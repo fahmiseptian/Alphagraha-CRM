@@ -1,0 +1,155 @@
+@extends('layouts.app')
+@section('title', 'Dashboard')
+
+@section('content')
+<div class="mb-6">
+    <h2 class="text-lg font-semibold text-slate-800">Halo, {{ Str::before(auth()->user()->name, ' ') }}! 👋</h2>
+    <p class="text-sm text-slate-500">Berikut ringkasan aktivitas penjualan Anda hari ini.</p>
+</div>
+
+{{-- Statistik utama --}}
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <x-stat-card title="Total Pelanggan" :value="number_format($customersCount)" icon="bi-people" color="brand" />
+    <x-stat-card title="Total Prospek (Lead)" :value="number_format($leadsCount)" icon="bi-funnel" color="purple" />
+    <x-stat-card title="Total Penawaran" :value="number_format($quotationsCount)" icon="bi-file-earmark-text" color="amber"
+                 :sub="$acceptedCount.' diterima'" />
+    <x-stat-card title="Nilai Penawaran Aktif" :value="money($quotationsValue)" icon="bi-cash-stack" color="green" />
+</div>
+
+<div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+    {{-- Pipeline opportunity --}}
+    <x-card title="Pipeline Penjualan" class="lg:col-span-2">
+        <div class="mb-5 grid grid-cols-2 gap-4">
+            <div class="rounded-lg bg-slate-50 p-4">
+                <p class="text-xs text-slate-500">Pipeline Terbuka</p>
+                <p class="mt-1 text-xl font-bold text-slate-800">{{ money($openPipeline) }}</p>
+            </div>
+            <div class="rounded-lg bg-green-50 p-4">
+                <p class="text-xs text-slate-500">Menang Bulan Ini</p>
+                <p class="mt-1 text-xl font-bold text-green-700">{{ money($wonThisMonth) }}</p>
+            </div>
+        </div>
+
+        @php $maxStage = max($stageDistribution ?: [1]); @endphp
+        <div class="space-y-3">
+            @forelse ($stageDistribution as $stage => $total)
+                <div>
+                    <div class="mb-1 flex items-center justify-between text-xs">
+                        <span class="font-medium text-slate-600">{{ $stage }}</span>
+                        <span class="text-slate-400">{{ $total }}</span>
+                    </div>
+                    <div class="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div class="h-full rounded-full bg-brand-500" style="width: {{ max(($total / $maxStage) * 100, 4) }}%"></div>
+                    </div>
+                </div>
+            @empty
+                <p class="py-6 text-center text-sm text-slate-400">Belum ada data opportunity.</p>
+            @endforelse
+        </div>
+    </x-card>
+
+    {{-- Status penawaran --}}
+    <x-card title="Status Penawaran">
+        @php
+            $statusMeta = [
+                'draft' => ['Draft', 'bg-slate-400'],
+                'sent' => ['Terkirim', 'bg-blue-500'],
+                'accepted' => ['Diterima', 'bg-green-500'],
+                'rejected' => ['Ditolak', 'bg-red-500'],
+                'expired' => ['Kedaluwarsa', 'bg-amber-500'],
+            ];
+            $totalQuo = array_sum($quotationStatus) ?: 1;
+        @endphp
+        @if (array_sum($quotationStatus) > 0)
+            <div class="mb-4 flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
+                @foreach ($statusMeta as $key => [$label, $bar])
+                    @if (($quotationStatus[$key] ?? 0) > 0)
+                        <div class="{{ $bar }}" style="width: {{ (($quotationStatus[$key] ?? 0)/$totalQuo)*100 }}%"></div>
+                    @endif
+                @endforeach
+            </div>
+            <ul class="space-y-2 text-sm">
+                @foreach ($statusMeta as $key => [$label, $bar])
+                    <li class="flex items-center justify-between">
+                        <span class="flex items-center gap-2 text-slate-600">
+                            <span class="h-2.5 w-2.5 rounded-full {{ $bar }}"></span> {{ $label }}
+                        </span>
+                        <span class="font-medium text-slate-700">{{ $quotationStatus[$key] ?? 0 }}</span>
+                    </li>
+                @endforeach
+            </ul>
+        @else
+            <x-empty-state icon="bi-file-earmark" title="Belum ada penawaran" message="Penawaran Anda akan tampil di sini." />
+        @endif
+    </x-card>
+</div>
+
+<div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+    {{-- Aktivitas mendatang --}}
+    <x-card class="lg:col-span-2" :padding="false">
+        <x-slot:title>Aktivitas & Follow-up Mendatang</x-slot:title>
+        <x-slot:action>
+            @if ($overdueCount > 0)
+                <x-badge color="red"><i class="bi bi-exclamation-circle"></i> {{ $overdueCount }} terlambat</x-badge>
+            @endif
+        </x-slot:action>
+
+        @forelse ($upcomingActivities as $activity)
+            <div class="flex items-center gap-4 border-b border-slate-50 px-5 py-3 last:border-0">
+                <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                    <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky'][$activity->type] ?? 'bi-check2-square' }}"></i>
+                </span>
+                <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-slate-800">{{ $activity->subject }}</p>
+                    <p class="truncate text-xs text-slate-400">
+                        {{ $activity->typeLabel() }}
+                        @if ($activity->account) &middot; {{ $activity->account->name }} @endif
+                    </p>
+                </div>
+                <div class="text-right">
+                    @if ($activity->due_at)
+                        <p class="text-xs font-medium {{ $activity->isOverdue() ? 'text-red-600' : 'text-slate-600' }}">
+                            {{ $activity->due_at->translatedFormat('d M') }}
+                        </p>
+                        <p class="text-[11px] text-slate-400">{{ $activity->due_at->format('H:i') }}</p>
+                    @else
+                        <span class="text-xs text-slate-300">—</span>
+                    @endif
+                </div>
+            </div>
+        @empty
+            <x-empty-state icon="bi-calendar-check" title="Tidak ada aktivitas" message="Semua tugas Anda sudah beres!" />
+        @endforelse
+
+        <div class="border-t border-slate-100 px-5 py-3">
+            <a href="{{ route('activities.index') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
+                Lihat semua aktivitas <i class="bi bi-arrow-right"></i>
+            </a>
+        </div>
+    </x-card>
+
+    {{-- Penawaran terbaru --}}
+    <x-card :padding="false">
+        <x-slot:title>Penawaran Terbaru</x-slot:title>
+        @forelse ($recentQuotations as $quo)
+            <a href="{{ route('quotations.show', $quo) }}" class="flex items-center gap-3 border-b border-slate-50 px-5 py-3 last:border-0 hover:bg-slate-50">
+                <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-slate-800">{{ $quo->number }}</p>
+                    <p class="truncate text-xs text-slate-400">{{ $quo->customer_name ?: '—' }}</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm font-semibold text-slate-700">{{ money($quo->total, $quo->currency) }}</p>
+                    <x-badge :color="$quo->statusColor()">{{ $quo->statusLabel() }}</x-badge>
+                </div>
+            </a>
+        @empty
+            <x-empty-state icon="bi-file-earmark-text" title="Belum ada penawaran" />
+        @endforelse
+        <div class="border-t border-slate-100 px-5 py-3">
+            <a href="{{ route('quotations.create') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
+                <i class="bi bi-plus-lg"></i> Buat penawaran baru
+            </a>
+        </div>
+    </x-card>
+</div>
+@endsection
