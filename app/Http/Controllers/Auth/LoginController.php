@@ -38,12 +38,16 @@ class LoginController extends Controller
 
         if (! $user) {
             throw ValidationException::withMessages([
-                'login' => 'Email/username atau kata sandi salah, atau akun tidak aktif.',
+                'login' => 'Invalid email/username or password, or account is inactive.',
             ]);
         }
 
         Auth::login($user);
         $request->session()->regenerate();
+
+        if ($user->isSales()) {
+            session()->flash('show_deadline_popup', true);
+        }
 
         return redirect()->intended(route('dashboard'));
     }

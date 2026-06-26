@@ -28,7 +28,7 @@ class TemplateController extends Controller
         $template = QuotationTemplate::create($data);
         $this->ensureSingleDefault($template);
 
-        return redirect()->route('templates.index')->with('success', 'Template berhasil dibuat.');
+        return redirect()->route('templates.index')->with('success', 'Template created successfully.');
     }
 
     public function edit(QuotationTemplate $template)
@@ -41,14 +41,14 @@ class TemplateController extends Controller
         $template->update($this->validateData($request));
         $this->ensureSingleDefault($template);
 
-        return redirect()->route('templates.index')->with('success', 'Template berhasil diperbarui.');
+        return redirect()->route('templates.index')->with('success', 'Template updated successfully.');
     }
 
     public function destroy(QuotationTemplate $template)
     {
         $template->delete();
 
-        return back()->with('success', 'Template dihapus.');
+        return back()->with('success', 'Template deleted.');
     }
 
     public function show(QuotationTemplate $template)

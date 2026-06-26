@@ -18,6 +18,14 @@ class Account extends Model
 
     protected $table = 'account';
 
+    protected $fillable = [
+        'name', 'type', 'industry', 'website', 'description',
+        'billing_address_street', 'billing_address_city', 'billing_address_state',
+        'billing_address_country', 'billing_address_postal_code', 'assigned_user_id',
+    ];
+
+    public const TYPES = ['Customer', 'Reseller', 'Partner'];
+
     public function espoEntityType(): string
     {
         return 'Account';

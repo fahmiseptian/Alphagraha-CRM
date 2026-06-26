@@ -9,6 +9,7 @@ use App\Models\Espo\Lead;
 use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 class DashboardController extends Controller
 {
@@ -80,11 +81,85 @@ class DashboardController extends Controller
             ->limit(5)
             ->get();
 
+        $deadlineAlerts = $user->isSales()
+            ? $this->deadlineAlertsForUser($user)
+            : collect();
+
+        $showDeadlinePopup = session('show_deadline_popup') && $deadlineAlerts->isNotEmpty();
+
         return view('dashboard', compact(
             'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue',
             'acceptedCount', 'openPipeline', 'wonThisMonth', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
-            'recentQuotations', 'recentCustomers'
+            'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup'
         ));
+    }
+
+    protected function deadlineAlertsForUser($user): Collection
+    {
+        $until = Carbon::now()->addDays(config('crm.deadline_alert_days', 7));
+
+        $opportunities = $this->scopeAssigned(Opportunity::query())
+            ->with('account')
+            ->whereIn('stage', Opportunity::OPEN_STAGES)
+            ->whereNotNull('close_date')
+            ->where('close_date', '<=', $until->toDateString())
+            ->orderBy('close_date')
+            ->get()
+            ->map(function (Opportunity $opp) {
+                $date = Carbon::parse($opp->close_date)->startOfDay();
+
+                return [
+                    'kind' => 'opportunity',
+                    'title' => $opp->name,
+                    'subtitle' => optional($opp->account)->name ?: $opp->company,
+                    'date' => $date,
+                    'date_label' => $this->deadlineLabel($date),
+                    'overdue' => $date->isPast(),
+                    'url' => route('opportunities.show', $opp),
+                ];
+            });
+
+        $followups = Activity::with('account')
+            ->where('assigned_to', $user->id)
+            ->where('type', 'followup')
+            ->whereNotIn('status', ['completed', 'cancelled'])
+            ->whereNotNull('due_at')
+            ->where('due_at', '<=', $until)
+            ->orderBy('due_at')
+            ->get()
+            ->map(function (Activity $activity) {
+                $date = $activity->due_at->copy()->startOfDay();
+
+                return [
+                    'kind' => 'followup',
+                    'title' => $activity->subject,
+                    'subtitle' => optional($activity->account)->name,
+                    'date' => $date,
+                    'date_label' => $this->deadlineLabel($date),
+                    'overdue' => $activity->isOverdue(),
+                    'url' => route('activities.edit', $activity),
+                ];
+            });
+
+        return $opportunities
+            ->concat($followups)
+            ->sortBy('date')
+            ->values();
+    }
+
+    protected function deadlineLabel(Carbon $date): string
+    {
+        $days = now()->startOfDay()->diffInDays($date, false);
+
+        if ($days < 0) {
+            return 'Terlambat '.abs($days).' hari';
+        }
+
+        if ($days === 0) {
+            return 'Hari ini';
+        }
+
+        return $days.' hari lagi';
     }
 }

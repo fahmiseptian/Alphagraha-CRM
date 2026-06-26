@@ -1,10 +1,10 @@
 @extends('layouts.app')
-@section('title', 'Pengguna Baru')
+@section('title', 'New User')
 
 @section('content')
 <div class="mb-4">
-    <h2 class="text-lg font-semibold text-slate-800">Pengguna Baru</h2>
-    <p class="text-sm text-slate-500">Tambah akun baru ke tabel user EspoCRM</p>
+    <h2 class="text-lg font-semibold text-slate-800">New User</h2>
+    <p class="text-sm text-slate-500">Add a new account to the EspoCRM user table</p>
 </div>
 
 <div class="max-w-2xl">

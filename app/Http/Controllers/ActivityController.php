@@ -65,7 +65,7 @@ class ActivityController extends Controller
 
         Activity::create($data);
 
-        return redirect()->route('activities.index')->with('success', 'Aktivitas berhasil dibuat.');
+        return redirect()->route('activities.index')->with('success', 'Activity created successfully.');
     }
 
     public function edit(Activity $activity)
@@ -82,7 +82,7 @@ class ActivityController extends Controller
         $data = $this->validateData($request);
         $activity->update($data);
 
-        return redirect()->route('activities.index')->with('success', 'Aktivitas berhasil diperbarui.');
+        return redirect()->route('activities.index')->with('success', 'Activity updated successfully.');
     }
 
     public function destroy(Activity $activity)
@@ -90,7 +90,7 @@ class ActivityController extends Controller
         $this->authorizeOwnership($activity);
         $activity->delete();
 
-        return back()->with('success', 'Aktivitas dihapus.');
+        return back()->with('success', 'Activity deleted.');
     }
 
     public function complete(Activity $activity)
@@ -98,7 +98,7 @@ class ActivityController extends Controller
         $this->authorizeOwnership($activity);
         $activity->update(['status' => 'completed', 'completed_at' => now()]);
 
-        return back()->with('success', 'Aktivitas ditandai selesai.');
+        return back()->with('success', 'Activity marked as completed.');
     }
 
     protected function validateData(Request $request): array
@@ -137,7 +137,7 @@ class ActivityController extends Controller
     protected function authorizeOwnership(Activity $activity): void
     {
         if (! $this->isAdmin() && $activity->assigned_to !== auth()->id() && $activity->created_by !== auth()->id()) {
-            abort(403, 'Anda tidak memiliki akses ke aktivitas ini.');
+            abort(403, 'You do not have access to this activity.');
         }
     }
 }

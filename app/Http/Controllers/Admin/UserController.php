@@ -53,7 +53,7 @@ class UserController extends Controller
 
         $this->manager->create($data);
 
-        return redirect()->route('users.index')->with('success', 'Pengguna berhasil dibuat.');
+        return redirect()->route('users.index')->with('success', 'User created successfully.');
     }
 
     public function edit(User $user)
@@ -67,22 +67,22 @@ class UserController extends Controller
 
         $this->manager->update($user, $data);
 
-        return redirect()->route('users.index')->with('success', 'Pengguna berhasil diperbarui.');
+        return redirect()->route('users.index')->with('success', 'User updated successfully.');
     }
 
     public function destroy(User $user)
     {
         if ($user->id === auth()->id()) {
-            return back()->with('error', 'Anda tidak dapat menghapus akun sendiri.');
+            return back()->with('error', 'You cannot delete your own account.');
         }
 
         if ($user->user_name === 'admin') {
-            return back()->with('error', 'Akun administrator utama tidak dapat dihapus.');
+            return back()->with('error', 'The main administrator account cannot be deleted.');
         }
 
         $this->manager->delete($user);
 
-        return back()->with('success', 'Pengguna dihapus.');
+        return back()->with('success', 'User deleted.');
     }
 
     /**

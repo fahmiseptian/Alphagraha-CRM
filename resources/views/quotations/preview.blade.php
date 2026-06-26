@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Preview {{ $quotation->number }}</title>
+    <link rel="stylesheet" href="{{ asset('css/quotation-fonts.css') }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         * { box-sizing: border-box; }
@@ -34,11 +35,11 @@
 </head>
 <body>
     <div class="toolbar">
-        <a href="{{ route('quotations.show', $quotation) }}" class="btn-light"><i class="bi bi-arrow-left"></i> Kembali</a>
+        <a href="{{ route('quotations.show', $quotation) }}" class="btn-light"><i class="bi bi-arrow-left"></i> Back</a>
         <strong>{{ $quotation->number }}</strong>
         <div class="spacer"></div>
-        <button onclick="window.print()" class="btn-light"><i class="bi bi-printer"></i> Cetak</button>
-        <a href="{{ route('quotations.pdf', $quotation) }}" class="btn-primary"><i class="bi bi-file-earmark-pdf"></i> Unduh PDF</a>
+        <button onclick="window.print()" class="btn-light"><i class="bi bi-printer"></i> Print</button>
+        <a href="{{ route('quotations.pdf', $quotation) }}" class="btn-primary"><i class="bi bi-file-earmark-pdf"></i> Download PDF</a>
     </div>
     <div class="paper">
         {!! $html !!}

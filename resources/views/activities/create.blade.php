@@ -1,10 +1,10 @@
 @extends('layouts.app')
-@section('title', 'Aktivitas Baru')
+@section('title', 'New Activity')
 
 @section('content')
 <div class="mb-4">
-    <a href="{{ route('activities.index') }}" class="text-sm text-slate-500 hover:text-slate-700"><i class="bi bi-arrow-left"></i> Kembali</a>
-    <h2 class="mt-1 text-lg font-semibold text-slate-800">Buat Aktivitas Baru</h2>
+    <a href="{{ route('activities.index') }}" class="text-sm text-slate-500 hover:text-slate-700"><i class="bi bi-arrow-left"></i> Back</a>
+    <h2 class="mt-1 text-lg font-semibold text-slate-800">Create Activity</h2>
 </div>
 
 <div class="max-w-3xl">

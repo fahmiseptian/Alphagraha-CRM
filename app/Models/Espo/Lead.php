@@ -20,6 +20,13 @@ class Lead extends Model
 
     protected $table = 'lead';
 
+    protected $fillable = [
+        'salutation_name', 'first_name', 'last_name', 'name', 'title', 'status',
+        'source', 'industry', 'account_name', 'website', 'description',
+        'address_street', 'address_city', 'address_state', 'address_country',
+        'address_postal_code', 'assigned_user_id',
+    ];
+
     /** Status lead standar EspoCRM. */
     public const STATUSES = [
         'New', 'Assigned', 'In Process', 'Converted', 'Recycled', 'Dead',

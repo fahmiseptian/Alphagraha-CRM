@@ -17,7 +17,7 @@
     ][$color] ?? 'bg-brand-50 text-brand-600';
 @endphp
 
-<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
+<div class="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:shadow-md">
     <div class="flex items-start justify-between">
         <div>
             <p class="text-sm font-medium text-slate-500">{{ $title }}</p>

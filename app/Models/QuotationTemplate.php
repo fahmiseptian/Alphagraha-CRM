@@ -10,7 +10,7 @@ class QuotationTemplate extends Model
     protected $table = 'crm_quotation_templates';
 
     protected $fillable = [
-        'name', 'description', 'body_html', 'is_active', 'is_default', 'created_by',
+        'name', 'code', 'description', 'body_html', 'is_active', 'is_default', 'created_by',
     ];
 
     protected $casts = [

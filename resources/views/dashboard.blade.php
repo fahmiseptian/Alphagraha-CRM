@@ -2,30 +2,32 @@
 @section('title', 'Dashboard')
 
 @section('content')
+@include('partials.deadline-alert')
+
 <div class="mb-6">
-    <h2 class="text-lg font-semibold text-slate-800">Halo, {{ Str::before(auth()->user()->name, ' ') }}! 👋</h2>
-    <p class="text-sm text-slate-500">Berikut ringkasan aktivitas penjualan Anda hari ini.</p>
+    <h2 class="crm-page-title">Hi, {{ Str::before(auth()->user()->name, ' ') }}!</h2>
+    <p class="crm-page-desc">Here's your sales activity summary for today.</p>
 </div>
 
-{{-- Statistik utama --}}
+{{-- Main stats --}}
 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <x-stat-card title="Total Pelanggan" :value="number_format($customersCount)" icon="bi-people" color="brand" />
-    <x-stat-card title="Total Prospek (Lead)" :value="number_format($leadsCount)" icon="bi-funnel" color="purple" />
-    <x-stat-card title="Total Penawaran" :value="number_format($quotationsCount)" icon="bi-file-earmark-text" color="amber"
-                 :sub="$acceptedCount.' diterima'" />
-    <x-stat-card title="Nilai Penawaran Aktif" :value="money($quotationsValue)" icon="bi-cash-stack" color="green" />
+    <x-stat-card title="Total Customers" :value="number_format($customersCount)" icon="bi-people" color="brand" />
+    <x-stat-card title="Total Leads" :value="number_format($leadsCount)" icon="bi-funnel" color="purple" />
+    <x-stat-card title="Total Quotations" :value="number_format($quotationsCount)" icon="bi-file-earmark-text" color="amber"
+                 :sub="$acceptedCount.' accepted'" />
+    <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green" />
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-    {{-- Pipeline opportunity --}}
-    <x-card title="Pipeline Penjualan" class="lg:col-span-2">
+    {{-- Opportunity pipeline --}}
+    <x-card title="Sales Pipeline" class="lg:col-span-2">
         <div class="mb-5 grid grid-cols-2 gap-4">
             <div class="rounded-lg bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">Pipeline Terbuka</p>
+                <p class="text-xs text-slate-500">Open Pipeline</p>
                 <p class="mt-1 text-xl font-bold text-slate-800">{{ money($openPipeline) }}</p>
             </div>
             <div class="rounded-lg bg-green-50 p-4">
-                <p class="text-xs text-slate-500">Menang Bulan Ini</p>
+                <p class="text-xs text-slate-500">Won This Month</p>
                 <p class="mt-1 text-xl font-bold text-green-700">{{ money($wonThisMonth) }}</p>
             </div>
         </div>
@@ -43,20 +45,20 @@
                     </div>
                 </div>
             @empty
-                <p class="py-6 text-center text-sm text-slate-400">Belum ada data opportunity.</p>
+                <p class="py-6 text-center text-sm text-slate-400">No opportunity data yet.</p>
             @endforelse
         </div>
     </x-card>
 
-    {{-- Status penawaran --}}
-    <x-card title="Status Penawaran">
+    {{-- Quotation status --}}
+    <x-card title="Quotation Status">
         @php
             $statusMeta = [
                 'draft' => ['Draft', 'bg-slate-400'],
-                'sent' => ['Terkirim', 'bg-blue-500'],
-                'accepted' => ['Diterima', 'bg-green-500'],
-                'rejected' => ['Ditolak', 'bg-red-500'],
-                'expired' => ['Kedaluwarsa', 'bg-amber-500'],
+                'sent' => ['Sent', 'bg-blue-500'],
+                'accepted' => ['Accepted', 'bg-green-500'],
+                'rejected' => ['Rejected', 'bg-red-500'],
+                'expired' => ['Expired', 'bg-amber-500'],
             ];
             $totalQuo = array_sum($quotationStatus) ?: 1;
         @endphp
@@ -79,18 +81,18 @@
                 @endforeach
             </ul>
         @else
-            <x-empty-state icon="bi-file-earmark" title="Belum ada penawaran" message="Penawaran Anda akan tampil di sini." />
+            <x-empty-state icon="bi-file-earmark" title="No quotations yet" message="Your quotations will appear here." />
         @endif
     </x-card>
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-    {{-- Aktivitas mendatang --}}
+    {{-- Upcoming activities --}}
     <x-card class="lg:col-span-2" :padding="false">
-        <x-slot:title>Aktivitas & Follow-up Mendatang</x-slot:title>
+        <x-slot:title>Upcoming Activities & Follow-ups</x-slot:title>
         <x-slot:action>
             @if ($overdueCount > 0)
-                <x-badge color="red"><i class="bi bi-exclamation-circle"></i> {{ $overdueCount }} terlambat</x-badge>
+                <x-badge color="red"><i class="bi bi-exclamation-circle"></i> {{ $overdueCount }} overdue</x-badge>
             @endif
         </x-slot:action>
 
@@ -118,19 +120,19 @@
                 </div>
             </div>
         @empty
-            <x-empty-state icon="bi-calendar-check" title="Tidak ada aktivitas" message="Semua tugas Anda sudah beres!" />
+            <x-empty-state icon="bi-calendar-check" title="No activities" message="You're all caught up!" />
         @endforelse
 
         <div class="border-t border-slate-100 px-5 py-3">
             <a href="{{ route('activities.index') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
-                Lihat semua aktivitas <i class="bi bi-arrow-right"></i>
+                View all activities <i class="bi bi-arrow-right"></i>
             </a>
         </div>
     </x-card>
 
-    {{-- Penawaran terbaru --}}
+    {{-- Recent quotations --}}
     <x-card :padding="false">
-        <x-slot:title>Penawaran Terbaru</x-slot:title>
+        <x-slot:title>Recent Quotations</x-slot:title>
         @forelse ($recentQuotations as $quo)
             <a href="{{ route('quotations.show', $quo) }}" class="flex items-center gap-3 border-b border-slate-50 px-5 py-3 last:border-0 hover:bg-slate-50">
                 <div class="min-w-0 flex-1">
@@ -143,11 +145,11 @@
                 </div>
             </a>
         @empty
-            <x-empty-state icon="bi-file-earmark-text" title="Belum ada penawaran" />
+            <x-empty-state icon="bi-file-earmark-text" title="No quotations yet" />
         @endforelse
         <div class="border-t border-slate-100 px-5 py-3">
             <a href="{{ route('quotations.create') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
-                <i class="bi bi-plus-lg"></i> Buat penawaran baru
+                <i class="bi bi-plus-lg"></i> Create new quotation
             </a>
         </div>
     </x-card>

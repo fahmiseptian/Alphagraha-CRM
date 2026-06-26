@@ -27,19 +27,19 @@ class Activity extends Model
     ];
 
     public const TYPES = [
-        'call' => 'Telepon',
+        'call' => 'Call',
         'meeting' => 'Meeting',
         'email' => 'Email',
         'task' => 'Task',
         'followup' => 'Follow-up',
-        'note' => 'Catatan',
+        'note' => 'Note',
     ];
 
     public const STATUSES = [
-        'planned' => 'Direncanakan',
-        'in_progress' => 'Berjalan',
-        'completed' => 'Selesai',
-        'cancelled' => 'Dibatalkan',
+        'planned' => 'Planned',
+        'in_progress' => 'In Progress',
+        'completed' => 'Completed',
+        'cancelled' => 'Cancelled',
     ];
 
     public function assignee(): BelongsTo

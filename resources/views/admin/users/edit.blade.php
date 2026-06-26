@@ -1,9 +1,9 @@
 @extends('layouts.app')
-@section('title', 'Edit Pengguna')
+@section('title', 'Edit User')
 
 @section('content')
 <div class="mb-4">
-    <h2 class="text-lg font-semibold text-slate-800">Edit Pengguna</h2>
+    <h2 class="text-lg font-semibold text-slate-800">Edit User</h2>
     <p class="text-sm text-slate-500">{{ $user->display_name }} (&commat;{{ $user->user_name }})</p>
 </div>
 

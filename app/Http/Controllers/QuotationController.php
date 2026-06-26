@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Account;
+use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
 use App\Models\QuotationTemplate;
 use App\Services\QuotationService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -63,8 +65,60 @@ class QuotationController extends Controller
             'status' => 'draft',
         ]);
 
+        $seedItems = null;
+
+        // Prefill dari Opportunity (1 opportunity : 1 penawaran).
+        if ($opportunityId = $request->get('opportunity_id')) {
+            $opportunity = $this->scopeAssigned(Opportunity::query())->with(['account', 'quotation'])->find($opportunityId);
+
+            if ($opportunity) {
+                if ($opportunity->quotation) {
+                    return redirect()->route('quotations.show', $opportunity->quotation)
+                        ->with('success', 'This opportunity already has a quotation.');
+                }
+
+                $account = $opportunity->account;
+                $quotation->opportunity_id = $opportunity->id;
+                $quotation->tax_percent = 0; // nilai opportunity umumnya sudah final
+                $quotation->currency = $opportunity->amount_currency ?: $quotation->currency;
+                $quotation->customer_name = $account?->name ?: ($opportunity->company ?: $opportunity->name);
+                $quotation->company_name = $opportunity->company ?: $account?->name;
+
+                if ($account) {
+                    $quotation->account_id = $account->id;
+                    $quotation->customer_email = $account->email;
+                    $quotation->customer_phone = $account->phone;
+                    $quotation->customer_address = $account->billing_address;
+                }
+
+                // Isi item penawaran dari daftar produk opportunity.
+                $products = $opportunity->products;
+                if ($products->isNotEmpty()) {
+                    $seedItems = $products->map(fn ($p) => [
+                        'name' => $p['name'],
+                        'description' => '',
+                        'quantity' => $p['quantity'] ?: 1,
+                        'unit' => '',
+                        'unit_price' => $p['price'],
+                    ])->all();
+                } elseif ((float) $opportunity->amount > 0) {
+                    $seedItems = [[
+                        'name' => $opportunity->name,
+                        'description' => '',
+                        'quantity' => 1,
+                        'unit' => '',
+                        'unit_price' => (float) $opportunity->amount,
+                    ]];
+                }
+
+                $templateId = $this->templateIdForCompany($opportunity->company);
+                if ($templateId) {
+                    $quotation->template_id = $templateId;
+                }
+            }
+        }
         // Prefill dari pelanggan bila datang dari halaman detail pelanggan.
-        if ($accountId = $request->get('account_id')) {
+        elseif ($accountId = $request->get('account_id')) {
             $account = $this->scopeAssigned(Account::query())->find($accountId);
             if ($account) {
                 $quotation->account_id = $account->id;
@@ -76,7 +130,7 @@ class QuotationController extends Controller
             }
         }
 
-        return view('quotations.create', $this->formData() + ['quotation' => $quotation]);
+        return view('quotations.create', $this->formData() + ['quotation' => $quotation, 'seedItems' => $seedItems]);
     }
 
     public function store(Request $request)
@@ -95,13 +149,13 @@ class QuotationController extends Controller
             $quotation->recalculateTotals();
             $quotation->save();
 
-            $this->snapshotRevision($quotation, 'Penawaran dibuat');
+            $this->snapshotRevision($quotation, 'Quotation created');
 
             return $quotation;
         });
 
         return redirect()->route('quotations.show', $quotation)
-            ->with('success', 'Penawaran ' . $quotation->number . ' berhasil dibuat.');
+            ->with('success', 'Quotation ' . $quotation->number . ' created successfully.');
     }
 
     public function show(Quotation $quotation)
@@ -123,7 +177,7 @@ class QuotationController extends Controller
     public function update(Request $request, Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
-        $data = $this->validateData($request);
+        $data = $this->validateData($request, $quotation);
 
         DB::transaction(function () use ($quotation, $data) {
             $quotation->fill($data);
@@ -135,11 +189,11 @@ class QuotationController extends Controller
             $quotation->increment('revision');
             $quotation->save();
 
-            $this->snapshotRevision($quotation, 'Penawaran direvisi');
+            $this->snapshotRevision($quotation, 'Quotation revised');
         });
 
         return redirect()->route('quotations.show', $quotation)
-            ->with('success', 'Penawaran berhasil diperbarui (revisi ' . $quotation->revision . ').');
+            ->with('success', 'Quotation updated successfully (revision ' . $quotation->revision . ').');
     }
 
     public function destroy(Quotation $quotation)
@@ -147,13 +201,16 @@ class QuotationController extends Controller
         $this->authorizeAccess($quotation);
         $quotation->delete();
 
-        return redirect()->route('quotations.index')->with('success', 'Penawaran dihapus.');
+        return redirect()->route('quotations.index')->with('success', 'Quotation deleted.');
     }
 
     public function preview(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
-        $html = $this->service->render($quotation, $this->templateHtml($quotation));
+        $this->ensureCreatorSignature($quotation);
+
+        $template = $this->resolveTemplate($quotation);
+        $html = $this->service->render($quotation, $template->body_html, $template);
 
         return view('quotations.preview', compact('quotation', 'html'));
     }
@@ -161,10 +218,14 @@ class QuotationController extends Controller
     public function pdf(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
-        $content = $this->service->render($quotation, $this->templateHtml($quotation));
+        $this->ensureCreatorSignature($quotation);
+
+        $template = $this->resolveTemplate($quotation);
+        $content = $this->service->render($quotation, $template->body_html, $template);
 
         $pdf = Pdf::loadView('quotations.pdf', ['content' => $content])
-            ->setPaper('a4');
+            ->setPaper('a4')
+            ->setOption('isRemoteEnabled', true);
 
         $filename = str_replace(['/', '\\'], '-', $quotation->number) . '.pdf';
 
@@ -184,7 +245,7 @@ class QuotationController extends Controller
         }
         $quotation->save();
 
-        return back()->with('success', 'Status penawaran diperbarui menjadi "' . $quotation->statusLabel() . '".');
+        return back()->with('success', 'Quotation status updated to "' . $quotation->statusLabel() . '".');
     }
 
     public function duplicate(Quotation $quotation)
@@ -213,15 +274,16 @@ class QuotationController extends Controller
         });
 
         return redirect()->route('quotations.edit', $copy)
-            ->with('success', 'Penawaran disalin ke ' . $copy->number . '.');
+            ->with('success', 'Quotation duplicated as ' . $copy->number . '.');
     }
 
     // ---------------------------------------------------------------------
 
-    protected function validateData(Request $request): array
+    protected function validateData(Request $request, ?Quotation $quotation = null): array
     {
         $data = $request->validate([
             'account_id' => ['nullable', 'string'],
+            'opportunity_id' => ['nullable', 'string', Rule::unique('crm_quotations', 'opportunity_id')->ignore($quotation?->id)],
             'customer_name' => ['required', 'string', 'max:255'],
             'company_name' => ['nullable', 'string', 'max:255'],
             'customer_email' => ['nullable', 'email', 'max:255'],
@@ -273,7 +335,8 @@ class QuotationController extends Controller
     protected function snapshotRevision(Quotation $quotation, string $note): void
     {
         $quotation->load('items');
-        $rendered = $this->service->render($quotation, $this->templateHtml($quotation));
+        $template = $this->resolveTemplate($quotation);
+        $rendered = $this->service->render($quotation, $template->body_html, $template);
 
         $quotation->revisions()->create([
             'revision' => $quotation->revision,
@@ -291,11 +354,61 @@ class QuotationController extends Controller
 
     protected function templateHtml(Quotation $quotation): string
     {
+        return $this->resolveTemplate($quotation)->body_html;
+    }
+
+    protected function resolveTemplate(Quotation $quotation): QuotationTemplate
+    {
         $template = $quotation->template
             ?? QuotationTemplate::where('is_default', true)->where('is_active', true)->first()
             ?? QuotationTemplate::where('is_active', true)->first();
 
-        return $template?->body_html ?? '<p>{{ customer_name }}</p>{{ items_table }}<p>Total: {{ total_price }}</p>';
+        if (! $template) {
+            $template = new QuotationTemplate([
+                'code' => 'agc-indo',
+                'body_html' => '<p>{{ customer_name }}</p>{{ items_table_idr }}<p>Total: {{ total_price }}</p>',
+            ]);
+        }
+
+        return $template;
+    }
+
+    protected function templateIdForCompany(?string $company): ?int
+    {
+        if (! $company) {
+            return null;
+        }
+
+        $map = config('crm.quotation_company_map', []);
+        $key = $map[$company] ?? null;
+
+        if (! $key) {
+            return null;
+        }
+
+        $code = match ($key) {
+            'agc' => 'agc-indo',
+            'eps' => 'eps-indo',
+            'psi' => 'psi-indo',
+            default => null,
+        };
+
+        return $code
+            ? QuotationTemplate::query()->where('code', $code)->where('is_active', true)->value('id')
+            : null;
+    }
+
+    protected function ensureCreatorSignature(Quotation $quotation): void
+    {
+        $creator = $quotation->creator;
+
+        if ($creator && $creator->isSales() && ! $creator->hasDigitalSignature()) {
+            throw new HttpResponseException(
+                redirect()
+                    ->route('profile.edit')
+                    ->with('error', 'Unggah tanda tangan digital di Profile sebelum membuat preview/PDF penawaran.')
+            );
+        }
     }
 
     protected function formData(): array
@@ -316,7 +429,7 @@ class QuotationController extends Controller
     protected function authorizeAccess(Quotation $quotation): void
     {
         if (! $this->isAdmin() && $quotation->created_by !== auth()->id()) {
-            abort(403, 'Anda tidak memiliki akses ke penawaran ini.');
+            abort(403, 'You do not have access to this quotation.');
         }
     }
 }

@@ -1,13 +1,13 @@
 @extends('layouts.app')
-@section('title', 'Detail Pelanggan')
+@section('title', 'Customer Detail')
 
 @section('content')
-<div class="mb-4">
-    <a href="{{ route('customers.index') }}" class="text-sm text-slate-500 hover:text-slate-700"><i class="bi bi-arrow-left"></i> Kembali ke daftar</a>
+<div class="mb-6">
+    <a href="{{ route('customers.index') }}" class="crm-back"><i class="bi bi-arrow-left"></i> Back to list</a>
 </div>
 
 <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-    {{-- Profil --}}
+    {{-- Profile --}}
     <div class="lg:col-span-1 space-y-4">
         <x-card>
             <div class="flex items-center gap-4">
@@ -22,53 +22,94 @@
 
             <dl class="mt-5 space-y-3 text-sm">
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-envelope mr-1"></i>Email</dt><dd class="text-slate-700">{{ $account->email ?: '—' }}</dd></div>
-                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-telephone mr-1"></i>Telepon</dt><dd class="text-slate-700">{{ $account->phone ?: '—' }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-telephone mr-1"></i>Phone</dt><dd class="text-slate-700">{{ $account->phone ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-globe mr-1"></i>Website</dt><dd class="text-slate-700">{{ $account->website ?: '—' }}</dd></div>
-                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-building mr-1"></i>Industri</dt><dd class="text-slate-700">{{ $account->industry ?: '—' }}</dd></div>
-                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Alamat</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-building mr-1"></i>Industry</dt><dd class="text-slate-700">{{ $account->industry ?: '—' }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-person mr-1"></i>Sales</dt><dd class="text-slate-700">{{ optional($account->assignedUser)->display_name ?: '—' }}</dd></div>
             </dl>
 
-            <div class="mt-5 flex gap-2">
-                <a href="{{ route('quotations.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-brand-700">
-                    <i class="bi bi-file-earmark-plus"></i> Penawaran
+            <div class="mt-5 flex flex-wrap gap-2">
+                <a href="{{ route('opportunities.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-brand-700">
+                    <i class="bi bi-briefcase"></i> Opportunity
+                </a>
+                <a href="{{ route('quotations.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-center text-sm font-medium text-brand-700 hover:bg-brand-100">
+                    <i class="bi bi-file-earmark-plus"></i> Quotation
                 </a>
                 <a href="{{ route('activities.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-center text-sm font-medium text-slate-600 hover:bg-slate-50">
-                    <i class="bi bi-calendar-plus"></i> Aktivitas
+                    <i class="bi bi-calendar-plus"></i> Activity
                 </a>
             </div>
         </x-card>
 
+        <x-card title="Contact Persons">
         @if ($contacts->count())
-        <x-card title="Kontak Person">
             <ul class="space-y-3">
                 @foreach ($contacts as $contact)
                     <li class="flex items-start gap-3">
                         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ initials($contact->full_name) }}</span>
                         <div>
                             <p class="text-sm font-medium text-slate-800">{{ $contact->full_name }}</p>
-                            <p class="text-xs text-slate-400">{{ $contact->email ?: $contact->phone ?: '—' }}</p>
+                            @if (auth()->user()->isAdmin())
+                                <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
+                                @if ($contact->phone)
+                                    <p class="text-xs text-slate-400"><i class="bi bi-telephone mr-0.5"></i>{{ $contact->phone }}</p>
+                                @endif
+                            @else
+                                <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
+                            @endif
                         </div>
                     </li>
                 @endforeach
             </ul>
-        </x-card>
+        @else
+            <p class="text-sm text-slate-400">No contacts yet.</p>
         @endif
+
+        <div class="mt-4 border-t border-slate-100 pt-4">
+            @if (auth()->user()->isAdmin())
+                <x-btn href="{{ route('contacts.create', ['account_id' => $account->id]) }}" variant="secondary" icon="bi-person-plus" class="w-full justify-center sm:w-auto">Add Contact</x-btn>
+            @else
+                <form method="POST" action="{{ route('customers.contacts.store', $account->id) }}" class="space-y-3">
+                    @csrf
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                            <label class="crm-label">First Name <span class="text-red-500">*</span></label>
+                            <input type="text" name="first_name" value="{{ old('first_name') }}" required class="crm-field">
+                        </div>
+                        <div>
+                            <label class="crm-label">Last Name</label>
+                            <input type="text" name="last_name" value="{{ old('last_name') }}" class="crm-field">
+                        </div>
+                        <div>
+                            <label class="crm-label">Email</label>
+                            <input type="email" name="email" value="{{ old('email') }}" class="crm-field">
+                        </div>
+                        <div>
+                            <label class="crm-label">Phone</label>
+                            <input type="text" name="phone" value="{{ old('phone') }}" class="crm-field">
+                        </div>
+                    </div>
+                    <x-btn type="submit" variant="secondary" icon="bi-person-plus">Add Contact</x-btn>
+                </form>
+            @endif
+        </div>
+        </x-card>
     </div>
 
-    {{-- Tab konten --}}
+    {{-- Content tabs --}}
     <div class="lg:col-span-2" x-data="{ tab: 'opportunities' }">
         <x-card :padding="false">
             <div class="flex gap-1 border-b border-slate-100 px-4 pt-3 text-sm">
-                <button @click="tab='opportunities'" :class="tab==='opportunities' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'" class="border-b-2 px-3 py-2.5 font-medium">Deal ({{ $opportunities->count() }})</button>
-                <button @click="tab='quotations'" :class="tab==='quotations' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'" class="border-b-2 px-3 py-2.5 font-medium">Penawaran ({{ $quotations->count() }})</button>
-                <button @click="tab='activities'" :class="tab==='activities' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'" class="border-b-2 px-3 py-2.5 font-medium">Riwayat Aktivitas</button>
+                <button @click="tab='opportunities'" :class="tab==='opportunities' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'" class="border-b-2 px-3 py-2.5 font-medium">Deals ({{ $opportunities->count() }})</button>
+                <button @click="tab='quotations'" :class="tab==='quotations' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'" class="border-b-2 px-3 py-2.5 font-medium">Quotations ({{ $quotations->count() }})</button>
+                <button @click="tab='activities'" :class="tab==='activities' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'" class="border-b-2 px-3 py-2.5 font-medium">Activity History</button>
             </div>
 
             {{-- Opportunities --}}
             <div x-show="tab==='opportunities'">
                 @forelse ($opportunities as $opp)
-                    <div class="flex items-center justify-between border-b border-slate-50 px-5 py-3 last:border-0">
+                    <a href="{{ route('opportunities.show', $opp) }}" class="flex items-center justify-between border-b border-slate-50 px-5 py-3 last:border-0 hover:bg-slate-50">
                         <div>
                             <p class="text-sm font-medium text-slate-800">{{ $opp->name }}</p>
                             <p class="text-xs text-slate-400">{{ $opp->close_date ? \Illuminate\Support\Carbon::parse($opp->close_date)->translatedFormat('d M Y') : '—' }} &middot; {{ optional($opp->assignedUser)->display_name }}</p>
@@ -78,9 +119,9 @@
                             @php $c = in_array($opp->stage, ['Closed Won']) ? 'green' : (in_array($opp->stage, ['Closed Lost']) ? 'red' : 'blue'); @endphp
                             <x-badge :color="$c">{{ $opp->stage }}</x-badge>
                         </div>
-                    </div>
+                    </a>
                 @empty
-                    <x-empty-state icon="bi-briefcase" title="Belum ada deal" />
+                    <x-empty-state icon="bi-briefcase" title="No deals yet" />
                 @endforelse
             </div>
 
@@ -98,7 +139,7 @@
                         </div>
                     </a>
                 @empty
-                    <x-empty-state icon="bi-file-earmark-text" title="Belum ada penawaran" />
+                    <x-empty-state icon="bi-file-earmark-text" title="No quotations yet" />
                 @endforelse
             </div>
 
@@ -119,7 +160,7 @@
                         </div>
                     </div>
                 @empty
-                    <x-empty-state icon="bi-clock-history" title="Belum ada aktivitas" message="Buat aktivitas untuk pelanggan ini." />
+                    <x-empty-state icon="bi-clock-history" title="No activities yet" message="Create an activity for this customer." />
                 @endforelse
             </div>
         </x-card>

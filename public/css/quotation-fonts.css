@@ -1,0 +1,11 @@
+/* Font untuk template penawaran — editor, preview, dan PDF */
+@import url('https://fonts.cdnfonts.com/css/machine-script');
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Great+Vibes&family=Inter:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;700&family=Merriweather:wght@400;700&family=Pacifico&family=Roboto:wght@400;700&display=swap');
+
+@font-face {
+    font-family: 'MachineScript';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('https://fonts.cdnfonts.com/s/107795/MachineScript.woff') format('woff');
+}

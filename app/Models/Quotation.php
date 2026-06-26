@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Espo\Account;
+use App\Models\Espo\Opportunity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,7 +16,7 @@ class Quotation extends Model
     protected $table = 'crm_quotations';
 
     protected $fillable = [
-        'number', 'account_id', 'customer_name', 'company_name', 'customer_email',
+        'number', 'account_id', 'opportunity_id', 'customer_name', 'company_name', 'customer_email',
         'customer_phone', 'customer_address', 'quotation_date', 'valid_until', 'status',
         'currency', 'subtotal', 'discount', 'tax_percent', 'tax_amount', 'total',
         'notes', 'terms', 'template_id', 'created_by', 'revision', 'sent_at',
@@ -34,10 +35,10 @@ class Quotation extends Model
 
     public const STATUSES = [
         'draft' => 'Draft',
-        'sent' => 'Terkirim',
-        'accepted' => 'Diterima',
-        'rejected' => 'Ditolak',
-        'expired' => 'Kedaluwarsa',
+        'sent' => 'Sent',
+        'accepted' => 'Accepted',
+        'rejected' => 'Rejected',
+        'expired' => 'Expired',
     ];
 
     public function items(): HasMany
@@ -63,6 +64,11 @@ class Quotation extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'account_id');
+    }
+
+    public function opportunity(): BelongsTo
+    {
+        return $this->belongsTo(Opportunity::class, 'opportunity_id');
     }
 
     /**
