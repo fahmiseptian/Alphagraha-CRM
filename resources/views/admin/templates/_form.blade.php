@@ -18,9 +18,10 @@
 
                 <textarea id="body_html" name="body_html">{!! old('body_html', $template->body_html) !!}</textarea>
                 <p class="mt-2 text-xs text-slate-400">
-                    Placeholder seperti <code class="rounded bg-slate-100 px-1">@{{ sales_signature }}</code> dan
-                    <code class="rounded bg-slate-100 px-1">@{{ items_table_idr }}</code> dipakai template Indonesia (AGC/EPS/PSI).
-                    TTD sales diisi otomatis dari Profile. Pilih jenis font dari toolbar (termasuk <strong>Machine Script</strong>).
+                    Gunakan <code class="rounded bg-slate-100 px-1">@{{ sales_signature }}</code> atau
+                    <code class="rounded bg-slate-100 px-1">@{{ notes }}</code> — jangan pakai sintaks Blade
+                    (<code class="rounded bg-slate-100 px-1">@if</code>, <code class="rounded bg-slate-100 px-1">{!! !!}</code>).
+                    Placeholder kosong otomatis tidak menampilkan apa-apa.
                 </p>
             </x-card>
         </div>

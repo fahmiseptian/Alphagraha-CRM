@@ -84,12 +84,62 @@ class QuotationService
     public function render(Quotation $quotation, string $templateHtml, ?QuotationTemplate $template = null): string
     {
         $data = $this->placeholders($quotation, $template);
-        $html = $templateHtml;
+        $html = $this->processTemplateConditionals($templateHtml, $quotation);
 
         foreach ($data as $key => $value) {
-            $pattern = '/\{\{\s*' . preg_quote($key, '/') . '\s*\}\}/';
-            $html = preg_replace($pattern, $value ?? '', $html);
+            foreach ($this->placeholderPatterns($key) as $pattern) {
+                $html = preg_replace($pattern, $value ?? '', $html);
+            }
         }
+
+        return $this->stripUnprocessedBladeDirectives($html);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function placeholderPatterns(string $key): array
+    {
+        $quoted = preg_quote($key, '/');
+
+        return [
+            '/\{\{\s*'.$quoted.'\s*\}\}/',
+            '/\{!!\s*'.$quoted.'\s*!!\}/',
+            '/@\{\{\s*'.$quoted.'\s*\}\}/',
+            '/@\{!!\s*'.$quoted.'\s*!!\}/',
+        ];
+    }
+
+    protected function processTemplateConditionals(string $html, Quotation $quotation): string
+    {
+        $rules = [
+            '/@if\s*\(\s*trim\s*\(\s*\$notes\s*\?\?\s*(?:\'\'|"")\s*\)\s*!==\s*(?:\'\'|"")\s*\)(.*?)@endif/is'
+                => static fn (array $m) => trim((string) $quotation->notes) !== '' ? $m[1] : '',
+            '/@if\s*\(\s*trim\s*\(\s*\$terms\s*\?\?\s*(?:\'\'|"")\s*\)\s*!==\s*(?:\'\'|"")\s*\)(.*?)@endif/is'
+                => static fn (array $m) => trim((string) $quotation->terms) !== '' ? $m[1] : '',
+            '/@if\s*\(\s*!\s*empty\s*\(\s*\$notes\s*\)\s*\)(.*?)@endif/is'
+                => static fn (array $m) => trim((string) $quotation->notes) !== '' ? $m[1] : '',
+            '/@if\s*\(\s*!\s*empty\s*\(\s*\$terms\s*\)\s*\)(.*?)@endif/is'
+                => static fn (array $m) => trim((string) $quotation->terms) !== '' ? $m[1] : '',
+            '/@if\s*\(\s*\$notes\s*\)(.*?)@endif/is'
+                => static fn (array $m) => trim((string) $quotation->notes) !== '' ? $m[1] : '',
+            '/@if\s*\(\s*\$terms\s*\)(.*?)@endif/is'
+                => static fn (array $m) => trim((string) $quotation->terms) !== '' ? $m[1] : '',
+        ];
+
+        foreach ($rules as $pattern => $callback) {
+            $html = preg_replace_callback($pattern, $callback, $html) ?? $html;
+        }
+
+        return $html;
+    }
+
+    protected function stripUnprocessedBladeDirectives(string $html): string
+    {
+        $html = preg_replace('/@if\s*\([^)]*\)/', '', $html) ?? $html;
+        $html = preg_replace('/@elseif\s*\([^)]*\)/', '', $html) ?? $html;
+        $html = preg_replace('/@else\b/', '', $html) ?? $html;
+        $html = preg_replace('/@endif\b/', '', $html) ?? $html;
 
         return $html;
     }
