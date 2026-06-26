@@ -221,11 +221,12 @@ class QuotationController extends Controller
         $this->ensureCreatorSignature($quotation);
 
         $template = $this->resolveTemplate($quotation);
-        $content = $this->service->render($quotation, $template->body_html, $template);
+        $content = $this->service->prepareHtmlForPdf(
+            $this->service->render($quotation, $template->body_html, $template)
+        );
 
         $pdf = Pdf::loadView('quotations.pdf', ['content' => $content])
-            ->setPaper('a4')
-            ->setOption('isRemoteEnabled', true);
+            ->setPaper('a4');
 
         $filename = str_replace(['/', '\\'], '-', $quotation->number) . '.pdf';
 

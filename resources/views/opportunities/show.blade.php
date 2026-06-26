@@ -15,6 +15,18 @@
                 <input type="hidden" name="stage" value="{{ $nextStage }}">
                 <x-btn type="submit" icon="bi-arrow-right-circle">Move to {{ $nextStage }}</x-btn>
             </form>
+        @elseif (! empty($closingStages))
+            @foreach ($closingStages as $stage)
+                <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
+                    @csrf @method('PATCH')
+                    <input type="hidden" name="stage" value="{{ $stage }}">
+                    @if ($stage === \App\Models\Espo\Opportunity::WON_STAGE)
+                        <x-btn type="submit" icon="bi-trophy" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Closed Won</x-btn>
+                    @else
+                        <x-btn type="submit" variant="secondary" icon="bi-x-circle" class="!border-red-200 !text-red-600 hover:!bg-red-50">Closed Lost</x-btn>
+                    @endif
+                </form>
+            @endforeach
         @endif
         <x-btn href="{{ route('opportunities.edit', $opportunity) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
     </div>
@@ -148,12 +160,18 @@
             </div>
 
             <div x-show="open" x-cloak class="border-t border-slate-100">
+                @if ($opportunity->stage === 'Negotiation')
+                    <p class="px-5 pt-3 text-xs text-slate-500">Pilih hasil akhir deal:</p>
+                @endif
                 <ul class="crm-stage-move">
                     @foreach (\App\Models\Espo\Opportunity::STAGES as $stage)
                         @php
                             $isCurrent = $opportunity->stage === $stage;
                             $isWon = $stage === \App\Models\Espo\Opportunity::WON_STAGE;
                             $isLost = $stage === \App\Models\Espo\Opportunity::LOST_STAGE;
+                            $isClosingOption = $opportunity->stage === 'Negotiation' && ($isWon || $isLost);
+                            $isNext = $nextStage === $stage;
+                            $canSelect = ! $isCurrent && ($isNext || $isClosingOption || ! in_array($stage, [\App\Models\Espo\Opportunity::WON_STAGE, \App\Models\Espo\Opportunity::LOST_STAGE], true));
                         @endphp
                         <li>
                             @if ($isCurrent)
@@ -164,7 +182,7 @@
                                 ])>
                                     <i class="bi bi-check-circle-fill"></i> {{ $stage }}
                                 </span>
-                            @else
+                            @elseif ($canSelect)
                                 <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
                                     @csrf @method('PATCH')
                                     <input type="hidden" name="stage" value="{{ $stage }}">
@@ -176,6 +194,8 @@
                                         {{ $stage }}
                                     </button>
                                 </form>
+                            @else
+                                <span class="crm-stage-move__item text-slate-300">{{ $stage }}</span>
                             @endif
                         </li>
                     @endforeach

@@ -65,13 +65,27 @@ class Opportunity extends Model implements HasMedia
 
     public function nextStage(): ?string
     {
-        $index = array_search($this->stage, self::STAGES, true);
+        $index = array_search($this->stage, self::OPEN_STAGES, true);
 
-        if ($index === false || $index >= count(self::STAGES) - 1) {
+        if ($index === false || $index >= count(self::OPEN_STAGES) - 1) {
             return null;
         }
 
-        return self::STAGES[$index + 1];
+        return self::OPEN_STAGES[$index + 1];
+    }
+
+    /**
+     * Opsi penutupan deal setelah tahap Negotiation.
+     *
+     * @return list<string>
+     */
+    public function closingStageOptions(): array
+    {
+        if ($this->stage !== 'Negotiation') {
+            return [];
+        }
+
+        return [self::WON_STAGE, self::LOST_STAGE];
     }
 
     /** Jenis pengadaan EspoCRM (kolom type). */
@@ -90,8 +104,8 @@ class Opportunity extends Model implements HasMedia
 
     /** Sumber lead standar EspoCRM. */
     public const LEAD_SOURCES = [
-        'Call', 'Email', 'Existing Customer', 'Partner', 'Public Relations',
-        'Web Site', 'Campaign', 'Other',
+        'WhatsApp', 'Call', 'Email', 'Existing Customer', 'Partner', 'Public Relations',
+        'Web Site', 'Campaign', 'Other', 'Social Media', 'Referral', 'Other',
     ];
 
     public function espoEntityType(): string

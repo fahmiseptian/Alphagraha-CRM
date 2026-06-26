@@ -95,13 +95,48 @@
                                         <i class="bi bi-chevron-down"></i>
                                     </button>
                                     <div x-show="open" x-cloak @click.outside="open = false"
-                                         class="absolute right-0 z-10 mt-1 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                         class="absolute right-0 z-10 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                                         <a href="{{ route('opportunities.show', $opp) }}" class="block px-3 py-1.5 text-xs hover:bg-slate-50">
                                             <i class="bi bi-eye mr-1"></i> View
                                         </a>
                                         <a href="{{ route('opportunities.edit', $opp) }}" class="block px-3 py-1.5 text-xs hover:bg-slate-50">
                                             <i class="bi bi-pencil mr-1"></i> Edit
                                         </a>
+
+                                        @php
+                                            $nextStage = $opp->nextStage();
+                                            $closingStages = $opp->closingStageOptions();
+                                        @endphp
+
+                                        @if ($nextStage || ! empty($closingStages))
+                                            <div class="my-1 border-t border-slate-100"></div>
+                                            @if ($nextStage)
+                                                <form method="POST" action="{{ route('opportunities.stage', $opp) }}" @submit="open = false">
+                                                    @csrf @method('PATCH')
+                                                    <input type="hidden" name="stage" value="{{ $nextStage }}">
+                                                    <button type="submit" class="block w-full px-3 py-1.5 text-left text-xs text-brand-600 hover:bg-brand-50">
+                                                        <i class="bi bi-arrow-right-circle mr-1"></i> Move to {{ $nextStage }}
+                                                    </button>
+                                                </form>
+                                            @endif
+                                            @foreach ($closingStages as $closeStage)
+                                                <form method="POST" action="{{ route('opportunities.stage', $opp) }}" @submit="open = false">
+                                                    @csrf @method('PATCH')
+                                                    <input type="hidden" name="stage" value="{{ $closeStage }}">
+                                                    <button type="submit" @class([
+                                                        'block w-full px-3 py-1.5 text-left text-xs hover:bg-slate-50',
+                                                        'text-green-600 hover:bg-green-50' => $closeStage === \App\Models\Espo\Opportunity::WON_STAGE,
+                                                        'text-red-600 hover:bg-red-50' => $closeStage === \App\Models\Espo\Opportunity::LOST_STAGE,
+                                                    ])>
+                                                        @if ($closeStage === \App\Models\Espo\Opportunity::WON_STAGE)
+                                                            <i class="bi bi-trophy mr-1"></i> Closed Won
+                                                        @else
+                                                            <i class="bi bi-x-circle mr-1"></i> Closed Lost
+                                                        @endif
+                                                    </button>
+                                                </form>
+                                            @endforeach
+                                        @endif
                                     </div>
                                 </div>
                             </div>

@@ -94,6 +94,95 @@ class QuotationService
         return $html;
     }
 
+    /**
+     * Siapkan HTML untuk DomPDF: font aman + path gambar lokal.
+     */
+    public function prepareHtmlForPdf(string $html): string
+    {
+        $html = $this->resolveImagesForPdf($html);
+
+        $fallback = 'DejaVu Sans, sans-serif';
+
+        $html = preg_replace(
+            '/font-family\s*:\s*([^;"\'}]+)([;"\'}])/i',
+            'font-family: '.$fallback.'$2',
+            $html
+        );
+
+        return preg_replace(
+            '/face\s*=\s*("|\')[^"\']*(\1)/i',
+            'face="DejaVu Sans"',
+            $html
+        ) ?? $html;
+    }
+
+    protected function resolveImagesForPdf(string $html): string
+    {
+        return preg_replace_callback(
+            '/<img\b([^>]*?)\ssrc=(["\'])([^"\']+)\2([^>]*)>/i',
+            function (array $matches): string {
+                $resolved = $this->resolveImageSrcForPdf($matches[3]);
+
+                return '<img'.$matches[1].' src='.$matches[2].$resolved.$matches[2].$matches[4].'>';
+            },
+            $html
+        ) ?? $html;
+    }
+
+    protected function resolveImageSrcForPdf(string $src): string
+    {
+        if (str_starts_with($src, 'data:')) {
+            return $src;
+        }
+
+        $path = $this->localImagePath($src);
+
+        if ($path && is_file($path)) {
+            return str_replace('\\', '/', realpath($path) ?: $path);
+        }
+
+        return $src;
+    }
+
+    protected function localImagePath(string $src): ?string
+    {
+        if (str_starts_with($src, 'file://')) {
+            $path = substr($src, 7);
+
+            return is_file($path) ? $path : null;
+        }
+
+        if (preg_match('#^https?://[^/]+(/.+)$#i', $src, $m)) {
+            $src = $m[1];
+        }
+
+        $relative = ltrim($src, '/');
+
+        if ($relative === '') {
+            return null;
+        }
+
+        if (str_starts_with($relative, 'storage/')) {
+            return public_path($relative);
+        }
+
+        if (str_starts_with($relative, 'public/')) {
+            return base_path($relative);
+        }
+
+        $publicPath = public_path($relative);
+        if (is_file($publicPath)) {
+            return $publicPath;
+        }
+
+        $basePath = base_path($relative);
+        if (is_file($basePath)) {
+            return $basePath;
+        }
+
+        return null;
+    }
+
     protected function companyConfigForTemplate(?QuotationTemplate $template): array
     {
         $key = match ($template?->code) {

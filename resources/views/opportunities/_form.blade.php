@@ -53,7 +53,7 @@
                         </select>
                     </div>
                     <div class="sm:col-span-2">
-                        <label class="crm-label">Name <span class="text-red-500">*</span></label>
+                        <label class="crm-label">Opportunity Name <span class="text-red-500">*</span></label>
                         <input type="text" name="name" value="{{ old('name', $opportunity->name) }}" required
                                class="crm-field">
                     </div>

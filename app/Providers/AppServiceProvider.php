@@ -20,5 +20,10 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         \Illuminate\Pagination\Paginator::defaultView('vendor.pagination.crm');
+
+        $fontDir = storage_path('fonts');
+        if (! is_dir($fontDir)) {
+            mkdir($fontDir, 0755, true);
+        }
     }
 }

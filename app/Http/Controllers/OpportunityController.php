@@ -63,8 +63,9 @@ class OpportunityController extends Controller
         $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder']);
         $mediaDocuments = $opportunity->getMedia('documents');
         $nextStage = $opportunity->nextStage();
+        $closingStages = $opportunity->closingStageOptions();
 
-        return view('opportunities.show', compact('opportunity', 'mediaDocuments', 'nextStage'));
+        return view('opportunities.show', compact('opportunity', 'mediaDocuments', 'nextStage', 'closingStages'));
     }
 
     public function create(Request $request)
@@ -144,8 +145,7 @@ class OpportunityController extends Controller
             $opportunity->save();
         }
 
-        return redirect()->route('opportunities.show', $opportunity)
-            ->with('success', 'Stage moved to '.$data['stage'].'.');
+        return back()->with('success', 'Stage moved to '.$data['stage'].'.');
     }
 
     protected function validateData(Request $request): array

@@ -2,10 +2,9 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <link rel="stylesheet" href="{{ asset('css/quotation-fonts.css') }}">
     <style>
         @page { margin: 28px 32px; }
-        body { font-family: 'Helvetica', sans-serif; font-size: 12px; color: #1f2937; line-height: 1.5; }
+        body { font-family: 'DejaVu Sans', sans-serif; font-size: 12px; color: #1f2937; line-height: 1.5; }
         table { border-collapse: collapse; }
         td, th { vertical-align: top; }
     </style>
