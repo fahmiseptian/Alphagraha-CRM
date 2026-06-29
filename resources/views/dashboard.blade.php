@@ -18,6 +18,73 @@
     <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green" />
 </div>
 
+{{-- Sales Leaderboard --}}
+<x-card class="mt-4" :padding="false">
+    <x-slot:title>
+        <span class="inline-flex items-center gap-2">
+            <i class="bi bi-trophy text-amber-500"></i> Sales Leaderboard
+        </span>
+    </x-slot:title>
+    <x-slot:action>
+        <form method="GET" action="{{ route('dashboard') }}">
+            <select name="leaderboard_period" onchange="this.form.submit()"
+                    class="rounded-lg border border-slate-300 bg-white py-1.5 pl-2 pr-8 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200">
+                <option value="alltime" @selected($leaderboardPeriod === 'alltime')>All Time</option>
+                <option value="month" @selected($leaderboardPeriod === 'month')>This Month</option>
+                <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
+            </select>
+        </form>
+    </x-slot:action>
+
+    @if ($salesLeaderboard->isNotEmpty())
+        <div class="overflow-x-auto">
+            <table class="crm-table">
+                <thead>
+                    <tr>
+                        <th class="w-14">#</th>
+                        <th>Sales</th>
+                        <th class="text-right">Deals Won</th>
+                        <th class="text-right">Total Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($salesLeaderboard as $entry)
+                        <tr @class(['bg-brand-50/40' => $entry['user_id'] === auth()->id()])>
+                            <td>
+                                @if ($entry['rank'] === 1)
+                                    <span class="crm-leaderboard-rank crm-leaderboard-rank--gold">1</span>
+                                @elseif ($entry['rank'] === 2)
+                                    <span class="crm-leaderboard-rank crm-leaderboard-rank--silver">2</span>
+                                @elseif ($entry['rank'] === 3)
+                                    <span class="crm-leaderboard-rank crm-leaderboard-rank--bronze">3</span>
+                                @else
+                                    <span class="crm-leaderboard-rank">{{ $entry['rank'] }}</span>
+                                @endif
+                            </td>
+                            <td>
+                                <div class="flex items-center gap-3">
+                                    <span class="crm-avatar">{{ initials($entry['name']) }}</span>
+                                    <div>
+                                        <p class="font-medium text-slate-800">{{ $entry['name'] }}</p>
+                                        @if ($entry['user_id'] === auth()->id())
+                                            <p class="text-[11px] text-brand-600">You</p>
+                                        @endif
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="text-right font-medium text-slate-700">{{ number_format($entry['won_count']) }}</td>
+                            <td class="text-right font-semibold text-slate-800">{{ money($entry['won_value']) }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    @else
+        <x-empty-state icon="bi-trophy" title="No closed won deals yet"
+                       message="Leaderboard akan muncul setelah ada deal Closed Won pada periode ini." />
+    @endif
+</x-card>
+
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
     {{-- Opportunity pipeline --}}
     <x-card title="Sales Pipeline" class="lg:col-span-2">

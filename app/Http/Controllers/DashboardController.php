@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Activity;
 use App\Models\Espo\Account;
+use App\Models\Espo\EspoUser;
 use App\Models\Espo\Lead;
 use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -15,9 +17,16 @@ class DashboardController extends Controller
 {
     use ScopesToUser;
 
-    public function __invoke()
+    public function __invoke(Request $request)
     {
         $user = auth()->user();
+
+        $leaderboardPeriod = $request->get('leaderboard_period', 'alltime');
+        if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year'], true)) {
+            $leaderboardPeriod = 'alltime';
+        }
+
+        $salesLeaderboard = $this->buildSalesLeaderboard($leaderboardPeriod);
 
         $customersCount = $this->scopeAssigned(Account::query())->count();
         $leadsCount = $this->scopeAssigned(Lead::query())->count();
@@ -91,8 +100,53 @@ class DashboardController extends Controller
             'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue',
             'acceptedCount', 'openPipeline', 'wonThisMonth', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
-            'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup'
+            'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
+            'salesLeaderboard', 'leaderboardPeriod'
         ));
+    }
+
+    protected function buildSalesLeaderboard(string $period): Collection
+    {
+        $query = Opportunity::query()
+            ->where('stage', Opportunity::WON_STAGE)
+            ->whereNotNull('assigned_user_id');
+
+        if ($period === 'month') {
+            $query->whereBetween('close_date', [
+                Carbon::now()->startOfMonth()->toDateString(),
+                Carbon::now()->endOfMonth()->toDateString(),
+            ]);
+        } elseif ($period === 'year') {
+            $query->whereBetween('close_date', [
+                Carbon::now()->startOfYear()->toDateString(),
+                Carbon::now()->endOfYear()->toDateString(),
+            ]);
+        }
+
+        $rows = $query
+            ->selectRaw('assigned_user_id, COUNT(*) as won_count, COALESCE(SUM(amount), 0) as won_value')
+            ->groupBy('assigned_user_id')
+            ->orderByDesc('won_value')
+            ->orderByDesc('won_count')
+            ->limit(10)
+            ->get();
+
+        $users = EspoUser::query()
+            ->whereIn('id', $rows->pluck('assigned_user_id'))
+            ->get()
+            ->keyBy('id');
+
+        return $rows->values()->map(function ($row, int $index) use ($users) {
+            $user = $users->get($row->assigned_user_id);
+
+            return [
+                'rank' => $index + 1,
+                'user_id' => $row->assigned_user_id,
+                'name' => $user?->display_name ?? 'Unknown',
+                'won_count' => (int) $row->won_count,
+                'won_value' => (float) $row->won_value,
+            ];
+        });
     }
 
     protected function deadlineAlertsForUser($user): Collection
