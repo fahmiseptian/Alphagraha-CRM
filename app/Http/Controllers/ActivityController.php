@@ -63,16 +63,20 @@ class ActivityController extends Controller
         $data['created_by'] = auth()->id();
         $data['assigned_to'] = $data['assigned_to'] ?? auth()->id();
 
-        Activity::create($data);
+        $activity = Activity::create($data);
 
-        return redirect()->route('activities.index')->with('success', 'Activity created successfully.');
+        return redirect()->route('activities.edit', $activity)->with('success', 'Activity created successfully. Anda dapat menambahkan media pendukung di bawah.');
     }
 
     public function edit(Activity $activity)
     {
         $this->authorizeOwnership($activity);
 
-        return view('activities.edit', $this->formData() + ['activity' => $activity]);
+        return view('activities.edit', $this->formData() + [
+            'activity' => $activity,
+            'mediaByCollection' => collect(Activity::MEDIA_COLLECTIONS)
+                ->mapWithKeys(fn ($label, $key) => [$key => $activity->getMedia($key)]),
+        ]);
     }
 
     public function update(Request $request, Activity $activity)
@@ -82,7 +86,7 @@ class ActivityController extends Controller
         $data = $this->validateData($request);
         $activity->update($data);
 
-        return redirect()->route('activities.index')->with('success', 'Activity updated successfully.');
+        return redirect()->route('activities.edit', $activity)->with('success', 'Activity updated successfully.');
     }
 
     public function destroy(Activity $activity)

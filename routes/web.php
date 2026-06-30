@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ActivityController;
+use App\Http\Controllers\ActivityMediaController;
 use App\Http\Controllers\Admin\TemplateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\LoginController;
@@ -58,12 +59,15 @@ Route::middleware('auth')->group(function () {
     Route::get('/opportunities/{opportunity}/edit', [OpportunityController::class, 'edit'])->name('opportunities.edit');
     Route::put('/opportunities/{opportunity}', [OpportunityController::class, 'update'])->name('opportunities.update');
     Route::patch('/opportunities/{opportunity}/stage', [OpportunityController::class, 'updateStage'])->name('opportunities.stage');
+    Route::delete('/opportunities/{opportunity}', [OpportunityController::class, 'destroy'])->name('opportunities.destroy');
     Route::post('/opportunities/{opportunity}/documents', [OpportunityDocumentController::class, 'store'])->name('opportunities.documents.store');
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
 
     // Aktivitas & Task
     Route::resource('activities', ActivityController::class)->except(['show']);
     Route::patch('/activities/{activity}/complete', [ActivityController::class, 'complete'])->name('activities.complete');
+    Route::post('/activities/{activity}/media', [ActivityMediaController::class, 'store'])->name('activities.media.store');
+    Route::delete('/activities/{activity}/media/{media}', [ActivityMediaController::class, 'destroy'])->name('activities.media.destroy');
 
     // Penawaran
     Route::get('/quotations/{quotation}/preview', [QuotationController::class, 'preview'])->name('quotations.preview');

@@ -7,6 +7,7 @@ use App\Models\Espo\Account;
 use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
 use App\Models\QuotationTemplate;
+use App\Support\OpportunityProductPricing;
 use App\Services\QuotationService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -99,7 +100,12 @@ class QuotationController extends Controller
                         'description' => '',
                         'quantity' => $p['quantity'] ?: 1,
                         'unit' => '',
-                        'unit_price' => $p['price'],
+                        'unit_price' => $p['sell_include'],
+                        'tax_category' => $p['tax_category'],
+                        'item_kind' => $p['item_kind'],
+                        'sell_exclude' => $p['sell_exclude'],
+                        'cost_exclude' => $p['cost_exclude'],
+                        'vendor' => $p['vendor'],
                     ])->all();
                 } elseif ((float) $opportunity->amount > 0) {
                     $seedItems = [[
@@ -320,14 +326,32 @@ class QuotationController extends Controller
         foreach (array_values($items) as $index => $item) {
             $quantity = (float) $item['quantity'];
             $unitPrice = (float) $item['unit_price'];
+            $sellExclude = isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null
+                ? (float) $item['sell_exclude']
+                : OpportunityProductPricing::excludeFromInclude($unitPrice);
+
+            $enriched = OpportunityProductPricing::enrichRow([
+                'name' => $item['name'],
+                'quantity' => $quantity,
+                'vendor' => $item['vendor'] ?? '',
+                'tax_category' => $item['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
+                'item_kind' => $item['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                'sell_exclude' => $sellExclude,
+                'cost_exclude' => (float) ($item['cost_exclude'] ?? 0),
+            ]);
 
             $quotation->items()->create([
                 'name' => $item['name'],
                 'description' => $item['description'] ?? null,
                 'quantity' => $quantity,
                 'unit' => $item['unit'] ?? null,
-                'unit_price' => $unitPrice,
-                'total' => round($quantity * $unitPrice, 2),
+                'unit_price' => $enriched['sell_include'],
+                'total' => round($quantity * $enriched['sell_include'], 2),
+                'tax_category' => $enriched['tax_category'],
+                'item_kind' => $enriched['item_kind'],
+                'sell_exclude' => $enriched['sell_exclude'],
+                'cost_exclude' => $enriched['cost_exclude'],
+                'vendor' => $enriched['vendor'] ?: null,
                 'sort_order' => $index,
             ]);
         }

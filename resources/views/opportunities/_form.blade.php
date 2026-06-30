@@ -1,7 +1,13 @@
 @php
     $initialProducts = old('products', $opportunity->exists
         ? $opportunity->products->map(fn ($p) => [
-            'name' => $p['name'], 'quantity' => $p['quantity'], 'price' => $p['price'], 'cost' => $p['cost'],
+            'name' => $p['name'],
+            'quantity' => $p['quantity'],
+            'sell_exclude' => $p['sell_exclude'],
+            'cost_exclude' => $p['cost_exclude'],
+            'vendor' => $p['vendor'],
+            'tax_category' => $p['tax_category'],
+            'item_kind' => $p['item_kind'],
           ])->values()->all()
         : []);
     $contactOptions = $contacts->map(fn ($c) => [
@@ -17,6 +23,7 @@
           'contacts' => $contactOptions,
           'accountId' => old('account_id', $opportunity->account_id),
           'contactId' => old('contact_id', $opportunity->contact_id),
+          'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
       ]) }})">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
@@ -122,40 +129,129 @@
 
             {{-- Line items --}}
             <x-card>
-                <div class="mb-3 hidden grid-cols-12 gap-2 px-1 text-xs font-medium uppercase tracking-wider text-slate-400 sm:grid">
-                    <div class="col-span-5">Item</div>
-                    <div class="col-span-2 text-right">Qty</div>
-                    <div class="col-span-2 text-right">Sell Price (Incl)</div>
-                    <div class="col-span-2 text-right">Cost (Include)</div>
-                    <div class="col-span-1"></div>
-                </div>
-                <div class="space-y-2">
-                    <template x-for="(p, i) in products" :key="i">
-                        <div class="grid grid-cols-12 gap-2">
-                            <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Item"
-                                   class="crm-field col-span-12 sm:col-span-5">
-                            <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity" placeholder="Qty"
-                                   class="crm-field col-span-4 text-right sm:col-span-2">
-                            <input type="number" step="0.01" min="0" :name="`products[${i}][price]`" x-model.number="p.price" placeholder="Sell Price"
-                                   class="crm-field col-span-4 text-right sm:col-span-2">
-                            <input type="number" step="0.01" min="0" :name="`products[${i}][cost]`" x-model.number="p.cost" placeholder="Cost"
-                                   class="crm-field col-span-3 text-right sm:col-span-2">
-                            <button type="button" @click="removeProduct(i)" class="col-span-1 rounded-lg p-2 text-red-500 hover:bg-red-50"><i class="bi bi-trash"></i></button>
-                        </div>
-                    </template>
-                    <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">No items yet. Click the + button below.</p>
-                </div>
-                <div class="mt-3 flex items-center justify-between">
-                    <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()">Add Item</x-btn>
-                    <div class="text-sm">
-                        <span class="text-slate-500">Total:&nbsp;</span>
-                        <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
+                {{-- Langkah 1: pilih kategori saja --}}
+                <div x-show="!selectedTaxCategory" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
+                    <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori terlebih dahulu</p>
+                    <div class="flex flex-wrap justify-center gap-3">
+                        <button type="button" @click="selectTaxCategory('non_wapu')"
+                                class="rounded-lg border-2 border-slate-200 bg-white px-8 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700">
+                            Non Wapu
+                        </button>
+                        <button type="button" @click="selectTaxCategory('wapu')"
+                                class="rounded-lg border-2 border-slate-200 bg-white px-8 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700">
+                            Wapu
+                        </button>
                     </div>
                 </div>
-                <div class="mt-5 border-t border-slate-100 pt-5">
-                    <label class="crm-label">Vendor</label>
-                    <input type="text" name="vendor" value="{{ old('vendor', $opportunity->vendor) }}"
-                           class="crm-field">
+
+                {{-- Langkah 2: form item setelah kategori dipilih --}}
+                <div x-show="selectedTaxCategory" x-cloak>
+                    <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm text-slate-500">Kategori:</span>
+                            <span class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="selectedTaxCategory === 'wapu' ? 'Wapu' : 'Non Wapu'"></span>
+                        </div>
+                        <button type="button" x-show="products.length === 0" @click="selectedTaxCategory = null"
+                                class="text-xs font-medium text-slate-500 hover:text-slate-700">
+                            <i class="bi bi-arrow-left"></i> Ganti kategori
+                        </button>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Input harga <strong>Exclude</strong> (putih). Include, PPH, margin & persentase terisi otomatis (kuning).</p>
+                    </div>
+
+                    <div class="space-y-4">
+                        <template x-for="(p, i) in products" :key="i">
+                            <div class="rounded-lg border border-slate-200 p-4">
+                                <input type="hidden" :name="`products[${i}][tax_category]`" :value="p.tax_category">
+                                <div class="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12">
+                                    <div class="sm:col-span-2">
+                                        <label class="crm-label text-xs">Barang / Jasa</label>
+                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" class="crm-field w-full text-sm">
+                                            <option value="barang">Barang</option>
+                                            <option value="jasa">Jasa</option>
+                                        </select>
+                                    </div>
+                                    <div class="sm:col-span-5">
+                                        <label class="crm-label text-xs">Item</label>
+                                        <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full">
+                                    </div>
+                                    <div class="sm:col-span-1">
+                                        <label class="crm-label text-xs">Qty</label>
+                                        <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity" class="crm-field w-full text-right">
+                                    </div>
+                                    <div class="sm:col-span-3">
+                                        <label class="crm-label text-xs">Vendor</label>
+                                        <input type="text" :name="`products[${i}][vendor]`" x-model="p.vendor" placeholder="Vendor" class="crm-field w-full">
+                                    </div>
+                                    <div class="flex items-end justify-end sm:col-span-1">
+                                        <button type="button" @click="removeProduct(i)" class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                </div>
+
+                            <div class="overflow-x-auto">
+                                <table class="w-full min-w-[640px] text-sm">
+                                    <thead>
+                                        <tr class="text-left text-xs uppercase tracking-wider text-slate-400">
+                                            <th class="pb-2 pr-3"></th>
+                                            <th class="pb-2 pr-3">Exclude</th>
+                                            <th class="pb-2 pr-3">Include</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">Harga Jual</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="number" step="0.01" min="0" :name="`products[${i}][sell_exclude]`" x-model.number="p.sell_exclude"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatNumber(sellInclude(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">Harga Beli / Modal</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="number" step="0.01" min="0" :name="`products[${i}][cost_exclude]`" x-model.number="p.cost_exclude"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatNumber(costInclude(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesPph(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600">PPH 2%</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">Exclude × 2%</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatNumber(pphAmount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">Margin</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="marginLabel(p)"></td>
+                                            <td class="py-2 pr-3">
+                                                <div class="flex items-center gap-2">
+                                                    <input type="text" readonly :value="formatNumber(marginAmount(p))"
+                                                           class="crm-field min-w-[8rem] flex-1 cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                    <span class="shrink-0 rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800" x-text="formatPercent(marginPercent(p))"></span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </template>
+                        <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">Belum ada item. Klik tombol + di bawah untuk menambahkan.</p>
+                    </div>
+                    <div class="mt-3 flex items-center justify-between">
+                        <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()">Add Item</x-btn>
+                        <div class="text-sm">
+                            <span class="text-slate-500">Total (Include):&nbsp;</span>
+                            <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
+                        </div>
+                    </div>
                 </div>
             </x-card>
         </div>
@@ -195,13 +291,19 @@
 
 <script>
     function opportunityForm(config) {
+        const TAX_MULTIPLIER = 1.11;
+
         return {
             products: (config.products || []).map(p => ({
                 name: p.name ?? '',
                 quantity: Number(p.quantity) || 0,
-                price: Number(p.price) || 0,
-                cost: Number(p.cost) || 0,
+                sell_exclude: Number(p.sell_exclude) || 0,
+                cost_exclude: Number(p.cost_exclude) || 0,
+                vendor: p.vendor ?? '',
+                tax_category: p.tax_category ?? 'non_wapu',
+                item_kind: p.item_kind ?? 'barang',
             })),
+            selectedTaxCategory: config.initialTaxCategory || null,
             contacts: config.contacts || [],
             accountId: config.accountId || '',
             contactId: config.contactId || '',
@@ -212,7 +314,50 @@
                 return this.contacts.filter(c => c.account_id === this.accountId);
             },
             get productsTotal() {
-                return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.price) || 0), 0);
+                return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * this.sellInclude(p), 0);
+            },
+            round(value) {
+                return Math.round((Number(value) || 0) * 100) / 100;
+            },
+            sellInclude(p) {
+                return this.round((Number(p.sell_exclude) || 0) * TAX_MULTIPLIER);
+            },
+            costInclude(p) {
+                return this.round((Number(p.cost_exclude) || 0) * TAX_MULTIPLIER);
+            },
+            appliesPph(p) {
+                return !(p.tax_category === 'non_wapu' && p.item_kind === 'barang');
+            },
+            pphAmount(p) {
+                if (!this.appliesPph(p)) return 0;
+                return this.round((Number(p.sell_exclude) || 0) * 0.02);
+            },
+            marginAmount(p) {
+                const sell = Number(p.sell_exclude) || 0;
+                const cost = Number(p.cost_exclude) || 0;
+                if (!this.appliesPph(p)) {
+                    return this.round(sell - cost);
+                }
+                return this.round(sell - this.pphAmount(p) - cost);
+            },
+            marginPercent(p) {
+                const margin = this.marginAmount(p);
+                const sell = Number(p.sell_exclude) || 0;
+                return sell > 0 ? this.round((margin / sell) * 100) : 0;
+            },
+            marginLabel(p) {
+                return this.appliesPph(p)
+                    ? 'Jual Exclude − PPH − Modal'
+                    : 'Jual Exclude − Beli Exclude';
+            },
+            formatNumber(value) {
+                value = Number(value) || 0;
+                if (this.currency === 'IDR') return value.toLocaleString('id-ID', { maximumFractionDigits: 0 });
+                return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            },
+            formatPercent(value) {
+                const n = Number(value) || 0;
+                return n.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
             },
             onAccountChange() {
                 const list = this.filteredContacts;
@@ -241,7 +386,21 @@
                 );
                 CrmSelect2.bindAlpine(el, this, 'contactId');
             },
-            addProduct() { this.products.push({ name: '', quantity: 1, price: 0, cost: 0 }); },
+            selectTaxCategory(category) {
+                this.selectedTaxCategory = category;
+            },
+            addProduct() {
+                if (!this.selectedTaxCategory) return;
+                this.products.push({
+                    name: '',
+                    quantity: 1,
+                    sell_exclude: 0,
+                    cost_exclude: 0,
+                    vendor: '',
+                    tax_category: this.selectedTaxCategory,
+                    item_kind: 'barang',
+                });
+            },
             removeProduct(i) { this.products.splice(i, 1); },
             init() {
                 this.$watch('products', () => { if (this.products.length > 0) this.amount = this.productsTotal; });

@@ -262,26 +262,40 @@ class QuotationService
         return '<img src="data:'.$mime.';base64,'.$data.'" alt="Signature" style="max-height:72px;max-width:220px;">';
     }
 
+    protected function cellStyle(string $align = 'left', bool $header = false): string
+    {
+        $base = 'padding:6px;border:1px solid #000000;';
+        $alignStyle = match ($align) {
+            'right' => 'text-align:right;',
+            'center' => 'text-align:center;',
+            default => 'text-align:left;',
+        };
+
+        return $base.$alignStyle.($header ? 'font-weight:700;background:#ffffff;' : '');
+    }
+
     protected function renderItemsRows(Quotation $quotation): string
     {
         $rows = '';
         $no = 1;
 
         foreach ($quotation->items as $item) {
+            $unitLabel = trim((string) $item->unit) ?: 'unit';
+
             $rows .= '<tr>'
-                . '<td style="text-align:center;">' . $no++ . '</td>'
-                . '<td>' . e($item->name)
-                . ($item->description ? '<br><small style="color:#666;">' . nl2br(e($item->description)) . '</small>' : '')
-                . '</td>'
-                . '<td style="text-align:center;">' . rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.')
-                . ' ' . e($item->unit) . '</td>'
-                . '<td style="text-align:right;">' . money($item->unit_price, $quotation->currency) . '</td>'
-                . '<td style="text-align:right;">' . money($item->total, $quotation->currency) . '</td>'
-                . '</tr>';
+                .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
+                .'<td style="'.$this->cellStyle().'">'.e($item->name)
+                .($item->description ? '<br><small style="color:#666;">'.nl2br(e($item->description)).'</small>' : '')
+                .'</td>'
+                .'<td style="'.$this->cellStyle('center').'">'
+                .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($item->unit_price, $quotation->currency).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($item->total, $quotation->currency).'</td>'
+                .'</tr>';
         }
 
         if ($rows === '') {
-            $rows = '<tr><td colspan="5" style="text-align:center;color:#999;">Belum ada item.</td></tr>';
+            $rows = '<tr><td colspan="5" style="'.$this->cellStyle('center').'color:#999;">No items yet.</td></tr>';
         }
 
         return $rows;
@@ -289,96 +303,101 @@ class QuotationService
 
     protected function renderItemsTable(Quotation $quotation): string
     {
-        return '<table style="width:100%;border-collapse:collapse;" border="1" cellpadding="8">'
-            . '<thead><tr style="background:#f3f4f6;">'
-            . '<th style="width:40px;">No</th><th>Description</th><th style="width:90px;">Qty</th>'
-            . '<th style="width:140px;">Price</th><th style="width:140px;">Amount</th>'
-            . '</tr></thead><tbody>'
-            . $this->renderItemsRows($quotation)
-            . '</tbody></table>';
+        return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0;">'
+            .'<thead><tr>'
+            .'<th style="'.$this->cellStyle('center', true).'width:32px;">No</th>'
+            .'<th style="'.$this->cellStyle('left', true).'">Description</th>'
+            .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Unit Price</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Amount</th>'
+            .'</tr></thead><tbody>'
+            .$this->renderItemsRows($quotation)
+            .$this->renderItemsTableSummary($quotation, 3)
+            .'</tbody></table>';
     }
 
     protected function renderItemsRowsIndo(Quotation $quotation): string
     {
         $rows = '';
         $no = 1;
-        $taxRate = (float) $quotation->tax_percent / 100;
 
         foreach ($quotation->items as $item) {
-            $qty = (float) $item->quantity;
-            $excl = (float) $item->unit_price;
-            $incl = $excl * (1 + $taxRate);
-            $lineTotal = (float) $item->total;
-            $unitLabel = trim((string) $item->unit) ?: 'unit';
+            $unitLabel = trim((string) $item->unit) ?: 'Unit';
 
             $rows .= '<tr>'
-                . '<td style="text-align:center;padding:6px;border:1px solid #000000;">'.$no++.'</td>'
-                . '<td style="padding:6px;border:1px solid #000000;">'.e($item->name)
-                . ($item->description ? '<br><small style="color:#666;">'.nl2br(e($item->description)).'</small>' : '')
-                . '</td>'
-                . '<td style="text-align:center;padding:6px;border:1px solid #000000;">'
-                .rtrim(rtrim(number_format($qty, 2), '0'), '.').' '.e($unitLabel).'</td>'
-                . '<td style="text-align:right;padding:6px;border:1px solid #000000;">'.money($excl, $quotation->currency).'</td>'
-                . '<td style="text-align:right;padding:6px;border:1px solid #000000;">'.money($incl, $quotation->currency).'</td>'
-                . '<td style="text-align:right;padding:6px;border:1px solid #000000;">'.money($lineTotal, $quotation->currency).'</td>'
-                . '</tr>';
+                .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
+                .'<td style="'.$this->cellStyle().'">'.e($item->name)
+                .($item->description ? '<br><small style="color:#666;">'.nl2br(e($item->description)).'</small>' : '')
+                .'</td>'
+                .'<td style="'.$this->cellStyle('center').'">'
+                .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($item->unit_price, $quotation->currency).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($item->total, $quotation->currency).'</td>'
+                .'</tr>';
         }
 
         if ($rows === '') {
-            $rows = '<tr><td colspan="6" style="text-align:center;padding:8px;border:1px solid #000000;color:#999;">Belum ada item.</td></tr>';
+            $rows = '<tr><td colspan="5" style="'.$this->cellStyle('center').'color:#999;">Belum ada item.</td></tr>';
         }
+
+        return $rows;
+    }
+
+    protected function renderItemsTableSummary(Quotation $quotation, int $labelColspan): string
+    {
+        $currency = $quotation->currency;
+        $labelStyle = $this->cellStyle('right', true);
+        $valueStyle = $this->cellStyle('right', true);
+
+        $rows = '<tr>'
+            .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+            .'<td style="'.$labelStyle.'">Subtotal</td>'
+            .'<td style="'.$valueStyle.'">'.money($quotation->subtotal, $currency).'</td>'
+            .'</tr>';
+
+        if ((float) $quotation->discount > 0) {
+            $rows .= '<tr>'
+                .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+                .'<td style="'.$labelStyle.'">Diskon</td>'
+                .'<td style="'.$valueStyle.'">-'.money($quotation->discount, $currency).'</td>'
+                .'</tr>';
+        }
+
+        if ((float) $quotation->tax_percent > 0) {
+            $taxLabel = 'PPn '.rtrim(rtrim(number_format((float) $quotation->tax_percent, 2), '0'), '.').'%';
+            $rows .= '<tr>'
+                .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+                .'<td style="'.$labelStyle.'">'.$taxLabel.'</td>'
+                .'<td style="'.$valueStyle.'">'.money($quotation->tax_amount, $currency).'</td>'
+                .'</tr>';
+        }
+
+        $rows .= '<tr>'
+            .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+            .'<td style="'.$labelStyle.'">Total</td>'
+            .'<td style="'.$valueStyle.'">'.money($quotation->total, $currency).'</td>'
+            .'</tr>';
 
         return $rows;
     }
 
     protected function renderItemsTableIndoSummary(Quotation $quotation): string
     {
-        $currency = $quotation->currency;
-        $taxLabel = 'PPn '.rtrim(rtrim(number_format((float) $quotation->tax_percent, 2), '0'), '.').'%';
-        $labelStyle = 'padding:6px;border:1px solid #000000;text-align:right;font-weight:700;';
-        $valueStyle = 'padding:6px;border:1px solid #000000;text-align:right;font-weight:700;';
-
-        $rows = '<tr>'
-            . '<td colspan="4" style="border:none;">&nbsp;</td>'
-            . '<td style="'.$labelStyle.'">Subtotal</td>'
-            . '<td style="'.$valueStyle.'">'.money($quotation->subtotal, $currency).'</td>'
-            . '</tr>';
-
-        if ((float) $quotation->discount > 0) {
-            $rows .= '<tr>'
-                . '<td colspan="4" style="border:none;">&nbsp;</td>'
-                . '<td style="'.$labelStyle.'">Diskon</td>'
-                . '<td style="'.$valueStyle.'">-'.money($quotation->discount, $currency).'</td>'
-                . '</tr>';
-        }
-
-        $rows .= '<tr>'
-            . '<td colspan="4" style="border:none;">&nbsp;</td>'
-            . '<td style="'.$labelStyle.'">'.$taxLabel.'</td>'
-            . '<td style="'.$valueStyle.'">'.money($quotation->tax_amount, $currency).'</td>'
-            . '</tr>'
-            . '<tr>'
-            . '<td colspan="4" style="border:none;">&nbsp;</td>'
-            . '<td style="'.$labelStyle.'">Total</td>'
-            . '<td style="'.$valueStyle.'">'.money($quotation->total, $currency).'</td>'
-            . '</tr>';
-
-        return $rows;
+        return $this->renderItemsTableSummary($quotation, 3);
     }
 
     protected function renderItemsTableIndo(Quotation $quotation): string
     {
         return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0;">'
-            . '<thead><tr style="background:#ffffff;">'
-            . '<th style="padding:6px;border:1px solid #000000;width:32px;">No.</th>'
-            . '<th style="padding:6px;border:1px solid #000000;">Deskripsi</th>'
-            . '<th style="padding:6px;border:1px solid #000000;width:72px;">Qty</th>'
-            . '<th style="padding:6px;border:1px solid #000000;width:110px;">Harga Unit Excl PPN</th>'
-            . '<th style="padding:6px;border:1px solid #000000;width:110px;">Harga Unit Incl PPN</th>'
-            . '<th style="padding:6px;border:1px solid #000000;width:120px;">Total Harga IDR</th>'
-            . '</tr></thead><tbody>'
-            . $this->renderItemsRowsIndo($quotation)
-            . $this->renderItemsTableIndoSummary($quotation)
-            . '</tbody></table>';
+            .'<thead><tr>'
+            .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
+            .'<th style="'.$this->cellStyle('left', true).'">Spesifikasi</th>'
+            .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga Unit IDR</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga IDR</th>'
+            .'</tr></thead><tbody>'
+            .$this->renderItemsRowsIndo($quotation)
+            .$this->renderItemsTableIndoSummary($quotation)
+            .'</tbody></table>';
     }
 }

@@ -18,74 +18,95 @@
     <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green" />
 </div>
 
-{{-- Sales Leaderboard --}}
-<x-card class="mt-4" :padding="false">
-    <x-slot:title>
-        <span class="inline-flex items-center gap-2">
-            <i class="bi bi-trophy text-amber-500"></i> Sales Leaderboard
-        </span>
-    </x-slot:title>
-    <x-slot:action>
-        <form method="GET" action="{{ route('dashboard') }}">
-            <select name="leaderboard_period" onchange="this.form.submit()"
-                    class="rounded-lg border border-slate-300 bg-white py-1.5 pl-2 pr-8 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200">
-                <option value="alltime" @selected($leaderboardPeriod === 'alltime')>All Time</option>
-                <option value="month" @selected($leaderboardPeriod === 'month')>This Month</option>
-                <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
-            </select>
-        </form>
-    </x-slot:action>
-
-    @if ($salesLeaderboard->isNotEmpty())
-        <div class="overflow-x-auto">
-            <table class="crm-table">
-                <thead>
-                    <tr>
-                        <th class="w-14">#</th>
-                        <th>Sales</th>
-                        <th class="text-right">Deals Won</th>
-                        <th class="text-right">Total Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($salesLeaderboard as $entry)
-                        <tr @class(['bg-brand-50/40' => $entry['user_id'] === auth()->id()])>
-                            <td>
-                                @if ($entry['rank'] === 1)
-                                    <span class="crm-leaderboard-rank crm-leaderboard-rank--gold">1</span>
-                                @elseif ($entry['rank'] === 2)
-                                    <span class="crm-leaderboard-rank crm-leaderboard-rank--silver">2</span>
-                                @elseif ($entry['rank'] === 3)
-                                    <span class="crm-leaderboard-rank crm-leaderboard-rank--bronze">3</span>
-                                @else
-                                    <span class="crm-leaderboard-rank">{{ $entry['rank'] }}</span>
-                                @endif
-                            </td>
-                            <td>
-                                <div class="flex items-center gap-3">
-                                    <span class="crm-avatar">{{ initials($entry['name']) }}</span>
-                                    <div>
-                                        <p class="font-medium text-slate-800">{{ $entry['name'] }}</p>
-                                        @if ($entry['user_id'] === auth()->id())
-                                            <p class="text-[11px] text-brand-600">You</p>
-                                        @endif
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="text-right font-medium text-slate-700">{{ number_format($entry['won_count']) }}</td>
-                            <td class="text-right font-semibold text-slate-800">{{ money($entry['won_value']) }}</td>
-                        </tr>
-                    @endforeach
-                </tbody>
-            </table>
+<div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
+    <div class="space-y-4">
+        {{-- Leaderboard widget (kiri) --}}
+        <x-card :padding="false" class="crm-leaderboard-widget">
+        <div class="border-b border-slate-100 px-4 py-3">
+            <div class="flex items-center justify-between gap-2">
+                <p class="text-sm font-semibold text-slate-800">
+                    <i class="bi bi-trophy text-amber-500"></i> Leaderboard
+                </p>
+                <form method="GET" action="{{ route('dashboard') }}">
+                    <select name="leaderboard_period" onchange="this.form.submit()"
+                            class="crm-leaderboard-widget__select">
+                        <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
+                        <option value="month" @selected($leaderboardPeriod === 'month')>This Month</option>
+                        <option value="alltime" @selected($leaderboardPeriod === 'alltime')>All Time</option>
+                    </select>
+                </form>
+            </div>
         </div>
-    @else
-        <x-empty-state icon="bi-trophy" title="No closed won deals yet"
-                       message="Leaderboard akan muncul setelah ada deal Closed Won pada periode ini." />
-    @endif
-</x-card>
 
-<div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        @if ($salesLeaderboard->isNotEmpty())
+            <ul class="divide-y divide-slate-50">
+                @foreach ($salesLeaderboard as $entry)
+                    <li @class(['px-4 py-2.5', 'bg-brand-50/50' => $entry['user_id'] === auth()->id()])>
+                        <div class="flex items-center gap-2.5">
+                            @if ($entry['rank'] === 1)
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--gold crm-leaderboard-rank--sm">1</span>
+                            @elseif ($entry['rank'] === 2)
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--silver crm-leaderboard-rank--sm">2</span>
+                            @elseif ($entry['rank'] === 3)
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--bronze crm-leaderboard-rank--sm">3</span>
+                            @else
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
+                            @endif
+                            <div class="min-w-0 flex-1">
+                                <p class="truncate text-xs font-medium text-slate-800">
+                                    {{ $entry['name'] }}
+                                    @if ($entry['user_id'] === auth()->id())
+                                        <span class="text-brand-600">· You</span>
+                                    @endif
+                                </p>
+                                <p class="text-[11px] text-slate-400">{{ $entry['won_count'] }} deal</p>
+                            </div>
+                            <p class="shrink-0 text-xs font-semibold text-slate-700">{{ money($entry['won_value']) }}</p>
+                        </div>
+                    </li>
+                @endforeach
+            </ul>
+        @else
+            <p class="px-4 py-8 text-center text-xs text-slate-400">Belum ada deal Closed Won.</p>
+        @endif
+        </x-card>
+
+        {{-- Quotation status --}}
+        <x-card title="Quotation Status">
+            @php
+                $statusMeta = [
+                    'draft' => ['Draft', 'bg-slate-400'],
+                    'sent' => ['Sent', 'bg-blue-500'],
+                    'accepted' => ['Accepted', 'bg-green-500'],
+                    'rejected' => ['Rejected', 'bg-red-500'],
+                    'expired' => ['Expired', 'bg-amber-500'],
+                ];
+                $totalQuo = array_sum($quotationStatus) ?: 1;
+            @endphp
+            @if (array_sum($quotationStatus) > 0)
+                <div class="mb-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    @foreach ($statusMeta as $key => [$label, $bar])
+                        @if (($quotationStatus[$key] ?? 0) > 0)
+                            <div class="{{ $bar }}" style="width: {{ (($quotationStatus[$key] ?? 0)/$totalQuo)*100 }}%"></div>
+                        @endif
+                    @endforeach
+                </div>
+                <ul class="space-y-1.5 text-xs">
+                    @foreach ($statusMeta as $key => [$label, $bar])
+                        <li class="flex items-center justify-between">
+                            <span class="flex items-center gap-1.5 text-slate-600">
+                                <span class="h-2 w-2 rounded-full {{ $bar }}"></span> {{ $label }}
+                            </span>
+                            <span class="font-medium text-slate-700">{{ $quotationStatus[$key] ?? 0 }}</span>
+                        </li>
+                    @endforeach
+                </ul>
+            @else
+                <p class="py-4 text-center text-xs text-slate-400">No quotations yet.</p>
+            @endif
+        </x-card>
+    </div>
+
     {{-- Opportunity pipeline --}}
     <x-card title="Sales Pipeline" class="lg:col-span-2">
         <div class="mb-5 grid grid-cols-2 gap-4">
@@ -116,41 +137,6 @@
             @endforelse
         </div>
     </x-card>
-
-    {{-- Quotation status --}}
-    <x-card title="Quotation Status">
-        @php
-            $statusMeta = [
-                'draft' => ['Draft', 'bg-slate-400'],
-                'sent' => ['Sent', 'bg-blue-500'],
-                'accepted' => ['Accepted', 'bg-green-500'],
-                'rejected' => ['Rejected', 'bg-red-500'],
-                'expired' => ['Expired', 'bg-amber-500'],
-            ];
-            $totalQuo = array_sum($quotationStatus) ?: 1;
-        @endphp
-        @if (array_sum($quotationStatus) > 0)
-            <div class="mb-4 flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                @foreach ($statusMeta as $key => [$label, $bar])
-                    @if (($quotationStatus[$key] ?? 0) > 0)
-                        <div class="{{ $bar }}" style="width: {{ (($quotationStatus[$key] ?? 0)/$totalQuo)*100 }}%"></div>
-                    @endif
-                @endforeach
-            </div>
-            <ul class="space-y-2 text-sm">
-                @foreach ($statusMeta as $key => [$label, $bar])
-                    <li class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-slate-600">
-                            <span class="h-2.5 w-2.5 rounded-full {{ $bar }}"></span> {{ $label }}
-                        </span>
-                        <span class="font-medium text-slate-700">{{ $quotationStatus[$key] ?? 0 }}</span>
-                    </li>
-                @endforeach
-            </ul>
-        @else
-            <x-empty-state icon="bi-file-earmark" title="No quotations yet" message="Your quotations will appear here." />
-        @endif
-    </x-card>
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -166,7 +152,7 @@
         @forelse ($upcomingActivities as $activity)
             <div class="flex items-center gap-4 border-b border-slate-50 px-5 py-3 last:border-0">
                 <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                    <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky'][$activity->type] ?? 'bi-check2-square' }}"></i>
+                    <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky','event_training'=>'bi-calendar-event'][$activity->type] ?? 'bi-check2-square' }}"></i>
                 </span>
                 <div class="min-w-0 flex-1">
                     <p class="truncate text-sm font-medium text-slate-800">{{ $activity->subject }}</p>

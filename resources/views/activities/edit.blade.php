@@ -9,5 +9,6 @@
 
 <div class="max-w-3xl">
     @include('activities._form', ['action' => route('activities.update', $activity), 'method' => 'PUT'])
+    @include('activities._media')
 </div>
 @endsection

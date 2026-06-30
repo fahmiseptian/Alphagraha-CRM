@@ -9,9 +9,10 @@
                 <div class="mb-3 flex flex-wrap gap-1.5">
                     <span class="mr-1 self-center text-xs text-slate-400">Insert:</span>
                     @foreach (['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','total_price','sales_name','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'] as $ph)
+                        @php $placeholderTag = '{'.'{ '.$ph.' }'.'}'; @endphp
                         <button type="button" onclick="insertPlaceholder('{{ $ph }}')"
                                 class="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-brand-700 hover:bg-brand-50">
-                            @{{ {{ $ph }} }}
+                            {{ $placeholderTag }}
                         </button>
                     @endforeach
                 </div>
@@ -20,7 +21,7 @@
                 <p class="mt-2 text-xs text-slate-400">
                     Gunakan <code class="rounded bg-slate-100 px-1">@{{ sales_signature }}</code> atau
                     <code class="rounded bg-slate-100 px-1">@{{ notes }}</code> — jangan pakai sintaks Blade
-                    (<code class="rounded bg-slate-100 px-1">@if</code>, <code class="rounded bg-slate-100 px-1">{!! !!}</code>).
+                    (<code class="rounded bg-slate-100 px-1">@@if</code>, <code class="rounded bg-slate-100 px-1">{&#123;!! !!&#125;}</code>).
                     Placeholder kosong otomatis tidak menampilkan apa-apa.
                 </p>
             </x-card>

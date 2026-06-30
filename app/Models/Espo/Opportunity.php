@@ -4,6 +4,7 @@ namespace App\Models\Espo;
 
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\Quotation;
+use App\Support\OpportunityProductPricing;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -25,6 +26,7 @@ class Opportunity extends Model implements HasMedia
         'name', 'account_id', 'company', 'stage', 'type', 'amount', 'amount_currency',
         'close_date', 'probability', 'lead_source', 'description', 'assigned_user_id',
         'contact_id', 'vendor',
+        'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
     ];
 
     protected $casts = [
@@ -32,6 +34,11 @@ class Opportunity extends Model implements HasMedia
         'quantity' => 'array',
         'price' => 'array',
         'cost' => 'array',
+        'vendor' => 'array',
+        'crm_tax_category' => 'array',
+        'crm_item_kind' => 'array',
+        'crm_sell_exclude' => 'array',
+        'crm_cost_exclude' => 'array',
     ];
 
     public const OPEN_STAGES = ['Prospecting', 'Qualification', 'Proposal', 'Negotiation'];
@@ -169,27 +176,45 @@ class Opportunity extends Model implements HasMedia
         $qtys = array_values((array) ($this->quantity ?? []));
         $prices = array_values((array) ($this->price ?? []));
         $costs = array_values((array) ($this->cost ?? []));
+        $vendors = array_values((array) ($this->vendor ?? []));
+        $taxCategories = array_values((array) ($this->crm_tax_category ?? []));
+        $itemKinds = array_values((array) ($this->crm_item_kind ?? []));
+        $sellExcludes = array_values((array) ($this->crm_sell_exclude ?? []));
+        $costExcludes = array_values((array) ($this->crm_cost_exclude ?? []));
 
-        $count = max(count($names), count($qtys), count($prices), count($costs));
+        $count = max(
+            count($names), count($qtys), count($prices), count($costs), count($vendors),
+            count($taxCategories), count($itemKinds), count($sellExcludes), count($costExcludes)
+        );
 
         if ($count === 0) {
             return collect();
         }
 
         return collect(range(0, $count - 1))
-            ->map(function ($i) use ($names, $qtys, $prices, $costs) {
-                $qty = (float) ($qtys[$i] ?? 1);
-                $price = (float) ($prices[$i] ?? 0);
+            ->map(function ($i) use ($names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds, $sellExcludes, $costExcludes) {
+                $priceInclude = (float) ($prices[$i] ?? 0);
+                $costInclude = (float) ($costs[$i] ?? 0);
+                $sellExclude = isset($sellExcludes[$i]) && $sellExcludes[$i] !== ''
+                    ? (float) $sellExcludes[$i]
+                    : OpportunityProductPricing::excludeFromInclude($priceInclude);
+                $costExclude = isset($costExcludes[$i]) && $costExcludes[$i] !== ''
+                    ? (float) $costExcludes[$i]
+                    : OpportunityProductPricing::excludeFromInclude($costInclude);
+                $taxCategory = (string) ($taxCategories[$i] ?? OpportunityProductPricing::TAX_NON_WAPU);
+                $itemKind = (string) ($itemKinds[$i] ?? OpportunityProductPricing::KIND_BARANG);
 
-                return [
+                return OpportunityProductPricing::enrichRow([
                     'name' => (string) ($names[$i] ?? ''),
-                    'quantity' => $qty,
-                    'price' => $price,
-                    'cost' => (float) ($costs[$i] ?? 0),
-                    'subtotal' => $qty * $price,
-                ];
+                    'quantity' => (float) ($qtys[$i] ?? 1),
+                    'vendor' => (string) ($vendors[$i] ?? ''),
+                    'tax_category' => $taxCategory,
+                    'item_kind' => $itemKind,
+                    'sell_exclude' => $sellExclude,
+                    'cost_exclude' => $costExclude,
+                ]);
             })
-            ->filter(fn ($row) => $row['name'] !== '' || $row['price'] > 0)
+            ->filter(fn ($row) => $row['name'] !== '' || $row['sell_exclude'] > 0 || $row['price'] > 0)
             ->values();
     }
 
@@ -200,5 +225,52 @@ class Opportunity extends Model implements HasMedia
             self::LOST_STAGE => 'red',
             default => 'blue',
         };
+    }
+
+    /**
+     * Kunci untuk mendeteksi deal duplikat (nama + akun + nilai sama).
+     */
+    public function duplicateKey(): string
+    {
+        return mb_strtolower(trim($this->name))
+            .'|'.($this->account_id ?? '')
+            .'|'.number_format((float) $this->amount, 2, '.', '');
+    }
+
+    /**
+     * @return array<string, list<string>> opportunity_id => [other duplicate ids]
+     */
+    public static function duplicateMap(Collection $opportunities): array
+    {
+        $groups = $opportunities->groupBy(fn (self $o) => $o->duplicateKey());
+
+        $map = [];
+        foreach ($groups as $group) {
+            if ($group->count() < 2) {
+                continue;
+            }
+            $ids = $group->pluck('id')->all();
+            foreach ($ids as $id) {
+                $map[$id] = array_values(array_filter($ids, fn ($other) => $other !== $id));
+            }
+        }
+
+        return $map;
+    }
+
+    public function potentialDuplicates(): Collection
+    {
+        if ($this->name === '') {
+            return collect();
+        }
+
+        return static::query()
+            ->with('quotation')
+            ->where('id', '!=', $this->id)
+            ->where('name', $this->name)
+            ->where('account_id', $this->account_id)
+            ->where('amount', $this->amount)
+            ->orderByDesc('modified_at')
+            ->get();
     }
 }

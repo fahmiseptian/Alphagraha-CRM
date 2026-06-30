@@ -85,7 +85,8 @@
 
                 <div class="crm-kanban-body">
                     @forelse ($cards as $opp)
-                        <div class="crm-kanban-card" x-data="{ open: false }" x-show="{{ $loop->index }} < visible">
+                        @php $hasDuplicates = ! empty($duplicateMap[$opp->id] ?? []); @endphp
+                        <div class="crm-kanban-card {{ $hasDuplicates ? 'ring-1 ring-amber-300' : '' }}" x-data="{ open: false }" x-show="{{ $loop->index }} < visible">
                             <div class="crm-kanban-card__top">
                                 <a href="{{ route('opportunities.show', $opp) }}" class="crm-kanban-card__title" title="{{ $opp->name }}">
                                     {{ $opp->name }}
@@ -137,9 +138,21 @@
                                                 </form>
                                             @endforeach
                                         @endif
+                                        <form method="POST" action="{{ route('opportunities.destroy', $opp) }}" onsubmit="return confirm('Hapus deal ini? Tindakan tidak bisa dibatalkan.')" @submit="open = false">
+                                            @csrf @method('DELETE')
+                                            <button type="submit" class="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50">
+                                                <i class="bi bi-trash mr-1"></i> Hapus deal
+                                            </button>
+                                        </form>
                                     </div>
                                 </div>
                             </div>
+
+                            @if ($hasDuplicates)
+                                <p class="mb-1 text-[11px] font-medium text-amber-600" title="Deal serupa ditemukan di stage lain">
+                                    <i class="bi bi-exclamation-triangle"></i> Kemungkinan duplikat
+                                </p>
+                            @endif
 
                             <p class="crm-kanban-card__amount">{{ money($opp->amount, $opp->amount_currency ?: 'IDR') }}</p>
 

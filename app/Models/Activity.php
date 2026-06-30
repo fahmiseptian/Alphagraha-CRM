@@ -7,10 +7,12 @@ use App\Models\Espo\Lead;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 
-class Activity extends Model
+class Activity extends Model implements HasMedia
 {
-    use HasFactory;
+    use HasFactory, InteractsWithMedia;
 
     protected $table = 'crm_activities';
 
@@ -33,6 +35,12 @@ class Activity extends Model
         'task' => 'Task',
         'followup' => 'Follow-up',
         'note' => 'Note',
+        'event_training' => 'Event/Training',
+    ];
+
+    public const MEDIA_COLLECTIONS = [
+        'invitation' => 'Undangan',
+        'proof' => 'Bukti',
     ];
 
     public const STATUSES = [
@@ -82,5 +90,11 @@ class Activity extends Model
     public function statusLabel(): string
     {
         return self::STATUSES[$this->status] ?? ucfirst($this->status);
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('invitation')->useDisk('public');
+        $this->addMediaCollection('proof')->useDisk('public');
     }
 }

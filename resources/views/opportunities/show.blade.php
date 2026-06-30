@@ -32,6 +32,34 @@
     </div>
 </div>
 
+@if ($duplicates->isNotEmpty())
+    <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p class="font-medium"><i class="bi bi-exclamation-triangle mr-1"></i> Deal duplikat terdeteksi</p>
+        <p class="mt-1 text-amber-700">Ada {{ $duplicates->count() }} deal lain dengan nama, customer, dan nilai yang sama. Ini bisa menyebabkan kartu ganda di pipeline meskipun stage sudah diubah.</p>
+        <ul class="mt-2 space-y-1">
+            @foreach ($duplicates as $dup)
+                <li class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white/70 px-3 py-2">
+                    <span>
+                        <x-badge color="blue">{{ $dup->stage }}</x-badge>
+                        <span class="ml-1 text-amber-900">
+                            {{ $dup->close_date ? \Illuminate\Support\Carbon::parse($dup->close_date)->translatedFormat('d M Y') : '—' }}
+                        </span>
+                    </span>
+                    <div class="flex items-center gap-2">
+                        <a href="{{ route('opportunities.show', $dup) }}" class="text-xs font-medium text-brand-600 hover:underline">Lihat</a>
+                        @if (! $dup->quotation)
+                            <form method="POST" action="{{ route('opportunities.destroy', $dup) }}" onsubmit="return confirm('Hapus deal duplikat ini?')">
+                                @csrf @method('DELETE')
+                                <button type="submit" class="text-xs font-medium text-red-600 hover:underline">Hapus duplikat</button>
+                            </form>
+                        @endif
+                    </div>
+                </li>
+            @endforeach
+        </ul>
+    </div>
+@endif
+
 <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
     {{-- Left column --}}
     <div class="space-y-4 lg:col-span-2">
@@ -53,7 +81,6 @@
                 <div><dt class="text-slate-400">Close Date</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->translatedFormat('d M Y') : '—' }}</dd></div>
                 <div><dt class="text-slate-400">Contact</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->contact)->full_name ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Lead Source</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->lead_source ?: '—' }}</dd></div>
-                <div><dt class="text-slate-400">Vendor</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->vendor ?: '—' }}</dd></div>
             </dl>
 
             @if ($opportunity->description)
@@ -73,30 +100,52 @@
             </div>
             @if ($products->count())
                 <div class="mt-3 overflow-x-auto">
-                    <table class="crm-table">
+                    <table class="crm-table min-w-[960px]">
                         <thead>
                             <tr>
+                                <th>Kategori</th>
+                                <th>Jenis</th>
                                 <th>Item</th>
                                 <th class="text-right">Qty</th>
-                                <th class="text-right">Sell Price (Incl)</th>
-                                <th class="text-right">Cost (Include)</th>
+                                <th class="text-right">Jual Excl</th>
+                                <th class="text-right">Jual Incl</th>
+                                <th class="text-right">Beli Excl</th>
+                                <th class="text-right">Beli Incl</th>
+                                <th class="text-right">PPH 2%</th>
+                                <th class="text-right">Margin</th>
+                                <th class="text-right">%</th>
+                                <th>Vendor</th>
                                 <th class="text-right">Subtotal</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach ($products as $p)
                                 <tr>
+                                    <td class="text-slate-600">{{ $p['tax_category'] === 'wapu' ? 'Wapu' : 'Non Wapu' }}</td>
+                                    <td class="text-slate-600">{{ ucfirst($p['item_kind']) }}</td>
                                     <td class="text-slate-700">{{ $p['name'] }}</td>
                                     <td class="text-right text-slate-600">{{ rtrim(rtrim(number_format($p['quantity'], 2, ',', '.'), '0'), ',') }}</td>
-                                    <td class="text-right text-slate-600">{{ money($p['price'], $opportunity->amount_currency ?: 'IDR') }}</td>
-                                    <td class="text-right text-slate-400">{{ money($p['cost'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">{{ money($p['sell_exclude'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">{{ money($p['sell_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-400">{{ money($p['cost_exclude'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-400">{{ money($p['cost_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">
+                                        @if ($p['pph_applicable'] ?? true)
+                                            {{ money($p['pph'], $opportunity->amount_currency ?: 'IDR') }}
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
+                                    <td class="text-right font-medium text-slate-700">{{ money($p['margin'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-500">{{ $p['margin_percent'] !== null ? number_format($p['margin_percent'], 2, ',', '.') . '%' : '—' }}</td>
+                                    <td class="text-slate-600">{{ $p['vendor'] ?: '—' }}</td>
                                     <td class="text-right font-medium text-slate-700">{{ money($p['subtotal'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
                         <tfoot>
                             <tr class="bg-slate-50">
-                                <td class="font-semibold text-slate-700" colspan="4">Total</td>
+                                <td class="font-semibold text-slate-700" colspan="12">Total</td>
                                 <td class="text-right font-bold text-slate-900">{{ money($products->sum('subtotal'), $opportunity->amount_currency ?: 'IDR') }}</td>
                             </tr>
                         </tfoot>

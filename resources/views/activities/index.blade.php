@@ -33,7 +33,7 @@
             @foreach ($activities as $activity)
                 <li class="flex items-center gap-4 px-5 py-4 transition hover:bg-slate-50">
                     <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg {{ $activity->isOverdue() ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600' }}">
-                        <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky'][$activity->type] ?? 'bi-check2-square' }}"></i>
+                        <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky','event_training'=>'bi-calendar-event'][$activity->type] ?? 'bi-check2-square' }}"></i>
                     </span>
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">

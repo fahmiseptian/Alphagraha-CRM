@@ -21,9 +21,9 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
-        $leaderboardPeriod = $request->get('leaderboard_period', 'alltime');
+        $leaderboardPeriod = $request->get('leaderboard_period', 'year');
         if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year'], true)) {
-            $leaderboardPeriod = 'alltime';
+            $leaderboardPeriod = 'year';
         }
 
         $salesLeaderboard = $this->buildSalesLeaderboard($leaderboardPeriod);

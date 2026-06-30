@@ -82,7 +82,7 @@
             @forelse ($activities as $activity)
                 <div class="flex gap-3 border-b border-slate-50 px-5 py-3 last:border-0">
                     <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                        <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky'][$activity->type] ?? 'bi-dot' }}"></i>
+                        <i class="bi {{ ['call'=>'bi-telephone','meeting'=>'bi-people','email'=>'bi-envelope','task'=>'bi-check2-square','followup'=>'bi-arrow-repeat','note'=>'bi-sticky','event_training'=>'bi-calendar-event'][$activity->type] ?? 'bi-dot' }}"></i>
                     </span>
                     <div class="flex-1">
                         <div class="flex items-center justify-between">

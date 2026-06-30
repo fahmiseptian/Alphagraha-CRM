@@ -8,6 +8,7 @@ use App\Models\Espo\Contact;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
 use App\Models\Espo\Team;
+use App\Support\OpportunityProductPricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -49,6 +50,7 @@ class OpportunityController extends Controller
         return view('opportunities.index', [
             'grouped' => $grouped,
             'kanbanStages' => $kanbanStages,
+            'duplicateMap' => Opportunity::duplicateMap($kanbanOpportunities),
             'summary' => $this->buildOpportunitySummary($allOpportunities, $kanbanStages),
             'salesUsers' => $this->isAdmin()
                 ? EspoUser::query()->activeRegular()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
@@ -64,8 +66,9 @@ class OpportunityController extends Controller
         $mediaDocuments = $opportunity->getMedia('documents');
         $nextStage = $opportunity->nextStage();
         $closingStages = $opportunity->closingStageOptions();
+        $duplicates = $opportunity->potentialDuplicates();
 
-        return view('opportunities.show', compact('opportunity', 'mediaDocuments', 'nextStage', 'closingStages'));
+        return view('opportunities.show', compact('opportunity', 'mediaDocuments', 'nextStage', 'closingStages', 'duplicates'));
     }
 
     public function create(Request $request)
@@ -145,7 +148,25 @@ class OpportunityController extends Controller
             $opportunity->save();
         }
 
-        return back()->with('success', 'Stage moved to '.$data['stage'].'.');
+        return redirect()->route('opportunities.index')
+            ->with('success', 'Stage dipindahkan ke '.$data['stage'].'.');
+    }
+
+    public function destroy(Opportunity $opportunity)
+    {
+        $this->authorizeAccess($opportunity);
+
+        if ($opportunity->quotation()->exists()) {
+            return back()->with('error', 'Deal tidak bisa dihapus karena masih terhubung ke penawaran.');
+        }
+
+        $opportunity->deleted = 1;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        return redirect()->route('opportunities.index')
+            ->with('success', 'Deal duplikat berhasil dihapus.');
     }
 
     protected function validateData(Request $request): array
@@ -163,15 +184,17 @@ class OpportunityController extends Controller
             'contact_id' => ['nullable', 'string', Rule::exists('contact', 'id')->where('deleted', 0)],
             'lead_source' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            'vendor' => ['nullable', 'string', 'max:255'],
             'assigned_user_id' => ['nullable', 'string', Rule::exists('user', 'id')->where('deleted', 0)],
             'team_ids' => ['nullable', 'array'],
             'team_ids.*' => ['string', Rule::exists('team', 'id')->where('deleted', 0)],
             'products' => ['nullable', 'array'],
             'products.*.name' => ['nullable', 'string', 'max:255'],
             'products.*.quantity' => ['nullable', 'numeric', 'min:0'],
-            'products.*.price' => ['nullable', 'numeric', 'min:0'],
-            'products.*.cost' => ['nullable', 'numeric', 'min:0'],
+            'products.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.vendor' => ['nullable', 'string', 'max:255'],
+            'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
+            'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
         ]);
 
         if (! empty($data['contact_id']) && ! empty($data['account_id'])) {
@@ -211,7 +234,6 @@ class OpportunityController extends Controller
             'contact_id' => ($data['contact_id'] ?? null) ?: null,
             'lead_source' => $data['lead_source'] ?? null,
             'description' => $data['description'] ?? null,
-            'vendor' => $data['vendor'] ?? null,
         ]);
 
         if ($this->isAdmin()) {
@@ -223,12 +245,26 @@ class OpportunityController extends Controller
         if ($request->has('products')) {
             $rows = collect($data['products'] ?? [])
                 ->filter(fn ($p) => filled($p['name'] ?? null))
+                ->map(fn ($p) => OpportunityProductPricing::enrichRow([
+                    'name' => $p['name'] ?? '',
+                    'quantity' => $p['quantity'] ?? 1,
+                    'vendor' => $p['vendor'] ?? '',
+                    'tax_category' => $p['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
+                    'item_kind' => $p['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                    'sell_exclude' => $p['sell_exclude'] ?? 0,
+                    'cost_exclude' => $p['cost_exclude'] ?? 0,
+                ]))
                 ->values();
 
             $opportunity->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
             $opportunity->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
             $opportunity->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
             $opportunity->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
+            $opportunity->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
+            $opportunity->crm_tax_category = $rows->pluck('tax_category')->all();
+            $opportunity->crm_item_kind = $rows->pluck('item_kind')->all();
+            $opportunity->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
+            $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
 
             if ($rows->isNotEmpty()) {
                 $opportunity->amount = $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0));
