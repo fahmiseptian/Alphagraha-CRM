@@ -35,6 +35,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/customers/create', [CustomerController::class, 'create'])->name('customers.create');
     Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
     Route::get('/customers/{id}', [CustomerController::class, 'show'])->name('customers.show');
+    Route::get('/customers/{id}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
+    Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
     Route::post('/customers/{account}/contacts', [CustomerContactController::class, 'store'])->name('customers.contacts.store');
 
     // Contact persons (admin)
@@ -42,6 +44,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
         Route::get('/contacts/create', [ContactController::class, 'create'])->name('contacts.create');
         Route::post('/contacts', [ContactController::class, 'store'])->name('contacts.store');
+        Route::get('/contacts/{id}/edit', [ContactController::class, 'edit'])->name('contacts.edit');
+        Route::put('/contacts/{id}', [ContactController::class, 'update'])->name('contacts.update');
     });
 
     // Lead
@@ -49,7 +53,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/leads/create', [LeadController::class, 'create'])->name('leads.create');
     Route::post('/leads', [LeadController::class, 'store'])->name('leads.store');
     Route::get('/leads/{id}', [LeadController::class, 'show'])->name('leads.show');
+    Route::get('/leads/{id}/edit', [LeadController::class, 'edit'])->name('leads.edit');
     Route::put('/leads/{id}', [LeadController::class, 'update'])->name('leads.update');
+    Route::patch('/leads/{id}/quick', [LeadController::class, 'quickUpdate'])->name('leads.quick-update');
 
     // Opportunity / Deal (EspoCRM, dapat diedit)
     Route::get('/opportunities', [OpportunityController::class, 'index'])->name('opportunities.index');

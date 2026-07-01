@@ -88,7 +88,10 @@
                                 <span class="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-slate-100 px-2 text-xs font-medium text-slate-600">{{ $account->opportunities_count }}</span>
                             </td>
                             <td class="text-right">
-                                <a href="{{ route('customers.show', $account->id) }}" class="crm-icon-btn crm-icon-btn--brand"><i class="bi bi-arrow-right"></i></a>
+                                <div class="flex items-center justify-end gap-1">
+                                    <a href="{{ route('customers.edit', $account->id) }}" class="crm-icon-btn" title="Edit"><i class="bi bi-pencil"></i></a>
+                                    <a href="{{ route('customers.show', $account->id) }}" class="crm-icon-btn crm-icon-btn--brand"><i class="bi bi-arrow-right"></i></a>
+                                </div>
                             </td>
                         </tr>
                     @endforeach

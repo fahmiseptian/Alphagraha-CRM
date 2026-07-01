@@ -56,12 +56,12 @@
         </div>
         <div>
             <label class="crm-label">Email</label>
-            <input type="email" name="email" value="{{ old('email') }}"
+            <input type="email" name="email" value="{{ old('email', $lead->email ?? '') }}"
                    class="crm-field">
         </div>
         <div>
             <label class="crm-label">Phone</label>
-            <input type="text" name="phone" value="{{ old('phone') }}"
+            <input type="text" name="phone" value="{{ old('phone', $lead->phone ?? '') }}"
                    class="crm-field">
         </div>
         <div class="sm:col-span-2">

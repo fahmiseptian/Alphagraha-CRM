@@ -26,19 +26,19 @@
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
                 <label class="crm-label">First Name <span class="text-red-500">*</span></label>
-                <input type="text" name="first_name" value="{{ old('first_name') }}" required class="crm-field">
+                <input type="text" name="first_name" value="{{ old('first_name', $contact->first_name ?? '') }}" required class="crm-field">
             </div>
             <div>
                 <label class="crm-label">Last Name</label>
-                <input type="text" name="last_name" value="{{ old('last_name') }}" class="crm-field">
+                <input type="text" name="last_name" value="{{ old('last_name', $contact->last_name ?? '') }}" class="crm-field">
             </div>
             <div>
                 <label class="crm-label">Email</label>
-                <input type="email" name="email" value="{{ old('email') }}" class="crm-field">
+                <input type="email" name="email" value="{{ old('email', $contact->email ?? '') }}" class="crm-field">
             </div>
             <div>
                 <label class="crm-label">Phone</label>
-                <input type="text" name="phone" value="{{ old('phone') }}" class="crm-field">
+                <input type="text" name="phone" value="{{ old('phone', $contact->phone ?? '') }}" class="crm-field">
             </div>
         </div>
 

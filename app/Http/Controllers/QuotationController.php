@@ -80,7 +80,6 @@ class QuotationController extends Controller
 
                 $account = $opportunity->account;
                 $quotation->opportunity_id = $opportunity->id;
-                $quotation->tax_percent = 0; // nilai opportunity umumnya sudah final
                 $quotation->currency = $opportunity->amount_currency ?: $quotation->currency;
                 $quotation->customer_name = $account?->name ?: ($opportunity->company ?: $opportunity->name);
                 $quotation->company_name = $opportunity->company ?: $account?->name;
@@ -145,7 +144,6 @@ class QuotationController extends Controller
 
         $quotation = DB::transaction(function () use ($data) {
             $quotation = new Quotation($data);
-            $quotation->number = $this->service->generateNumber();
             $quotation->created_by = auth()->id();
             $quotation->revision = 1;
             $quotation->save();
@@ -288,33 +286,43 @@ class QuotationController extends Controller
 
     protected function validateData(Request $request, ?Quotation $quotation = null): array
     {
+        $isCreate = $quotation === null;
+
         $data = $request->validate([
+            'number' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('crm_quotations', 'number')->ignore($quotation?->id),
+            ],
             'account_id' => ['nullable', 'string'],
             'opportunity_id' => ['nullable', 'string', Rule::unique('crm_quotations', 'opportunity_id')->ignore($quotation?->id)],
             'customer_name' => ['required', 'string', 'max:255'],
             'company_name' => ['nullable', 'string', 'max:255'],
-            'customer_email' => ['nullable', 'email', 'max:255'],
-            'customer_phone' => ['nullable', 'string', 'max:50'],
-            'customer_address' => ['nullable', 'string'],
+            'customer_email' => [$isCreate ? 'required' : 'nullable', 'email', 'max:255'],
+            'customer_phone' => [$isCreate ? 'required' : 'nullable', 'string', 'max:50'],
+            'customer_address' => [$isCreate ? 'required' : 'nullable', 'string'],
             'quotation_date' => ['required', 'date'],
-            'valid_until' => ['nullable', 'date'],
+            'valid_until' => [$isCreate ? 'required' : 'nullable', 'date', 'after_or_equal:quotation_date'],
             'currency' => ['required', 'string', 'max:6'],
             'discount' => ['nullable', 'numeric', 'min:0'],
-            'tax_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'template_id' => ['nullable', 'exists:crm_quotation_templates,id'],
             'notes' => ['nullable', 'string'],
-            'terms' => ['nullable', 'string'],
+            'terms' => [$isCreate ? 'required' : 'nullable', 'string'],
             'status' => ['required', Rule::in(array_keys(Quotation::STATUSES))],
             'items' => ['required', 'array', 'min:1'],
             'items.*.name' => ['required', 'string', 'max:255'],
             'items.*.description' => ['nullable', 'string'],
-            'items.*.quantity' => ['required', 'numeric', 'min:0'],
+            'items.*.quantity' => ['required', 'numeric', $isCreate ? 'min:0.01' : 'min:0'],
             'items.*.unit' => ['nullable', 'string', 'max:50'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+        ], [
+            'number.unique' => 'Nomor quotation sudah digunakan. Silakan gunakan nomor lain.',
         ]);
 
         $data['discount'] = $data['discount'] ?? 0;
-        $data['tax_percent'] = $data['tax_percent'] ?? 0;
+        $data['tax_percent'] = 11;
+        $data['number'] = trim($data['number']);
 
         return $data;
     }

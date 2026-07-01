@@ -92,6 +92,31 @@ class CustomerController extends Controller
             ->with('success', 'Customer created successfully.');
     }
 
+    public function edit(string $id)
+    {
+        $account = $this->scopeAssigned(Account::query())
+            ->with(['emailAddresses', 'phoneNumbers'])
+            ->findOrFail($id);
+
+        return view('customers.edit', $this->formData() + compact('account'));
+    }
+
+    public function update(Request $request, string $id)
+    {
+        $account = $this->scopeAssigned(Account::query())->findOrFail($id);
+        $data = $this->validateData($request);
+
+        $this->applyValidatedData($account, $data);
+        $account->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $account->save();
+
+        $this->writer->syncPrimaryEmail($account->id, 'Account', $data['email'] ?? null);
+        $this->writer->syncPrimaryPhone($account->id, 'Account', $data['phone'] ?? null);
+
+        return redirect()->route('customers.show', $account->id)
+            ->with('success', 'Customer updated successfully.');
+    }
+
     public function show(string $id)
     {
         $account = $this->scopeAssigned(Account::query())

@@ -30,6 +30,9 @@
             </dl>
 
             <div class="mt-5 flex flex-wrap gap-2">
+                <a href="{{ route('customers.edit', $account->id) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-center text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <i class="bi bi-pencil"></i> Edit
+                </a>
                 <a href="{{ route('opportunities.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-brand-700">
                     <i class="bi bi-briefcase"></i> Opportunity
                 </a>
@@ -48,7 +51,7 @@
                 @foreach ($contacts as $contact)
                     <li class="flex items-start gap-3">
                         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ initials($contact->full_name) }}</span>
-                        <div>
+                        <div class="min-w-0 flex-1">
                             <p class="text-sm font-medium text-slate-800">{{ $contact->full_name }}</p>
                             @if (auth()->user()->isAdmin())
                                 <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
@@ -59,6 +62,9 @@
                                 <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
                             @endif
                         </div>
+                        @if (auth()->user()->isAdmin())
+                            <a href="{{ route('contacts.edit', $contact->id) }}" class="crm-icon-btn shrink-0" title="Edit contact"><i class="bi bi-pencil"></i></a>
+                        @endif
                     </li>
                 @endforeach
             </ul>

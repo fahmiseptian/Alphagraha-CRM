@@ -89,7 +89,9 @@ class LeadController extends Controller
 
     public function show(string $id)
     {
-        $lead = $this->scopeAssigned(Lead::query())->with('assignedUser')->findOrFail($id);
+        $lead = $this->scopeAssigned(Lead::query())
+            ->with(['assignedUser', 'emailAddresses', 'phoneNumbers'])
+            ->findOrFail($id);
 
         $activities = $lead->activities()->with('assignee')->latest()->get();
         $salesUsers = EspoUser::query()->activeRegular()->orderBy('name')->get();
@@ -102,7 +104,32 @@ class LeadController extends Controller
         ]);
     }
 
+    public function edit(string $id)
+    {
+        $lead = $this->scopeAssigned(Lead::query())
+            ->with(['emailAddresses', 'phoneNumbers'])
+            ->findOrFail($id);
+
+        return view('leads.edit', $this->formData() + compact('lead'));
+    }
+
     public function update(Request $request, string $id)
+    {
+        $lead = $this->scopeAssigned(Lead::query())->findOrFail($id);
+        $data = $this->validateData($request);
+
+        $this->applyValidatedData($lead, $data);
+        $lead->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $lead->save();
+
+        $this->writer->syncPrimaryEmail($lead->id, 'Lead', $data['email'] ?? null);
+        $this->writer->syncPrimaryPhone($lead->id, 'Lead', $data['phone'] ?? null);
+
+        return redirect()->route('leads.show', $lead->id)
+            ->with('success', 'Lead updated successfully.');
+    }
+
+    public function quickUpdate(Request $request, string $id)
     {
         $lead = $this->scopeAssigned(Lead::query())->findOrFail($id);
 

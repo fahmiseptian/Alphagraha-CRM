@@ -61,11 +61,14 @@
                                 @endif
                             </td>
                             <td class="text-right">
-                                @if ($contact->account)
-                                    <a href="{{ route('customers.show', $contact->account->id) }}" class="crm-icon-btn crm-icon-btn--brand" title="View customer">
-                                        <i class="bi bi-arrow-right"></i>
-                                    </a>
-                                @endif
+                                <div class="flex items-center justify-end gap-1">
+                                    <a href="{{ route('contacts.edit', $contact->id) }}" class="crm-icon-btn" title="Edit"><i class="bi bi-pencil"></i></a>
+                                    @if ($contact->account)
+                                        <a href="{{ route('customers.show', $contact->account->id) }}" class="crm-icon-btn crm-icon-btn--brand" title="View customer">
+                                            <i class="bi bi-arrow-right"></i>
+                                        </a>
+                                    @endif
+                                </div>
                             </td>
                         </tr>
                     @endforeach

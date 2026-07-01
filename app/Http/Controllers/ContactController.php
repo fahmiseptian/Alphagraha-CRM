@@ -73,4 +73,40 @@ class ContactController extends Controller
         return redirect()->route('contacts.index')
             ->with('success', 'Contact added successfully.');
     }
+
+    public function edit(string $id)
+    {
+        $contact = Contact::query()
+            ->with(['account', 'emailAddresses', 'phoneNumbers'])
+            ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
+            ->findOrFail($id);
+
+        return view('contacts.edit', [
+            'contact' => $contact,
+            'accounts' => $this->scopeAssigned(Account::query())->orderBy('name')->get(['id', 'name']),
+            'selectedAccountId' => $contact->account_id,
+        ]);
+    }
+
+    public function update(Request $request, string $id)
+    {
+        $contact = Contact::query()
+            ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
+            ->findOrFail($id);
+
+        $data = $request->validate([
+            'account_id' => ['required', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
+            'first_name' => ['required', 'string', 'max:100'],
+            'last_name' => ['nullable', 'string', 'max:100'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        $account = $this->scopeAssigned(Account::query())->findOrFail($data['account_id']);
+
+        $this->contacts->update($contact, $account, $data);
+
+        return redirect()->route('contacts.index')
+            ->with('success', 'Contact updated successfully.');
+    }
 }

@@ -2,8 +2,9 @@
 @section('title', 'Lead Detail')
 
 @section('content')
-<div class="mb-6">
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
     <a href="{{ route('leads.index') }}" class="crm-back"><i class="bi bi-arrow-left"></i> Back to list</a>
+    <x-btn href="{{ route('leads.edit', $lead->id) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
 </div>
 
 <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -27,8 +28,8 @@
 
         {{-- Update status & assignment --}}
         <x-card title="Update Lead">
-            <form method="POST" action="{{ route('leads.update', $lead->id) }}" class="space-y-4">
-                @csrf @method('PUT')
+            <form method="POST" action="{{ route('leads.quick-update', $lead->id) }}" class="space-y-4">
+                @csrf @method('PATCH')
                 <div>
                     <label class="mb-1.5 block text-sm font-medium text-slate-700">Status</label>
                     <select name="status" class="select2 w-full">

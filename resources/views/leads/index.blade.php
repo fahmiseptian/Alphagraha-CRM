@@ -59,7 +59,10 @@
                             <td class="text-slate-600">{{ $lead->source ?: '—' }}</td>
                             <td class="text-slate-600">{{ optional($lead->assignedUser)->display_name ?: '—' }}</td>
                             <td class="text-right">
-                                <a href="{{ route('leads.show', $lead->id) }}" class="crm-icon-btn crm-icon-btn--brand"><i class="bi bi-arrow-right"></i></a>
+                                <div class="flex items-center justify-end gap-1">
+                                    <a href="{{ route('leads.edit', $lead->id) }}" class="crm-icon-btn" title="Edit"><i class="bi bi-pencil"></i></a>
+                                    <a href="{{ route('leads.show', $lead->id) }}" class="crm-icon-btn crm-icon-btn--brand"><i class="bi bi-arrow-right"></i></a>
+                                </div>
                             </td>
                         </tr>
                     @endforeach

@@ -36,4 +36,22 @@ class ContactService
 
         return $contact;
     }
+
+    public function update(Contact $contact, Account $account, array $data): Contact
+    {
+        $firstName = trim($data['first_name']);
+        $lastName = trim($data['last_name'] ?? '');
+
+        $contact->account_id = $account->id;
+        $contact->first_name = $firstName;
+        $contact->last_name = $lastName ?: null;
+        $contact->name = trim($firstName.' '.$lastName) ?: $firstName;
+        $contact->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $contact->save();
+
+        $this->writer->syncPrimaryEmail($contact->id, 'Contact', $data['email'] ?? null);
+        $this->writer->syncPrimaryPhone($contact->id, 'Contact', $data['phone'] ?? null);
+
+        return $contact;
+    }
 }

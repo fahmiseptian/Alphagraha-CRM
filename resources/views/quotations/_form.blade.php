@@ -1,4 +1,5 @@
 @php
+    $isCreate = ! $quotation->exists;
     $initialItems = old('items', $quotation->exists
         ? $quotation->items->map(fn ($i) => [
             'name' => $i->name, 'description' => $i->description,
@@ -15,7 +16,7 @@
     $config = [
         'items' => $initialItems,
         'discount' => (float) old('discount', $quotation->discount ?? 0),
-        'taxPercent' => (float) old('tax_percent', $quotation->tax_percent ?? 0),
+        'taxPercent' => 11,
         'currency' => old('currency', $quotation->currency ?? 'IDR'),
         'accounts' => $accountMap,
         'accountId' => (string) old('account_id', $quotation->account_id),
@@ -65,19 +66,22 @@
                                    class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                         </div>
                         <div>
-                            <label class="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+                            <label class="mb-1.5 block text-sm font-medium text-slate-700">Email @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
                             <input type="email" name="customer_email" value="{{ old('customer_email', $quotation->customer_email) }}"
+                                   @if ($isCreate) required @endif
                                    class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                         </div>
                         <div>
-                            <label class="mb-1.5 block text-sm font-medium text-slate-700">Phone</label>
+                            <label class="mb-1.5 block text-sm font-medium text-slate-700">Phone @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
                             <input type="text" name="customer_phone" value="{{ old('customer_phone', $quotation->customer_phone) }}"
+                                   @if ($isCreate) required @endif
                                    class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                         </div>
                     </div>
                     <div>
-                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Address</label>
+                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Address @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
                         <textarea name="customer_address" x-model="customerAddress" rows="2"
+                                  @if ($isCreate) required @endif
                                   class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"></textarea>
                     </div>
                 </div>
@@ -85,7 +89,7 @@
 
             {{-- Item penawaran --}}
             <x-card>
-                <x-slot:title>Quotation Items</x-slot:title>
+                <x-slot:title>Quotation Items @if ($isCreate)<span class="text-red-500">*</span>@endif</x-slot:title>
                 <x-slot:action>
                     <button type="button" @click="addItem()" class="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-100">
                         <i class="bi bi-plus-lg"></i> Add Item
@@ -97,11 +101,12 @@
                         <div class="rounded-lg border border-slate-200 p-3">
                             <div class="grid grid-cols-12 gap-2">
                                 <div class="col-span-12 sm:col-span-5">
-                                    <input type="text" :name="`items[${index}][name]`" x-model="item.name" placeholder="Product/service name" required
+                                    <input type="text" :name="`items[${index}][name]`" x-model="item.name" placeholder="Product/service name" @if ($isCreate) required @endif
                                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
                                 <div class="col-span-4 sm:col-span-2">
                                     <input type="number" step="0.01" min="0" :name="`items[${index}][quantity]`" x-model.number="item.quantity" placeholder="Qty"
+                                           @if ($isCreate) required @endif
                                            class="w-full rounded-lg border border-slate-300 py-2 px-2 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
                                 <div class="col-span-3 sm:col-span-1">
@@ -110,6 +115,7 @@
                                 </div>
                                 <div class="col-span-5 sm:col-span-3">
                                     <input type="number" step="0.01" min="0" :name="`items[${index}][unit_price]`" x-model.number="item.unit_price" placeholder="Unit price"
+                                           @if ($isCreate) required @endif
                                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
                                 <div class="col-span-12 flex items-center justify-between sm:col-span-1 sm:justify-center">
@@ -137,8 +143,8 @@
                         <textarea name="notes" rows="2" class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('notes', $quotation->notes) }}</textarea>
                     </div>
                     <div>
-                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Terms & Conditions</label>
-                        <textarea name="terms" rows="3" class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Prices exclude VAT where applicable.\n2. This quotation is valid for the period stated above.") }}</textarea>
+                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Terms & Conditions @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
+                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Harga sudah termasuk PPN 11%\n2. Harga dan ketersediaan barang dapat berubah sewaktu-waktu tanpa pemberitahuan terlebih dahulu.") }}</textarea>
                     </div>
                 </div>
             </x-card>
@@ -149,13 +155,25 @@
             <x-card title="Quotation Settings">
                 <div class="space-y-4">
                     <div>
+                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Quotation Number <span class="text-red-500">*</span></label>
+                        <input type="text" name="number" value="{{ old('number', $quotation->number) }}" required
+                               placeholder="e.g. QUO/2026/07/0001"
+                               class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('number') border-red-400 @enderror">
+                        @error('number')
+                            <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                        @else
+                            <p class="mt-1 text-xs text-slate-400">Enter the quotation number manually. The number must be unique and not duplicate any existing quotation.</p>
+                        @enderror
+                    </div>
+                    <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Date <span class="text-red-500">*</span></label>
                         <input type="date" name="quotation_date" value="{{ old('quotation_date', optional($quotation->quotation_date)->format('Y-m-d') ?? now()->format('Y-m-d')) }}" required
                                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                     </div>
                     <div>
-                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Valid Until</label>
+                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Valid Until @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
                         <input type="date" name="valid_until" value="{{ old('valid_until', optional($quotation->valid_until)->format('Y-m-d')) }}"
+                               @if ($isCreate) required @endif
                                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                     </div>
                     <div class="grid grid-cols-2 gap-3">
@@ -201,9 +219,10 @@
                         <dd><input type="number" step="0.01" min="0" name="discount" x-model.number="discount" class="w-28 rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"></dd>
                     </div>
                     <div class="flex items-center justify-between">
-                        <dt class="text-slate-500">Tax (%)</dt>
-                        <dd><input type="number" step="0.01" min="0" max="100" name="tax_percent" x-model.number="taxPercent" class="w-28 rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"></dd>
+                        <dt class="text-slate-500">Tax (PPN)</dt>
+                        <dd class="font-medium text-slate-700">11%</dd>
                     </div>
+                    <input type="hidden" name="tax_percent" value="11">
                     <div class="flex justify-between text-slate-500">
                         <dt>Tax Amount</dt>
                         <dd x-text="formatMoney(taxAmount)"></dd>
