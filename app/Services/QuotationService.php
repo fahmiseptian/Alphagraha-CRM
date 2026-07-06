@@ -41,6 +41,7 @@ class QuotationService
         $creator = $quotation->creator;
         $contact = $quotation->opportunity?->contact;
         $company = $this->companyConfigForTemplate($template);
+        $jobPosition = trim((string) (optional($creator?->profile)->job_position ?? ''));
 
         $placeDate = optional($quotation->quotation_date)->translatedFormat('d F Y') ?: now()->translatedFormat('d F Y');
 
@@ -66,7 +67,8 @@ class QuotationService
             'notes' => nl2br(e((string) $quotation->notes)),
             'terms' => nl2br(e((string) $quotation->terms)),
             'sales_name' => (string) optional($creator)->display_name,
-            'sales_title' => (string) (optional($creator)->title ?: 'Account Manager'),
+            'sales_job_position' => $jobPosition,
+            'sales_title' => $jobPosition !== '' ? $jobPosition : (string) (optional($creator)->title ?: 'Account Manager'),
             'sales_signature' => $this->renderSalesSignature($creator),
             'revision' => (string) $quotation->revision,
             'items_table' => $this->renderItemsTable($quotation),
@@ -285,7 +287,7 @@ class QuotationService
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
                 .'<td style="'.$this->cellStyle().'">'.e($item->name)
-                .($item->description ? '<br><small style="color:#666;">'.nl2br(e($item->description)).'</small>' : '')
+                .($item->description ? '<br><small ">'.nl2br(e($item->description)).'</small>' : '')
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -326,8 +328,8 @@ class QuotationService
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
-                .'<td style="'.$this->cellStyle().'">'.e($item->name)
-                .($item->description ? '<br><small style="color:#666;">'.nl2br(e($item->description)).'</small>' : '')
+                .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
+                .($item->description ? '<span style="display:block; height:4px;"></span><small">'.nl2br(e($item->description)).'</small>' : '')
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -388,10 +390,10 @@ class QuotationService
 
     protected function renderItemsTableIndo(Quotation $quotation): string
     {
-        return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0;">'
+        return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0; line-height: 1;">'
             .'<thead><tr>'
             .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
-            .'<th style="'.$this->cellStyle('left', true).'">Spesifikasi</th>'
+            .'<th style="'.$this->cellStyle('center', true).'">Spesifikasi</th>'
             .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
             .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga Unit IDR</th>'
             .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga IDR</th>'

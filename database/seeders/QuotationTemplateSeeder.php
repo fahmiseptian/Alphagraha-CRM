@@ -104,7 +104,7 @@ class QuotationTemplateSeeder extends Seeder
         <div style="font-weight:700; margin-top:4px;">{{ company_legal_name }}</div>
         <div style="height:78px; margin:8px 0;">{{ sales_signature }}</div>
         <div style="font-weight:700; text-decoration:underline; display:inline-block;">{{ sales_name }}</div>
-        <div style="color:#4b5563;">{{ sales_title }}</div>
+        <div style="color:#4b5563;">{{ sales_job_position }}</div>
     </div>
 </div>
 HTML;

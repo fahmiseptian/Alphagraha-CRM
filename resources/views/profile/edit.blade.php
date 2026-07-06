@@ -66,6 +66,13 @@
                     <input type="email" value="{{ $user->email }}" disabled
                            class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-500">
                 </div>
+                <div class="sm:col-span-2">
+                    <label class="mb-1.5 block text-sm font-medium text-slate-700">Job Position</label>
+                    <input type="text" name="job_position" value="{{ old('job_position', $user->profile?->job_position) }}"
+                           placeholder="e.g. Account Manager, Sales Executive"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <p class="mt-1 text-xs text-slate-400">Jabatan ini muncul di penawaran (PDF) sebagai posisi sales yang membuat quotation.</p>
+                </div>
             </div>
             <p class="-mt-2 text-xs text-slate-400"><i class="bi bi-info-circle"></i> Name & email are managed in EspoCRM.</p>
 

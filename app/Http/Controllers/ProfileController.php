@@ -24,20 +24,30 @@ class ProfileController extends Controller
     {
         $user = $request->user();
 
-        $request->validate([
-            'current_password' => ['required'],
-            'password' => ['required', 'confirmed', Password::min(6)],
+        $validated = $request->validate([
+            'job_position' => ['nullable', 'string', 'max:255'],
+            'current_password' => ['nullable', 'required_with:password'],
+            'password' => ['nullable', 'confirmed', Password::min(6)],
         ]);
 
+        UserProfile::query()->updateOrCreate(
+            ['user_id' => $user->id],
+            ['job_position' => $validated['job_position'] ?? null]
+        );
+
+        if (! $request->filled('password')) {
+            return back()->with('success', 'Job position berhasil disimpan.');
+        }
+
         if (! EspoPassword::verify($request->input('current_password'), $user->password)) {
-            return back()->withErrors(['current_password' => 'Current password is incorrect.']);
+            return back()->withErrors(['current_password' => 'Current password is incorrect.'])->withInput();
         }
 
         DB::table('user')->where('id', $user->id)->update([
             'password' => EspoPassword::hash($request->input('password')),
         ]);
 
-        return back()->with('success', 'Password updated successfully.');
+        return back()->with('success', 'Profil dan password berhasil diperbarui.');
     }
 
     public function uploadSignature(Request $request)

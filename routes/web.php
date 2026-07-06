@@ -12,6 +12,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\OpportunityController;
 use App\Http\Controllers\OpportunityDocumentController;
+use App\Http\Controllers\OpportunityNoteController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuotationController;
 use Illuminate\Support\Facades\Artisan;
@@ -68,6 +69,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/opportunities/{opportunity}', [OpportunityController::class, 'destroy'])->name('opportunities.destroy');
     Route::post('/opportunities/{opportunity}/documents', [OpportunityDocumentController::class, 'store'])->name('opportunities.documents.store');
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
+    Route::post('/opportunities/{opportunity}/notes', [OpportunityNoteController::class, 'store'])->name('opportunities.notes.store');
+    Route::delete('/opportunities/{opportunity}/notes/{note}', [OpportunityNoteController::class, 'destroy'])->name('opportunities.notes.destroy');
 
     // Aktivitas & Task
     Route::resource('activities', ActivityController::class)->except(['show']);

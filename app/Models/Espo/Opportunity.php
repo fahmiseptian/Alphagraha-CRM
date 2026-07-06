@@ -3,11 +3,13 @@
 namespace App\Models\Espo;
 
 use App\Models\Espo\Concerns\EspoEntity;
+use App\Models\OpportunityNote;
 use App\Models\Quotation;
 use App\Support\OpportunityProductPricing;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Collection;
 use Spatie\MediaLibrary\HasMedia;
@@ -159,6 +161,11 @@ class Opportunity extends Model implements HasMedia
             ->withPivot('deleted')
             ->wherePivot('deleted', 0)
             ->orderByDesc('document.created_at');
+    }
+
+    public function notes(): HasMany
+    {
+        return $this->hasMany(OpportunityNote::class, 'opportunity_id')->latest();
     }
 
     public function registerMediaCollections(): void

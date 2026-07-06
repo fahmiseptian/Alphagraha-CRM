@@ -320,6 +320,56 @@
                 </div>
             @endif
         </x-card>
+
+        {{-- Notes (append-only, seperti dokumen) --}}
+        <x-card :padding="false" x-data="{ adding: false }">
+            <div class="flex items-center justify-between px-5 pt-4">
+                <h3 class="text-sm font-semibold text-slate-800">Notes</h3>
+                <button type="button" @click="adding = !adding" class="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-100" title="Add note">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+            </div>
+
+            <div x-show="adding" x-cloak class="border-b border-slate-100 px-5 py-3">
+                <form method="POST" action="{{ route('opportunities.notes.store', $opportunity) }}" class="space-y-3">
+                    @csrf
+                    <textarea name="body" rows="3" required placeholder="Tulis catatan..."
+                              class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('body') }}</textarea>
+                    <div class="flex items-center gap-2">
+                        <x-btn type="submit" variant="primary" icon="bi-plus-lg">Add Note</x-btn>
+                        <button type="button" @click="adding = false" class="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                    </div>
+                </form>
+            </div>
+
+            @if ($opportunity->notes->count())
+                <ul class="mt-2 divide-y divide-slate-50">
+                    @foreach ($opportunity->notes as $note)
+                        <li class="flex items-start gap-2 px-5 py-3 hover:bg-slate-50">
+                            <i class="bi bi-sticky mt-0.5 shrink-0 text-slate-400"></i>
+                            <div class="min-w-0 flex-1">
+                                <p class="whitespace-pre-line text-sm text-slate-700">{{ $note->body }}</p>
+                                <p class="mt-1 text-xs text-slate-400">
+                                    {{ optional($note->creator)->display_name ?: '—' }}
+                                    &middot;
+                                    {{ $note->created_at?->translatedFormat('d M Y H:i') }}
+                                </p>
+                            </div>
+                            @if (auth()->user()->isAdmin() || $note->created_by === auth()->id())
+                                <form method="POST" action="{{ route('opportunities.notes.destroy', [$opportunity, $note]) }}" onsubmit="return confirm('Delete this note?')" class="shrink-0">
+                                    @csrf @method('DELETE')
+                                    <button class="rounded p-1 text-red-500 hover:bg-red-50" title="Delete"><i class="bi bi-trash text-sm"></i></button>
+                                </form>
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            @else
+                <div class="px-5 py-8 text-center text-sm text-slate-400">
+                    No notes yet. Click <i class="bi bi-plus-lg"></i> to add a note.
+                </div>
+            @endif
+        </x-card>
     </div>
 </div>
 @endsection

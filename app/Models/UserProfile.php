@@ -11,7 +11,7 @@ class UserProfile extends Model
     protected $table = 'crm_user_profiles';
 
     protected $fillable = [
-        'user_id', 'signature_path',
+        'user_id', 'signature_path', 'job_position',
     ];
 
     public function user(): BelongsTo

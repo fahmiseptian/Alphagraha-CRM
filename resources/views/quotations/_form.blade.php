@@ -123,7 +123,7 @@
                                     <button type="button" @click="removeItem(index)" class="rounded-lg p-2 text-red-500 hover:bg-red-50"><i class="bi bi-trash"></i></button>
                                 </div>
                                 <div class="col-span-12">
-                                    <input type="text" :name="`items[${index}][description]`" x-model="item.description" placeholder="Description (optional)"
+                                    <input type="text" :name="`items[${index}][description]`" x-model="item.description" placeholder="Specification (optional)"
                                            class="w-full rounded-lg border border-slate-200 py-1.5 px-3 text-xs text-slate-500 focus:border-brand-500 focus:ring-1 focus:ring-brand-200">
                                 </div>
                             </div>
@@ -157,7 +157,7 @@
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Quotation Number <span class="text-red-500">*</span></label>
                         <input type="text" name="number" value="{{ old('number', $quotation->number) }}" required
-                               placeholder="e.g. QUO/2026/07/0001"
+                               placeholder="e.g. 00001/QO/KA/VI/26"
                                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('number') border-red-400 @enderror">
                         @error('number')
                             <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
