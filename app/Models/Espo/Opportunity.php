@@ -29,6 +29,7 @@ class Opportunity extends Model implements HasMedia
         'close_date', 'probability', 'lead_source', 'description', 'assigned_user_id',
         'contact_id', 'vendor',
         'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
+        'crm_won_margin',
     ];
 
     protected $casts = [
@@ -41,6 +42,7 @@ class Opportunity extends Model implements HasMedia
         'crm_item_kind' => 'array',
         'crm_sell_exclude' => 'array',
         'crm_cost_exclude' => 'array',
+        'crm_won_margin' => 'float',
     ];
 
     public const OPEN_STAGES = ['Prospecting', 'Qualification', 'Proposal', 'Negotiation'];
@@ -223,6 +225,27 @@ class Opportunity extends Model implements HasMedia
             })
             ->filter(fn ($row) => $row['name'] !== '' || $row['sell_exclude'] > 0 || $row['price'] > 0)
             ->values();
+    }
+
+    /**
+     * Total margin semua produk (per baris: margin satuan × qty).
+     */
+    public function totalProductsMargin(): float
+    {
+        return round(
+            $this->products->sum(fn (array $row) => (float) ($row['quantity'] ?? 1) * (float) ($row['margin'] ?? 0)),
+            2
+        );
+    }
+
+    /**
+     * Simpan margin ke deal bila Closed Won; kosongkan jika stage berubah.
+     */
+    public function syncWonMargin(): void
+    {
+        $this->crm_won_margin = $this->stage === self::WON_STAGE
+            ? $this->totalProductsMargin()
+            : null;
     }
 
     public function stageColor(): string

@@ -9,6 +9,7 @@ use App\Models\Espo\EspoUser;
 use App\Models\Espo\Lead;
 use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
+use App\Models\UserProfile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -26,7 +27,16 @@ class DashboardController extends Controller
             $leaderboardPeriod = 'year';
         }
 
-        $salesLeaderboard = $this->buildSalesLeaderboard($leaderboardPeriod);
+        $leaderboardSort = $request->get('leaderboard_sort', 'total');
+        if (! in_array($leaderboardSort, ['total', 'margin', 'percent'], true)) {
+            $leaderboardSort = 'total';
+        }
+
+        if ($user->isSales()) {
+            $leaderboardSort = 'percent';
+        }
+
+        $salesLeaderboard = $this->buildSalesLeaderboard($leaderboardPeriod, $leaderboardSort);
 
         $customersCount = $this->scopeAssigned(Account::query())->count();
         $leadsCount = $this->scopeAssigned(Lead::query())->count();
@@ -36,7 +46,12 @@ class DashboardController extends Controller
             $quotationQuery->where('created_by', $user->id);
         }
         $quotationsCount = (clone $quotationQuery)->count();
-        $quotationsValue = (clone $quotationQuery)->whereIn('status', ['sent', 'accepted'])->sum('total');
+        $activeQuotations = (clone $quotationQuery)
+            ->whereIn('status', ['sent', 'accepted'])
+            ->with('items')
+            ->get();
+        $quotationsValue = $activeQuotations->sum('total');
+        $quotationsMargin = $activeQuotations->sum(fn (Quotation $quotation) => $quotation->totalItemsMargin());
         $acceptedCount = (clone $quotationQuery)->where('status', 'accepted')->count();
 
         // Pipeline opportunity (deal) yang masih terbuka.
@@ -97,20 +112,78 @@ class DashboardController extends Controller
         $showDeadlinePopup = session('show_deadline_popup') && $deadlineAlerts->isNotEmpty();
 
         return view('dashboard', compact(
-            'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue',
+            'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue', 'quotationsMargin',
             'acceptedCount', 'openPipeline', 'wonThisMonth', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
             'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
-            'salesLeaderboard', 'leaderboardPeriod'
+            'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort'
         ));
     }
 
-    protected function buildSalesLeaderboard(string $period): Collection
+    protected function buildSalesLeaderboard(string $period, string $sort = 'total'): Collection
     {
-        $query = Opportunity::query()
+        $wonQuery = Opportunity::query()
             ->where('stage', Opportunity::WON_STAGE)
             ->whereNotNull('assigned_user_id');
 
+        $this->applyLeaderboardPeriodToCloseDate($wonQuery, $period);
+
+        $wonRows = $wonQuery
+            ->selectRaw('assigned_user_id, COUNT(*) as won_count, COALESCE(SUM(amount), 0) as won_total, COALESCE(SUM(crm_won_margin), 0) as won_margin')
+            ->groupBy('assigned_user_id')
+            ->get();
+
+        if ($wonRows->isEmpty()) {
+            return collect();
+        }
+
+        $users = EspoUser::query()
+            ->whereIn('id', $wonRows->pluck('assigned_user_id'))
+            ->get()
+            ->keyBy('id');
+
+        $profiles = UserProfile::query()
+            ->whereIn('user_id', $wonRows->pluck('assigned_user_id'))
+            ->get()
+            ->keyBy('user_id');
+
+        $entries = $wonRows->map(function ($row) use ($users, $profiles) {
+            $user = $users->get($row->assigned_user_id);
+            $salesTarget = $profiles->get($row->assigned_user_id)?->resolvedSalesTarget()
+                ?? UserProfile::DEFAULT_SALES_TARGET;
+            $wonTotal = (float) $row->won_total;
+
+            return [
+                'user_id' => $row->assigned_user_id,
+                'name' => $user?->display_name ?? 'Unknown',
+                'won_count' => (int) $row->won_count,
+                'won_total' => $wonTotal,
+                'won_margin' => (float) $row->won_margin,
+                'sales_target' => $salesTarget,
+                'target_progress' => $salesTarget > 0
+                    ? round(($wonTotal / $salesTarget) * 100, 1)
+                    : 0,
+            ];
+        });
+
+        $sorted = $entries->sort(function (array $a, array $b) use ($sort) {
+            return match ($sort) {
+                'margin' => $b['won_margin'] <=> $a['won_margin']
+                    ?: $b['won_total'] <=> $a['won_total'],
+                'percent' => $b['target_progress'] <=> $a['target_progress']
+                    ?: $b['won_total'] <=> $a['won_total'],
+                default => $b['won_total'] <=> $a['won_total']
+                    ?: $b['won_margin'] <=> $a['won_margin'],
+            };
+        })->values()->take(10);
+
+        return $sorted->map(fn (array $entry, int $index) => array_merge($entry, [
+            'rank' => $index + 1,
+        ]));
+    }
+
+    protected function applyLeaderboardPeriodToCloseDate($query, string $period): void
+    {
         if ($period === 'month') {
             $query->whereBetween('close_date', [
                 Carbon::now()->startOfMonth()->toDateString(),
@@ -122,31 +195,6 @@ class DashboardController extends Controller
                 Carbon::now()->endOfYear()->toDateString(),
             ]);
         }
-
-        $rows = $query
-            ->selectRaw('assigned_user_id, COUNT(*) as won_count, COALESCE(SUM(amount), 0) as won_value')
-            ->groupBy('assigned_user_id')
-            ->orderByDesc('won_value')
-            ->orderByDesc('won_count')
-            ->limit(10)
-            ->get();
-
-        $users = EspoUser::query()
-            ->whereIn('id', $rows->pluck('assigned_user_id'))
-            ->get()
-            ->keyBy('id');
-
-        return $rows->values()->map(function ($row, int $index) use ($users) {
-            $user = $users->get($row->assigned_user_id);
-
-            return [
-                'rank' => $index + 1,
-                'user_id' => $row->assigned_user_id,
-                'name' => $user?->display_name ?? 'Unknown',
-                'won_count' => (int) $row->won_count,
-                'won_value' => (float) $row->won_value,
-            ];
-        });
     }
 
     protected function deadlineAlertsForUser($user): Collection

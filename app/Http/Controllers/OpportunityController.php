@@ -143,6 +143,7 @@ class OpportunityController extends Controller
         if ($data['stage'] !== $opportunity->stage) {
             $opportunity->stage = $data['stage'];
             $opportunity->probability = Opportunity::defaultProbabilityForStage($data['stage']);
+            $opportunity->syncWonMargin();
             $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
             $opportunity->modified_by_id = auth()->id();
             $opportunity->save();
@@ -270,6 +271,8 @@ class OpportunityController extends Controller
                 $opportunity->amount = $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0));
             }
         }
+
+        $opportunity->syncWonMargin();
     }
 
     protected function generateId(): string

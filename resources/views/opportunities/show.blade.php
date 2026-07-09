@@ -77,6 +77,9 @@
                 <div><dt class="text-slate-400">Account / Customer</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->account)->name ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Type</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->type ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Amount</dt><dd class="mt-0.5 font-semibold text-slate-800">{{ money($opportunity->amount, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
+                @if ($opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE && $opportunity->crm_won_margin !== null)
+                    <div><dt class="text-slate-400">Won Margin</dt><dd class="mt-0.5 font-semibold text-green-700">{{ money($opportunity->crm_won_margin, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
+                @endif
                 <div><dt class="text-slate-400">Probability</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->probability !== null ? $opportunity->probability . '%' : '—' }}</dd></div>
                 <div><dt class="text-slate-400">Close Date</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->translatedFormat('d M Y') : '—' }}</dd></div>
                 <div><dt class="text-slate-400">Contact</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->contact)->full_name ?: '—' }}</dd></div>

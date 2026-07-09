@@ -30,10 +30,9 @@ class ProfileController extends Controller
             'password' => ['nullable', 'confirmed', Password::min(6)],
         ]);
 
-        UserProfile::query()->updateOrCreate(
-            ['user_id' => $user->id],
-            ['job_position' => $validated['job_position'] ?? null]
-        );
+        $profile = UserProfile::ensureForUser($user->id, $user->isSales());
+        $profile->job_position = $validated['job_position'] ?? null;
+        $profile->save();
 
         if (! $request->filled('password')) {
             return back()->with('success', 'Job position berhasil disimpan.');
@@ -61,7 +60,7 @@ class ProfileController extends Controller
         $file = $request->file('signature');
         $path = $file->storeAs('signatures', $user->id.'.'.$file->getClientOriginalExtension(), 'public');
 
-        $profile = UserProfile::query()->firstOrNew(['user_id' => $user->id]);
+        $profile = UserProfile::ensureForUser($user->id, $user->isSales());
 
         if ($profile->signature_path && $profile->signature_path !== $path) {
             Storage::disk('public')->delete($profile->signature_path);

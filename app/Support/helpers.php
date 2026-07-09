@@ -17,6 +17,41 @@ if (! function_exists('money')) {
     }
 }
 
+if (! function_exists('money_compact')) {
+    /**
+     * Format mata uang ringkas untuk tampilan sempit (leaderboard, dll).
+     * Contoh: money_compact(48397231850) => "Rp 48,4M"
+     */
+    function money_compact($amount, string $currency = 'IDR'): string
+    {
+        $amount = (float) $amount;
+        $sign = $amount < 0 ? '-' : '';
+        $abs = abs($amount);
+
+        if ($currency === 'IDR') {
+            if ($abs >= 1_000_000_000) {
+                $value = rtrim(rtrim(number_format($abs / 1_000_000_000, 1, ',', '.'), '0'), ',');
+
+                return $sign.'Rp '.$value.'M';
+            }
+
+            if ($abs >= 1_000_000) {
+                $value = rtrim(rtrim(number_format($abs / 1_000_000, 1, ',', '.'), '0'), ',');
+
+                return $sign.'Rp '.$value.' Jt';
+            }
+
+            return money($amount, $currency);
+        }
+
+        if ($abs >= 1_000_000) {
+            return $sign.$currency.' '.rtrim(rtrim(number_format($abs / 1_000_000, 1, '.', ','), '0'), '.').'M';
+        }
+
+        return money($amount, $currency);
+    }
+}
+
 if (! function_exists('initials')) {
     /**
      * Ambil inisial dari sebuah nama (maksimal 2 huruf).

@@ -85,6 +85,16 @@ class Quotation extends Model
         $this->total = $afterDiscount + $taxAmount;
     }
 
+    /**
+     * Total margin dari semua item penawaran.
+     */
+    public function totalItemsMargin(): float
+    {
+        $this->loadMissing('items');
+
+        return round($this->items->sum(fn (QuotationItem $item) => $item->lineMargin()), 2);
+    }
+
     public function statusLabel(): string
     {
         return self::STATUSES[$this->status] ?? ucfirst($this->status);

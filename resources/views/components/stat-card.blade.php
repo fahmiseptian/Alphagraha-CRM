@@ -4,6 +4,7 @@
     'icon' => 'bi-graph-up',
     'color' => 'brand',
     'sub' => null,
+    'href' => null,
 ])
 
 @php
@@ -17,7 +18,16 @@
     ][$color] ?? 'bg-brand-50 text-brand-600';
 @endphp
 
-<div class="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:shadow-md">
+@php
+    $classes = 'block rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:shadow-md'
+        . ($href ? ' cursor-pointer hover:border-slate-300' : '');
+@endphp
+
+@if ($href)
+    <a href="{{ $href }}" class="{{ $classes }}">
+@else
+    <div class="{{ $classes }}">
+@endif
     <div class="flex items-start justify-between">
         <div>
             <p class="text-sm font-medium text-slate-500">{{ $title }}</p>
@@ -30,4 +40,8 @@
             <i class="bi {{ $icon }} text-xl"></i>
         </span>
     </div>
-</div>
+@if ($href)
+    </a>
+@else
+    </div>
+@endif

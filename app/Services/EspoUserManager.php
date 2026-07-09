@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Models\UserProfile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -41,6 +42,8 @@ class EspoUserManager
         if (! empty($data['email'])) {
             $this->syncPrimaryEmail($id, $data['email']);
         }
+
+        UserProfile::ensureForUser($id, ($data['type'] ?? '') === 'regular');
 
         return User::query()->whereKey($id)->first();
     }

@@ -8,11 +8,36 @@ use Illuminate\Support\Facades\Storage;
 
 class UserProfile extends Model
 {
+    public const DEFAULT_SALES_TARGET = 1_000_000_000_000;
+
     protected $table = 'crm_user_profiles';
 
     protected $fillable = [
-        'user_id', 'signature_path', 'job_position',
+        'user_id', 'signature_path', 'job_position', 'sales_target',
     ];
+
+    protected $casts = [
+        'sales_target' => 'float',
+    ];
+
+    public static function ensureForUser(string $userId, bool $isSales = true): self
+    {
+        if (! $isSales) {
+            return static::query()->firstOrCreate(['user_id' => $userId]);
+        }
+
+        return static::query()->firstOrCreate(
+            ['user_id' => $userId],
+            ['sales_target' => self::DEFAULT_SALES_TARGET]
+        );
+    }
+
+    public function resolvedSalesTarget(): float
+    {
+        $target = (float) ($this->sales_target ?? 0);
+
+        return $target > 0 ? $target : self::DEFAULT_SALES_TARGET;
+    }
 
     public function user(): BelongsTo
     {

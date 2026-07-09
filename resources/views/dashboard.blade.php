@@ -11,11 +11,14 @@
 
 {{-- Main stats --}}
 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <x-stat-card title="Total Customers" :value="number_format($customersCount)" icon="bi-people" color="brand" />
-    <x-stat-card title="Total Leads" :value="number_format($leadsCount)" icon="bi-funnel" color="purple" />
+    <x-stat-card title="Total Customers" :value="number_format($customersCount)" icon="bi-people" color="brand"
+                 :href="route('customers.index')" />
+    <x-stat-card title="Total Leads" :value="number_format($leadsCount)" icon="bi-funnel" color="purple"
+                 :href="route('leads.index')" />
     <x-stat-card title="Total Quotations" :value="number_format($quotationsCount)" icon="bi-file-earmark-text" color="amber"
-                 :sub="$acceptedCount.' accepted'" />
-    <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green" />
+                 :sub="$acceptedCount.' accepted'" :href="route('quotations.index')" />
+    <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green"
+                 :sub="money($quotationsMargin).' margin'" :href="route('quotations.index')" />
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
@@ -23,11 +26,19 @@
         {{-- Leaderboard widget (kiri) --}}
         <x-card :padding="false" class="crm-leaderboard-widget">
         <div class="border-b border-slate-100 px-4 py-3">
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
                 <p class="text-sm font-semibold text-slate-800">
                     <i class="bi bi-trophy text-amber-500"></i> Leaderboard
                 </p>
-                <form method="GET" action="{{ route('dashboard') }}">
+                <form method="GET" action="{{ route('dashboard') }}" class="flex flex-wrap items-center justify-end gap-1.5">
+                    @if (auth()->user()->isAdmin())
+                        <select name="leaderboard_sort" onchange="this.form.submit()"
+                                class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">
+                            <option value="total" @selected($leaderboardSort === 'total')>Sort: Total</option>
+                            <option value="margin" @selected($leaderboardSort === 'margin')>Sort: Margin</option>
+                            <option value="percent" @selected($leaderboardSort === 'percent')>Sort: % Target</option>
+                        </select>
+                    @endif
                     <select name="leaderboard_period" onchange="this.form.submit()"
                             class="crm-leaderboard-widget__select">
                         <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
@@ -39,33 +50,58 @@
         </div>
 
         @if ($salesLeaderboard->isNotEmpty())
-            <ul class="divide-y divide-slate-50">
-                @foreach ($salesLeaderboard as $entry)
-                    <li @class(['px-4 py-2.5', 'bg-brand-50/50' => $entry['user_id'] === auth()->id()])>
-                        <div class="flex items-center gap-2.5">
+            <div @class(['crm-leaderboard-table', 'crm-leaderboard-table--sales' => auth()->user()->isSales()])>
+                <div class="crm-leaderboard-table__head">
+                    <span></span>
+                    <span>Sales</span>
+                    @if (auth()->user()->isAdmin())
+                        <span>Total</span>
+                        <span>Margin</span>
+                    @else
+                        <span>Percentage</span>
+                    @endif
+                </div>
+                <ul class="divide-y divide-slate-50">
+                    @foreach ($salesLeaderboard as $entry)
+                        <li @class(['crm-leaderboard-table__row', 'bg-brand-50/50' => $entry['user_id'] === auth()->id()])>
                             @if ($entry['rank'] === 1)
-                                <span class="crm-leaderboard-rank crm-leaderboard-rank--gold crm-leaderboard-rank--sm">1</span>
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--gold crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
                             @elseif ($entry['rank'] === 2)
-                                <span class="crm-leaderboard-rank crm-leaderboard-rank--silver crm-leaderboard-rank--sm">2</span>
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--silver crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
                             @elseif ($entry['rank'] === 3)
-                                <span class="crm-leaderboard-rank crm-leaderboard-rank--bronze crm-leaderboard-rank--sm">3</span>
+                                <span class="crm-leaderboard-rank crm-leaderboard-rank--bronze crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
                             @else
                                 <span class="crm-leaderboard-rank crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
                             @endif
-                            <div class="min-w-0 flex-1">
+                            <div class="crm-leaderboard-table__sales min-w-0">
                                 <p class="truncate text-xs font-medium text-slate-800">
                                     {{ $entry['name'] }}
                                     @if ($entry['user_id'] === auth()->id())
                                         <span class="text-brand-600">· You</span>
                                     @endif
                                 </p>
-                                <p class="text-[11px] text-slate-400">{{ $entry['won_count'] }} deal</p>
                             </div>
-                            <p class="shrink-0 text-xs font-semibold text-slate-700">{{ money($entry['won_value']) }}</p>
-                        </div>
-                    </li>
-                @endforeach
-            </ul>
+                            @if (auth()->user()->isAdmin())
+                                <span class="crm-leaderboard-table__value" title="{{ money($entry['won_total']) }}">
+                                    {{ money_compact($entry['won_total']) }}
+                                </span>
+                                <span @class([
+                                    'crm-leaderboard-table__value',
+                                    'text-green-700' => $entry['won_margin'] >= 0,
+                                    'text-red-600' => $entry['won_margin'] < 0,
+                                ]) title="{{ money($entry['won_margin']) }}">
+                                    {{ money_compact($entry['won_margin']) }}
+                                </span>
+                            @else
+                                <span class="crm-leaderboard-table__value text-brand-700"
+                                      title="{{ money($entry['won_total']) }} / {{ money($entry['sales_target']) }}">
+                                    {{ number_format($entry['target_progress'], 1, ',', '.') }}%
+                                </span>
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
         @else
             <p class="px-4 py-8 text-center text-xs text-slate-400">Belum ada deal Closed Won.</p>
         @endif
