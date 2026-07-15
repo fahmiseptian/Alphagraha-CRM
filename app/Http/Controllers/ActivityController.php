@@ -64,8 +64,21 @@ class ActivityController extends Controller
         $data['assigned_to'] = $data['assigned_to'] ?? auth()->id();
 
         $activity = Activity::create($data);
+        $calendarUrl = $activity->googleCalendarUrl();
+        $editUrl = route('activities.edit', $activity);
 
-        return redirect()->route('activities.edit', $activity)->with('success', 'Activity created successfully. Anda dapat menambahkan media pendukung di bawah.');
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'google_calendar_url' => $calendarUrl,
+                'redirect' => $editUrl,
+                'message' => 'Activity berhasil dibuat.',
+            ]);
+        }
+
+        return redirect()
+            ->route('activities.edit', $activity)
+            ->with('success', 'Activity berhasil dibuat. Jika tab Calendar tidak terbuka, klik tombol di bawah.')
+            ->with('google_calendar_url', $calendarUrl);
     }
 
     public function edit(Activity $activity)

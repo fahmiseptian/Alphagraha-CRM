@@ -77,4 +77,25 @@ return [
     |--------------------------------------------------------------------------
     */
     'deadline_alert_days' => (int) env('CRM_DEADLINE_ALERT_DAYS', 7),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Timezone Google Calendar (TEMPLATE link)
+    |--------------------------------------------------------------------------
+    */
+    'google_calendar_timezone' => env('CRM_GOOGLE_CALENDAR_TIMEZONE', 'Asia/Jakarta'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Format nomor penawaran otomatis
+    |--------------------------------------------------------------------------
+    | Contoh: 0002/KA/QO/VII/26
+    | - sequence unik per tahun
+    | - sales_code dari profil user (diisi admin)
+    | - revisi setelah status sent: 0002-R1/KA/QO/VII/26
+    */
+    'quotation_number' => [
+        'prefix' => 'QO',
+        'sequence_pad' => 4,
+    ],
 ];

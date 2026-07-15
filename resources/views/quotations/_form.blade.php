@@ -155,15 +155,28 @@
             <x-card title="Quotation Settings">
                 <div class="space-y-4">
                     <div>
-                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Quotation Number <span class="text-red-500">*</span></label>
-                        <input type="text" name="number" value="{{ old('number', $quotation->number) }}" required
-                               placeholder="e.g. 00001/QO/KA/VI/26"
-                               class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('number') border-red-400 @enderror">
-                        @error('number')
-                            <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                        @if ($isCreate)
+                            <label class="mb-1.5 block text-sm font-medium text-slate-700">Quotation Number</label>
+                            <input type="text" value="Otomatis — {{ $resolvedSalesCode ?? '…' }}/QO/…" disabled
+                                   class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-500">
+                            <p class="mt-1 text-xs text-slate-400">
+                                Nomor digenerate otomatis memakai Sales Code
+                                <strong>{{ $resolvedSalesCode ?? '—' }}</strong>
+                                @if (! empty($resolvedSalesOwner))
+                                    ({{ $resolvedSalesOwner }})
+                                @endif.
+                                Revisi (-R1) hanya setelah status Sent dan ada perubahan.
+                            </p>
                         @else
-                            <p class="mt-1 text-xs text-slate-400">Enter the quotation number manually. The number must be unique and not duplicate any existing quotation.</p>
-                        @enderror
+                            <label class="mb-1.5 block text-sm font-medium text-slate-700">Quotation Number</label>
+                            <input type="text" name="number" value="{{ old('number', $quotation->number) }}" readonly
+                                   class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-700">
+                            @if ($quotation->hasBeenSent())
+                                <p class="mt-1 text-xs text-amber-600">Sudah pernah Sent. Perubahan isi akan menaikkan revisi dokumen (mis. -R1, -R2).</p>
+                            @else
+                                <p class="mt-1 text-xs text-slate-400">Belum Sent — nomor tetap tanpa suffix revisi meski diedit.</p>
+                            @endif
+                        @endif
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Date <span class="text-red-500">*</span></label>

@@ -80,6 +80,7 @@ Route::middleware('auth')->group(function () {
 
     // Penawaran
     Route::get('/quotations/{quotation}/preview', [QuotationController::class, 'preview'])->name('quotations.preview');
+    Route::get('/quotations/{quotation}/revisions/{revision}/preview', [QuotationController::class, 'previewRevision'])->name('quotations.revisions.preview');
     Route::get('/quotations/{quotation}/pdf', [QuotationController::class, 'pdf'])->name('quotations.pdf');
     Route::patch('/quotations/{quotation}/status', [QuotationController::class, 'updateStatus'])->name('quotations.status');
     Route::post('/quotations/{quotation}/duplicate', [QuotationController::class, 'duplicate'])->name('quotations.duplicate');

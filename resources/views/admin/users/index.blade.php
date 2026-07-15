@@ -22,6 +22,7 @@
                 <tr>
                     <th>Name</th>
                     <th>Username</th>
+                    <th>Sales Code</th>
                     <th>Email</th>
                     <th>Role</th>
                     <th>Status</th>
@@ -38,6 +39,7 @@
                             </div>
                         </td>
                         <td class="text-slate-600">{{ $user->user_name }}</td>
+                        <td class="font-mono text-sm text-slate-700">{{ $user->profile?->sales_code ?: '—' }}</td>
                         <td class="text-slate-600">{{ $user->email ?? '—' }}</td>
                         <td><x-badge :color="$user->role === 'admin' ? 'purple' : 'blue'">{{ ucfirst($user->role) }}</x-badge></td>
                         <td>
@@ -53,7 +55,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="6" class="py-12 text-center text-slate-400">No users found.</td></tr>
+                    <tr><td colspan="7" class="py-12 text-center text-slate-400">No users found.</td></tr>
                 @endforelse
             </tbody>
         </table>

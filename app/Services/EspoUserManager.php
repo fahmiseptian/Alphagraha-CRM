@@ -45,6 +45,10 @@ class EspoUserManager
 
         UserProfile::ensureForUser($id, ($data['type'] ?? '') === 'regular');
 
+        if (array_key_exists('sales_code', $data)) {
+            $this->syncSalesCode($id, $data['sales_code'] ?? null, ($data['type'] ?? '') === 'regular');
+        }
+
         return User::query()->whereKey($id)->first();
     }
 
@@ -75,7 +79,28 @@ class EspoUserManager
             $this->syncPrimaryEmail($user->id, $data['email']);
         }
 
-        return $user->fresh();
+        if (array_key_exists('sales_code', $data)) {
+            $this->syncSalesCode(
+                $user->id,
+                $data['sales_code'] ?? null,
+                ($data['type'] ?? $user->type) === 'regular'
+            );
+        }
+
+        return $user->fresh(['profile']);
+    }
+
+    /**
+     * Simpan Sales Code ke profil (buat profil bila belum ada).
+     */
+    protected function syncSalesCode(string $userId, ?string $salesCode, bool $isSales = true): void
+    {
+        $code = $salesCode !== null && trim($salesCode) !== ''
+            ? strtoupper(trim($salesCode))
+            : null;
+
+        $profile = UserProfile::ensureForUser($userId, $isSales);
+        $profile->forceFill(['sales_code' => $code])->save();
     }
 
     /**

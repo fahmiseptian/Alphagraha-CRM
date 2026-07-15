@@ -24,6 +24,7 @@ class UserController extends Controller
         $search = trim((string) $request->get('search'));
 
         $users = User::query()
+            ->with('profile')
             ->whereIn('type', ['regular', 'admin'])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($q) use ($search) {
@@ -58,11 +59,14 @@ class UserController extends Controller
 
     public function edit(User $user)
     {
+        $user->load('profile');
+
         return view('admin.users.edit', compact('user'));
     }
 
     public function update(Request $request, User $user)
     {
+        $user->load('profile');
         $data = $this->validateData($request, $user);
 
         $this->manager->update($user, $data);
@@ -100,8 +104,21 @@ class UserController extends Controller
             'user_name' => ['required', 'string', 'max:50', $userNameRule],
             'email' => ['nullable', 'email', 'max:255'],
             'role' => ['required', Rule::in(['admin', 'sales'])],
+            'sales_code' => [
+                'required',
+                'string',
+                'max:20',
+                'regex:/^[A-Za-z0-9]+$/',
+                Rule::unique('crm_user_profiles', 'sales_code')->ignore(
+                    optional($user?->profile)->id
+                ),
+            ],
             'password' => [$user ? 'nullable' : 'required', 'confirmed', Password::min(6)],
             'is_active' => ['nullable', 'boolean'],
+        ], [
+            'sales_code.required' => 'Sales Code wajib diisi.',
+            'sales_code.unique' => 'Sales Code sudah dipakai user lain.',
+            'sales_code.regex' => 'Sales Code hanya boleh huruf dan angka.',
         ]);
 
         return [
@@ -111,6 +128,7 @@ class UserController extends Controller
             'type' => $validated['role'] === 'admin' ? 'admin' : 'regular',
             'password' => $validated['password'] ?? null,
             'is_active' => $request->boolean('is_active'),
+            'sales_code' => strtoupper(trim($validated['sales_code'])),
         ];
     }
 }

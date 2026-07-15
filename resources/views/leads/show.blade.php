@@ -61,7 +61,7 @@
     {{-- Follow-up & activities --}}
     <div class="lg:col-span-2 space-y-4">
         <x-card title="Add Follow-up">
-            <form method="POST" action="{{ route('activities.store') }}" class="space-y-3">
+            <form method="POST" action="{{ route('activities.store') }}" class="space-y-3" id="lead-followup-form">
                 @csrf
                 <input type="hidden" name="lead_id" value="{{ $lead->id }}">
                 <input type="hidden" name="type" value="followup">
@@ -76,6 +76,44 @@
                 <textarea name="description" rows="2" placeholder="Notes..." class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"></textarea>
                 <button class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"><i class="bi bi-plus-lg"></i> Add Follow-up</button>
             </form>
+            <script>
+            (function () {
+                const form = document.getElementById('lead-followup-form');
+                if (!form) return;
+                form.addEventListener('submit', async function (e) {
+                    e.preventDefault();
+                    const btn = form.querySelector('button');
+                    if (btn) btn.disabled = true;
+                    const calendarTab = window.open('about:blank', '_blank');
+                    try {
+                        const response = await fetch(form.action, {
+                            method: 'POST',
+                            body: new FormData(form),
+                            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                            credentials: 'same-origin',
+                        });
+                        if (!response.ok) {
+                            if (calendarTab) calendarTab.close();
+                            if (btn) btn.disabled = false;
+                            const err = await response.json().catch(() => null);
+                            alert(err?.message || (err?.errors ? Object.values(err.errors).flat().join('\n') : 'Gagal menyimpan follow-up.'));
+                            return;
+                        }
+                        const data = await response.json();
+                        if (calendarTab && data.google_calendar_url) {
+                            calendarTab.location.href = data.google_calendar_url;
+                        } else if (data.google_calendar_url) {
+                            window.open(data.google_calendar_url, '_blank', 'noopener');
+                        }
+                        window.location.href = data.redirect || window.location.href;
+                    } catch (err) {
+                        if (calendarTab) calendarTab.close();
+                        if (btn) btn.disabled = false;
+                        alert('Terjadi kesalahan. Coba lagi.');
+                    }
+                });
+            })();
+            </script>
         </x-card>
 
         <x-card :padding="false">

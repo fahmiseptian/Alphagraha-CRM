@@ -13,7 +13,7 @@ class UserProfile extends Model
     protected $table = 'crm_user_profiles';
 
     protected $fillable = [
-        'user_id', 'signature_path', 'job_position', 'sales_target',
+        'user_id', 'signature_path', 'job_position', 'sales_code', 'sales_target',
     ];
 
     protected $casts = [

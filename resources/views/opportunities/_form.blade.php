@@ -155,7 +155,7 @@
                                 class="text-xs font-medium text-slate-500 hover:text-slate-700">
                             <i class="bi bi-arrow-left"></i> Ganti kategori
                         </button>
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Input harga <strong>Exclude</strong> (putih). Include, PPH, margin & persentase terisi otomatis (kuning).</p>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Exclude &amp; % margin bisa diubah (putih). Ubah % margin → harga jual ikut. Include / PPH / nilai margin (kuning) otomatis.</p>
                     </div>
 
                     <div class="space-y-4">
@@ -165,7 +165,7 @@
                                 <div class="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12">
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Barang / Jasa</label>
-                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" class="crm-field w-full text-sm">
+                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" @change="onItemKindChange(p)" class="crm-field w-full text-sm">
                                             <option value="barang">Barang</option>
                                             <option value="jasa">Jasa</option>
                                         </select>
@@ -201,6 +201,7 @@
                                             <td class="py-2 pr-3 font-medium text-slate-600">Harga Jual</td>
                                             <td class="py-2 pr-3">
                                                 <input type="number" step="0.01" min="0" :name="`products[${i}][sell_exclude]`" x-model.number="p.sell_exclude"
+                                                       @input="onSellChange(p)"
                                                        class="crm-field w-full min-w-[8rem] bg-white text-right">
                                             </td>
                                             <td class="py-2 pr-3">
@@ -212,6 +213,7 @@
                                             <td class="py-2 pr-3 font-medium text-slate-600">Harga Beli / Modal</td>
                                             <td class="py-2 pr-3">
                                                 <input type="number" step="0.01" min="0" :name="`products[${i}][cost_exclude]`" x-model.number="p.cost_exclude"
+                                                       @input="onCostChange(p)"
                                                        class="crm-field w-full min-w-[8rem] bg-white text-right">
                                             </td>
                                             <td class="py-2 pr-3">
@@ -234,7 +236,14 @@
                                                 <div class="flex items-center gap-2">
                                                     <input type="text" readonly :value="formatNumber(marginAmount(p))"
                                                            class="crm-field min-w-[8rem] flex-1 cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
-                                                    <span class="shrink-0 rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800" x-text="formatPercent(marginPercent(p))"></span>
+                                                    <div class="flex shrink-0 items-center gap-1">
+                                                        <input type="number" step="0.01" min="0" max="99.99"
+                                                               x-model.number="p.margin_percent"
+                                                               @input="onMarginPercentChange(p)"
+                                                               class="crm-field w-20 bg-white text-right text-sm"
+                                                               title="Ubah % margin untuk hitung ulang harga jual">
+                                                        <span class="text-xs font-semibold text-slate-600">%</span>
+                                                    </div>
                                                 </div>
                                             </td>
                                         </tr>
@@ -293,16 +302,31 @@
     function opportunityForm(config) {
         const TAX_MULTIPLIER = 1.11;
 
-        return {
-            products: (config.products || []).map(p => ({
+        const initialProducts = (config.products || []).map(p => {
+            const taxCategory = p.tax_category ?? 'non_wapu';
+            const itemKind = p.item_kind ?? 'barang';
+            const sell = Number(p.sell_exclude) || 0;
+            const cost = Number(p.cost_exclude) || 0;
+            const appliesPph = !(taxCategory === 'non_wapu' && itemKind === 'barang');
+            const pph = appliesPph ? Math.round(sell * 0.02 * 100) / 100 : 0;
+            const margin = Math.round((appliesPph ? (sell - pph - cost) : (sell - cost)) * 100) / 100;
+            const marginPercent = sell > 0 ? Math.round((margin / sell) * 10000) / 100 : 0;
+
+            return {
                 name: p.name ?? '',
                 quantity: Number(p.quantity) || 0,
-                sell_exclude: Number(p.sell_exclude) || 0,
-                cost_exclude: Number(p.cost_exclude) || 0,
+                sell_exclude: sell,
+                cost_exclude: cost,
                 vendor: p.vendor ?? '',
-                tax_category: p.tax_category ?? 'non_wapu',
-                item_kind: p.item_kind ?? 'barang',
-            })),
+                tax_category: taxCategory,
+                item_kind: itemKind,
+                margin_percent: marginPercent,
+                _lockMarginPercent: false,
+            };
+        });
+
+        return {
+            products: initialProducts,
             selectedTaxCategory: config.initialTaxCategory || null,
             contacts: config.contacts || [],
             accountId: config.accountId || '',
@@ -340,15 +364,68 @@
                 }
                 return this.round(sell - this.pphAmount(p) - cost);
             },
-            marginPercent(p) {
+            calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
                 const sell = Number(p.sell_exclude) || 0;
                 return sell > 0 ? this.round((margin / sell) * 100) : 0;
+            },
+            marginPercent(p) {
+                return Number(p.margin_percent) || 0;
             },
             marginLabel(p) {
                 return this.appliesPph(p)
                     ? 'Jual Exclude − PPH − Modal'
                     : 'Jual Exclude − Beli Exclude';
+            },
+            /**
+             * Dari % margin target + modal → hitung harga jual exclude.
+             * Tanpa PPH: sell = cost / (1 - pct/100)
+             * Dengan PPH 2%: sell = cost / (0.98 - pct/100)
+             */
+            sellFromMarginPercent(p) {
+                const pct = Number(p.margin_percent) || 0;
+                const cost = Number(p.cost_exclude) || 0;
+                if (cost <= 0 || pct <= 0) {
+                    return Number(p.sell_exclude) || 0;
+                }
+
+                const factor = this.appliesPph(p) ? 0.98 : 1;
+                const denom = factor - (pct / 100);
+                if (denom <= 0) {
+                    return Number(p.sell_exclude) || 0;
+                }
+
+                return this.round(cost / denom);
+            },
+            onSellChange(p) {
+                p._lockMarginPercent = false;
+                p.margin_percent = this.calcMarginPercent(p);
+            },
+            onCostChange(p) {
+                if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0) {
+                    p.sell_exclude = this.sellFromMarginPercent(p);
+                } else {
+                    p.margin_percent = this.calcMarginPercent(p);
+                }
+            },
+            onMarginPercentChange(p) {
+                let pct = Number(p.margin_percent) || 0;
+                const maxPct = this.appliesPph(p) ? 97.99 : 99.99;
+                if (pct < 0) pct = 0;
+                if (pct > maxPct) pct = maxPct;
+                p.margin_percent = pct;
+                p._lockMarginPercent = true;
+
+                if ((Number(p.cost_exclude) || 0) > 0 && pct > 0) {
+                    p.sell_exclude = this.sellFromMarginPercent(p);
+                }
+            },
+            onItemKindChange(p) {
+                if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0 && (Number(p.cost_exclude) || 0) > 0) {
+                    p.sell_exclude = this.sellFromMarginPercent(p);
+                } else {
+                    p.margin_percent = this.calcMarginPercent(p);
+                }
             },
             formatNumber(value) {
                 value = Number(value) || 0;
@@ -399,11 +476,13 @@
                     vendor: '',
                     tax_category: this.selectedTaxCategory,
                     item_kind: 'barang',
+                    margin_percent: 0,
+                    _lockMarginPercent: false,
                 });
             },
             removeProduct(i) { this.products.splice(i, 1); },
             init() {
-                this.$watch('products', () => { if (this.products.length > 0) this.amount = this.productsTotal; });
+                this.$watch('products', () => { if (this.products.length > 0) this.amount = this.productsTotal; }, { deep: true });
                 if (this.products.length > 0) this.amount = this.productsTotal;
 
                 this.$nextTick(() => {

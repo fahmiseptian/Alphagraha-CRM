@@ -8,7 +8,13 @@
         <div class="mt-1 flex items-center gap-3">
             <h2 class="text-xl font-bold text-slate-800">{{ $quotation->number }}</h2>
             <x-badge :color="$quotation->statusColor()">{{ $quotation->statusLabel() }}</x-badge>
-            <span class="text-xs text-slate-400">Revision {{ $quotation->revision }}</span>
+            <span class="text-xs text-slate-400">
+                @if ($quotation->document_revision > 0)
+                    Dokumen R{{ $quotation->document_revision }}
+                @else
+                    Quotation
+                @endif
+            </span>
         </div>
     </div>
     <div class="flex flex-wrap items-center gap-2">
@@ -78,10 +84,22 @@
             @forelse ($quotation->revisions as $rev)
                 <div class="flex items-center justify-between border-b border-slate-50 px-5 py-3 last:border-0">
                     <div>
-                        <p class="text-sm font-medium text-slate-800">Revision {{ $rev->revision }} <span class="text-xs font-normal text-slate-400">— {{ $rev->note }}</span></p>
+                        <p class="text-sm font-medium text-slate-800">
+                            @php $revNumber = data_get($rev->snapshot, 'number', $quotation->number); @endphp
+                            {{ $revNumber }}
+                            <span class="text-xs font-normal text-slate-400">— {{ $rev->note }}</span>
+                        </p>
                         <p class="text-xs text-slate-400">{{ $rev->created_at->translatedFormat('d M Y H:i') }} &middot; {{ optional($rev->creator)->name }}</p>
                     </div>
-                    <span class="text-sm text-slate-600">{{ money(data_get($rev->snapshot, 'total', 0), $quotation->currency) }}</span>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-slate-600">{{ money(data_get($rev->snapshot, 'total', 0), $quotation->currency) }}</span>
+                        @if ($rev->rendered_html)
+                            <a href="{{ route('quotations.revisions.preview', [$quotation, $rev]) }}" target="_blank"
+                               class="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-brand-600 hover:bg-brand-50">
+                                <i class="bi bi-eye"></i> Lihat
+                            </a>
+                        @endif
+                    </div>
                 </div>
             @empty
                 <div class="px-5 py-6 text-center text-sm text-slate-400">No revision history yet.</div>

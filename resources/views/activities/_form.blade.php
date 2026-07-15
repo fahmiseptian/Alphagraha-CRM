@@ -1,7 +1,8 @@
+@php $isCreate = ($method ?? 'POST') === 'POST'; @endphp
 <x-card>
-    <form method="POST" action="{{ $action }}" class="space-y-5">
+    <form method="POST" action="{{ $action }}" class="space-y-5" @if ($isCreate) id="activity-create-form" @endif>
         @csrf
-        @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
+        @if (! $isCreate)@method('PUT')@endif
 
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
@@ -47,7 +48,7 @@
                 <label class="crm-label">Assigned to</label>
                 <select name="assigned_to" class="select2 w-full">
                     @foreach ($users as $u)
-                        <option value="{{ $u->id }}" @selected((int) old('assigned_to', $activity->assigned_to ?? auth()->id()) === $u->id)>{{ $u->name }}</option>
+                        <option value="{{ $u->id }}" @selected(old('assigned_to', $activity->assigned_to ?? auth()->id()) == $u->id)>{{ $u->display_name }}</option>
                     @endforeach
                 </select>
             </div>
@@ -84,3 +85,66 @@
         </div>
     </form>
 </x-card>
+
+@if ($isCreate)
+<script>
+(function () {
+    const form = document.getElementById('activity-create-form');
+    if (!form) return;
+
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const submitBtn = form.querySelector('[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+
+        // Buka tab baru saat klik Save (agar tidak diblokir popup blocker).
+        const calendarTab = window.open('about:blank', '_blank');
+
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                body: new FormData(form),
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+            });
+
+            if (response.status === 422) {
+                if (calendarTab) calendarTab.close();
+                if (submitBtn) submitBtn.disabled = false;
+                const errors = await response.json();
+                const messages = errors.errors
+                    ? Object.values(errors.errors).flat().join('\n')
+                    : 'Validasi gagal.';
+                alert(messages);
+                return;
+            }
+
+            if (!response.ok) {
+                if (calendarTab) calendarTab.close();
+                if (submitBtn) submitBtn.disabled = false;
+                alert('Gagal menyimpan activity.');
+                return;
+            }
+
+            const data = await response.json();
+
+            if (calendarTab && data.google_calendar_url) {
+                calendarTab.location.href = data.google_calendar_url;
+            } else if (data.google_calendar_url) {
+                window.open(data.google_calendar_url, '_blank', 'noopener');
+            }
+
+            window.location.href = data.redirect || @json(route('activities.index'));
+        } catch (err) {
+            if (calendarTab) calendarTab.close();
+            if (submitBtn) submitBtn.disabled = false;
+            alert('Terjadi kesalahan. Coba lagi.');
+        }
+    });
+})();
+</script>
+@endif

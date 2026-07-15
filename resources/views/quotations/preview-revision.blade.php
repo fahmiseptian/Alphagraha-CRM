@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Revisi {{ data_get($revision->snapshot, 'number', $quotation->number) }}</title>
+    <link rel="stylesheet" href="{{ asset('css/quotation-fonts.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #e2e8f0; font-family: 'Helvetica Neue', Arial, sans-serif; }
+        .toolbar {
+            position: sticky; top: 0; display: flex; align-items: center; gap: 12px;
+            background: #1e293b; color: #fff; padding: 12px 20px;
+        }
+        .toolbar .spacer { flex: 1; }
+        .toolbar a, .toolbar button {
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+            border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; text-decoration: none;
+        }
+        .btn-light { background: rgba(255,255,255,.15); color: #fff; }
+        .btn-light:hover { background: rgba(255,255,255,.25); }
+        .paper {
+            background: #fff; max-width: 800px; margin: 28px auto; padding: 48px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.15); border-radius: 4px;
+        }
+        @media print {
+            .toolbar { display: none; }
+            body { background: #fff; }
+            .paper { box-shadow: none; margin: 0; max-width: none; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="{{ route('quotations.show', $quotation) }}" class="btn-light"><i class="bi bi-arrow-left"></i> Back</a>
+        <strong>{{ data_get($revision->snapshot, 'number', $quotation->number) }}</strong>
+        <span style="opacity:.7;font-size:13px;">{{ $revision->note }} · {{ $revision->created_at->translatedFormat('d M Y H:i') }}</span>
+        <div class="spacer"></div>
+        <button onclick="window.print()" class="btn-light"><i class="bi bi-printer"></i> Print</button>
+    </div>
+    <div class="paper">
+        {!! $html !!}
+    </div>
+</body>
+</html>

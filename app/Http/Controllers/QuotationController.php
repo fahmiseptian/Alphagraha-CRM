@@ -6,10 +6,12 @@ use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Account;
 use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
+use App\Models\QuotationRevision;
 use App\Models\QuotationTemplate;
 use App\Support\OpportunityProductPricing;
 use App\Services\QuotationService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\Carbon;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -58,6 +60,19 @@ class QuotationController extends Controller
 
     public function create(Request $request)
     {
+        $opportunityId = $request->get('opportunity_id');
+        $salesContext = $this->service->resolveSalesCodeContext(
+            $opportunityId ? (string) $opportunityId : null,
+            auth()->user()
+        );
+
+        if ($salesContext['code'] === '') {
+            $who = $this->service->salesCodeOwnerLabel($salesContext['user']);
+
+            return redirect()->back()
+                ->with('error', 'Sales Code untuk '.$who.' belum diisi. Minta admin mengisi Sales Code di menu Users, lalu coba lagi.');
+        }
+
         $quotation = new Quotation([
             'quotation_date' => now()->toDateString(),
             'valid_until' => now()->addDays(14)->toDateString(),
@@ -69,7 +84,7 @@ class QuotationController extends Controller
         $seedItems = null;
 
         // Prefill dari Opportunity (1 opportunity : 1 penawaran).
-        if ($opportunityId = $request->get('opportunity_id')) {
+        if ($opportunityId) {
             $opportunity = $this->scopeAssigned(Opportunity::query())->with(['account', 'quotation'])->find($opportunityId);
 
             if ($opportunity) {
@@ -135,28 +150,55 @@ class QuotationController extends Controller
             }
         }
 
-        return view('quotations.create', $this->formData() + ['quotation' => $quotation, 'seedItems' => $seedItems]);
+        return view('quotations.create', $this->formData() + [
+            'quotation' => $quotation,
+            'seedItems' => $seedItems,
+            'resolvedSalesCode' => $salesContext['code'],
+            'resolvedSalesOwner' => $this->service->salesCodeOwnerLabel($salesContext['user']),
+        ]);
     }
 
     public function store(Request $request)
     {
         $data = $this->validateData($request);
 
-        $quotation = DB::transaction(function () use ($data) {
-            $quotation = new Quotation($data);
-            $quotation->created_by = auth()->id();
-            $quotation->revision = 1;
-            $quotation->save();
+        try {
+            $quotation = DB::transaction(function () use ($data) {
+                $salesContext = $this->service->resolveSalesCodeContext(
+                    $data['opportunity_id'] ?? null,
+                    auth()->user()
+                );
 
-            $this->syncItems($quotation, $data['items']);
-            $quotation->load('items');
-            $quotation->recalculateTotals();
-            $quotation->save();
+                $number = $this->service->generateNumber(
+                    $salesContext['code'],
+                    isset($data['quotation_date']) ? Carbon::parse($data['quotation_date']) : null,
+                    $salesContext['user']
+                );
 
-            $this->snapshotRevision($quotation, 'Quotation created');
+                $quotation = new Quotation($data);
+                $quotation->number = $number;
+                $quotation->base_number = $number;
+                $quotation->document_revision = 0;
+                // Pemilik dokumen = sales assign opportunity (bukan admin yang membantu membuat).
+                $quotation->created_by = $salesContext['user']?->id ?: auth()->id();
+                $quotation->revision = 1;
+                if (($data['status'] ?? '') === 'sent') {
+                    $quotation->sent_at = now();
+                }
+                $quotation->save();
 
-            return $quotation;
-        });
+                $this->syncItems($quotation, $data['items']);
+                $quotation->load('items');
+                $quotation->recalculateTotals();
+                $quotation->save();
+
+                $this->snapshotRevision($quotation, 'Quotation created');
+
+                return $quotation;
+            });
+        } catch (\RuntimeException $e) {
+            return back()->withInput()->with('error', $e->getMessage());
+        }
 
         return redirect()->route('quotations.show', $quotation)
             ->with('success', 'Quotation ' . $quotation->number . ' created successfully.');
@@ -183,21 +225,58 @@ class QuotationController extends Controller
         $this->authorizeAccess($quotation);
         $data = $this->validateData($request, $quotation);
 
-        DB::transaction(function () use ($quotation, $data) {
+        $result = DB::transaction(function () use ($quotation, $data) {
+            $before = $this->contentFingerprint($quotation);
+            $wasSent = $quotation->hasBeenSent();
+
+            // Nomor tidak boleh diubah manual; pertahankan yang ada.
+            unset($data['number']);
+
             $quotation->fill($data);
+            if (($data['status'] ?? '') === 'sent' && ! $quotation->sent_at) {
+                $quotation->sent_at = now();
+            }
             $quotation->save();
 
             $this->syncItems($quotation, $data['items']);
             $quotation->load('items');
             $quotation->recalculateTotals();
-            $quotation->increment('revision');
             $quotation->save();
 
-            $this->snapshotRevision($quotation, 'Quotation revised');
+            $changed = $before !== $this->contentFingerprint($quotation);
+
+            if (! $changed) {
+                return ['changed' => false, 'document_revision' => (int) $quotation->document_revision];
+            }
+
+            if ($wasSent) {
+                $quotation->document_revision = (int) $quotation->document_revision + 1;
+                $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
+                $quotation->base_number = $base;
+                $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
+            }
+
+            $quotation->revision = (int) $quotation->revision + 1;
+            $quotation->save();
+
+            $note = $wasSent
+                ? 'Revisi dokumen R'.$quotation->document_revision
+                : 'Quotation updated';
+            $this->snapshotRevision($quotation, $note);
+
+            return ['changed' => true, 'document_revision' => (int) $quotation->document_revision];
         });
 
-        return redirect()->route('quotations.show', $quotation)
-            ->with('success', 'Quotation updated successfully (revision ' . $quotation->revision . ').');
+        if (! $result['changed']) {
+            return redirect()->route('quotations.show', $quotation)
+                ->with('success', 'Tidak ada perubahan pada quotation.');
+        }
+
+        $msg = $result['document_revision'] > 0
+            ? 'Quotation diperbarui menjadi '.$quotation->fresh()->number.'.'
+            : 'Quotation updated successfully.';
+
+        return redirect()->route('quotations.show', $quotation)->with('success', $msg);
     }
 
     public function destroy(Quotation $quotation)
@@ -253,30 +332,54 @@ class QuotationController extends Controller
         return back()->with('success', 'Quotation status updated to "' . $quotation->statusLabel() . '".');
     }
 
+    public function previewRevision(Quotation $quotation, QuotationRevision $revision)
+    {
+        $this->authorizeAccess($quotation);
+
+        if ((int) $revision->quotation_id !== (int) $quotation->id) {
+            abort(404);
+        }
+
+        $html = $revision->rendered_html;
+        if (! $html) {
+            abort(404, 'Snapshot dokumen revisi tidak tersedia.');
+        }
+
+        return view('quotations.preview-revision', compact('quotation', 'revision', 'html'));
+    }
+
     public function duplicate(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
         $quotation->load('items');
 
-        $copy = DB::transaction(function () use ($quotation) {
-            $copy = $quotation->replicate(['number', 'sent_at', 'revision']);
-            $copy->number = $this->service->generateNumber();
-            $copy->status = 'draft';
-            $copy->revision = 1;
-            $copy->created_by = auth()->id();
-            $copy->quotation_date = now()->toDateString();
-            $copy->save();
+        try {
+            $copy = DB::transaction(function () use ($quotation) {
+                $copy = $quotation->replicate(['number', 'base_number', 'sent_at', 'revision', 'document_revision']);
+                $number = $this->service->generateNumber();
+                $copy->number = $number;
+                $copy->base_number = $number;
+                $copy->document_revision = 0;
+                $copy->status = 'draft';
+                $copy->revision = 1;
+                $copy->created_by = auth()->id();
+                $copy->quotation_date = now()->toDateString();
+                $copy->opportunity_id = null;
+                $copy->save();
 
-            foreach ($quotation->items as $item) {
-                $newItem = $item->replicate(['quotation_id']);
-                $newItem->quotation_id = $copy->id;
-                $newItem->save();
-            }
+                foreach ($quotation->items as $item) {
+                    $newItem = $item->replicate(['quotation_id']);
+                    $newItem->quotation_id = $copy->id;
+                    $newItem->save();
+                }
 
-            $this->snapshotRevision($copy, 'Disalin dari ' . $quotation->number);
+                $this->snapshotRevision($copy, 'Disalin dari ' . $quotation->number);
 
-            return $copy;
-        });
+                return $copy;
+            });
+        } catch (\RuntimeException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return redirect()->route('quotations.edit', $copy)
             ->with('success', 'Quotation duplicated as ' . $copy->number . '.');
@@ -288,13 +391,7 @@ class QuotationController extends Controller
     {
         $isCreate = $quotation === null;
 
-        $data = $request->validate([
-            'number' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('crm_quotations', 'number')->ignore($quotation?->id),
-            ],
+        $rules = [
             'account_id' => ['nullable', 'string'],
             'opportunity_id' => ['nullable', 'string', Rule::unique('crm_quotations', 'opportunity_id')->ignore($quotation?->id)],
             'customer_name' => ['required', 'string', 'max:255'],
@@ -316,15 +413,55 @@ class QuotationController extends Controller
             'items.*.quantity' => ['required', 'numeric', $isCreate ? 'min:0.01' : 'min:0'],
             'items.*.unit' => ['nullable', 'string', 'max:50'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
-        ], [
-            'number.unique' => 'Nomor quotation sudah digunakan. Silakan gunakan nomor lain.',
-        ]);
+        ];
+
+        if (! $isCreate) {
+            $rules['number'] = ['nullable', 'string', 'max:255'];
+        }
+
+        $data = $request->validate($rules);
 
         $data['discount'] = $data['discount'] ?? 0;
         $data['tax_percent'] = 11;
-        $data['number'] = trim($data['number']);
+
+        if ($isCreate) {
+            unset($data['number']);
+        }
 
         return $data;
+    }
+
+    /**
+     * Fingerprint konten untuk mendeteksi apakah ada perubahan substantif.
+     */
+    protected function contentFingerprint(Quotation $quotation): string
+    {
+        $quotation->loadMissing('items');
+
+        $payload = [
+            'customer_name' => $quotation->customer_name,
+            'company_name' => $quotation->company_name,
+            'customer_email' => $quotation->customer_email,
+            'customer_phone' => $quotation->customer_phone,
+            'customer_address' => $quotation->customer_address,
+            'quotation_date' => optional($quotation->quotation_date)->format('Y-m-d'),
+            'valid_until' => optional($quotation->valid_until)->format('Y-m-d'),
+            'currency' => $quotation->currency,
+            'discount' => (float) $quotation->discount,
+            'tax_percent' => (float) $quotation->tax_percent,
+            'notes' => (string) $quotation->notes,
+            'terms' => (string) $quotation->terms,
+            'template_id' => $quotation->template_id,
+            'items' => $quotation->items->map(fn ($i) => [
+                'name' => $i->name,
+                'description' => (string) $i->description,
+                'quantity' => (float) $i->quantity,
+                'unit' => (string) $i->unit,
+                'unit_price' => (float) $i->unit_price,
+            ])->values()->all(),
+        ];
+
+        return md5(json_encode($payload));
     }
 
     protected function syncItems(Quotation $quotation, array $items): void
@@ -374,6 +511,9 @@ class QuotationController extends Controller
         $quotation->revisions()->create([
             'revision' => $quotation->revision,
             'snapshot' => [
+                'number' => $quotation->number,
+                'base_number' => $quotation->base_number,
+                'document_revision' => $quotation->document_revision,
                 'customer_name' => $quotation->customer_name,
                 'company_name' => $quotation->company_name,
                 'total' => $quotation->total,
@@ -436,10 +576,20 @@ class QuotationController extends Controller
         $creator = $quotation->creator;
 
         if ($creator && $creator->isSales() && ! $creator->hasDigitalSignature()) {
+            $name = $creator->display_name ?: $creator->user_name;
+            $message = 'Sales '.$name.' belum mengunggah tanda tangan digital di Profile. Minta sales mengunggah TTD sebelum preview/PDF.';
+
+            // Admin yang membantu: jangan redirect ke profile admin sendiri.
+            if ($this->isAdmin() && $creator->id !== auth()->id()) {
+                throw new HttpResponseException(
+                    redirect()->back()->with('error', $message)
+                );
+            }
+
             throw new HttpResponseException(
                 redirect()
                     ->route('profile.edit')
-                    ->with('error', 'Unggah tanda tangan digital di Profile sebelum membuat preview/PDF penawaran.')
+                    ->with('error', $message)
             );
         }
     }

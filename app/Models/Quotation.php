@@ -16,10 +16,10 @@ class Quotation extends Model
     protected $table = 'crm_quotations';
 
     protected $fillable = [
-        'number', 'account_id', 'opportunity_id', 'customer_name', 'company_name', 'customer_email',
+        'number', 'base_number', 'account_id', 'opportunity_id', 'customer_name', 'company_name', 'customer_email',
         'customer_phone', 'customer_address', 'quotation_date', 'valid_until', 'status',
         'currency', 'subtotal', 'discount', 'tax_percent', 'tax_amount', 'total',
-        'notes', 'terms', 'template_id', 'created_by', 'revision', 'sent_at',
+        'notes', 'terms', 'template_id', 'created_by', 'revision', 'document_revision', 'sent_at',
     ];
 
     protected $casts = [
@@ -109,5 +109,26 @@ class Quotation extends Model
             'rejected' => 'red',
             'expired' => 'amber',
         ][$this->status] ?? 'gray';
+    }
+
+    /**
+     * Apakah dokumen sudah pernah dikirim (status sent pernah terjadi).
+     */
+    public function hasBeenSent(): bool
+    {
+        return $this->sent_at !== null || $this->status === 'sent';
+    }
+
+    /**
+     * Label tampilan nomor dokumen (dengan -Rn bila ada).
+     */
+    public function displayNumber(): string
+    {
+        return (string) $this->number;
+    }
+
+    public function isDocumentRevision(): bool
+    {
+        return (int) $this->document_revision > 0;
     }
 }

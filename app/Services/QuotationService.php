@@ -6,7 +6,6 @@ use App\Models\Quotation;
 use App\Models\QuotationTemplate;
 use App\Models\User;
 use Carbon\Carbon;
-use Illuminate\Support\Str;
 
 /**
  * Logika inti penawaran: penomoran otomatis & merge data ke template HTML
@@ -14,21 +13,164 @@ use Illuminate\Support\Str;
  */
 class QuotationService
 {
-    public function generateNumber(?Carbon $date = null): string
+    /**
+     * Format: 0002/KA/QO/VII/26
+     * Sequence unik per tahun. Kode sales dari profil user.
+     */
+    public function generateNumber(?string $salesCode = null, ?Carbon $date = null, ?User $forUser = null): string
     {
         $date = $date ?? now();
-        $prefix = sprintf('QUO/%s/%s/', $date->format('Y'), $date->format('m'));
+        $forUser = $forUser ?? auth()->user();
+        $salesCode = strtoupper(trim((string) ($salesCode ?: $this->resolveSalesCode($forUser))));
+        $prefix = (string) config('crm.quotation_number.prefix', 'QO');
+        $pad = (int) config('crm.quotation_number.sequence_pad', 4);
+        $year = $date->format('y');
+        $romanMonth = $this->romanMonth((int) $date->format('n'));
 
-        $last = Quotation::where('number', 'like', $prefix . '%')
-            ->orderByDesc('number')
-            ->value('number');
-
-        $sequence = 1;
-        if ($last) {
-            $sequence = (int) Str::afterLast($last, '/') + 1;
+        if ($salesCode === '') {
+            $who = $forUser?->display_name ?: $forUser?->user_name ?: 'user ini';
+            throw new \RuntimeException(
+                'Sales Code untuk '.$who.' belum diisi. Minta admin mengisi Sales Code di menu Users.'
+            );
         }
 
-        return $prefix . str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+        $sequence = $this->nextYearlySequence((int) $date->format('Y'), $pad);
+        $seq = str_pad((string) $sequence, $pad, '0', STR_PAD_LEFT);
+
+        return sprintf('%s/%s/%s/%s/%s', $seq, $salesCode, $prefix, $romanMonth, $year);
+    }
+
+    /**
+     * Terapkan suffix revisi dokumen: 0002-R1/KA/QO/VII/26
+     */
+    public function withDocumentRevision(string $baseNumber, int $documentRevision): string
+    {
+        if ($documentRevision < 1) {
+            return $baseNumber;
+        }
+
+        if (! preg_match('/^(\d+)(\/.*)$/', $baseNumber, $m)) {
+            return $baseNumber.'-R'.$documentRevision;
+        }
+
+        return $m[1].'-R'.$documentRevision.$m[2];
+    }
+
+    public function stripDocumentRevision(string $number): string
+    {
+        return preg_replace('/^(\d+)-R\d+(\/.*)$/', '$1$2', $number) ?: $number;
+    }
+
+    public function parseDocumentRevision(string $number): int
+    {
+        if (preg_match('/^\d+-R(\d+)\//', $number, $m)) {
+            return (int) $m[1];
+        }
+
+        return 0;
+    }
+
+    protected function nextYearlySequence(int $year, int $pad): int
+    {
+        $yy = substr((string) $year, -2);
+        $max = 0;
+
+        // Kunci baris terkait tahun berjalan agar sequence aman dari race condition.
+        $numbers = Quotation::query()
+            ->where(function ($q) use ($yy, $year) {
+                $q->where('base_number', 'like', '%/'.$yy)
+                    ->orWhere('number', 'like', '%/'.$yy)
+                    ->orWhere('number', 'like', 'QUO/'.$year.'/%');
+            })
+            ->lockForUpdate()
+            ->get(['number', 'base_number']);
+
+        foreach ($numbers as $row) {
+            foreach ([$row->base_number, $row->number] as $candidate) {
+                if (! $candidate) {
+                    continue;
+                }
+
+                if (preg_match('/^(\d+)(?:-R\d+)?\/[A-Z0-9]+\/QO\//i', $candidate, $m)) {
+                    $max = max($max, (int) $m[1]);
+                    continue;
+                }
+
+                if (preg_match('#^QUO/\d{4}/\d{2}/(\d+)$#', $candidate, $m)) {
+                    $max = max($max, (int) $m[1]);
+                }
+            }
+        }
+
+        return $max + 1;
+    }
+
+    /**
+     * Ambil Sales Code langsung dari DB (hindari cache relasi yang stale).
+     */
+    public function resolveSalesCode(?User $user = null): string
+    {
+        $user = $user ?? auth()->user();
+        if (! $user) {
+            return '';
+        }
+
+        $code = \App\Models\UserProfile::query()
+            ->where('user_id', $user->id)
+            ->value('sales_code');
+
+        return strtoupper(trim((string) ($code ?? '')));
+    }
+
+    /**
+     * Prioritas kode sales untuk nomor QO:
+     * 1) Sales yang di-assign pada opportunity
+     * 2) User yang sedang login
+     *
+     * @return array{code: string, user: ?User}
+     */
+    public function resolveSalesCodeContext(?string $opportunityId = null, ?User $fallbackUser = null): array
+    {
+        $fallbackUser = $fallbackUser ?? auth()->user();
+
+        if ($opportunityId) {
+            $assignedUserId = \App\Models\Espo\Opportunity::query()
+                ->whereKey($opportunityId)
+                ->value('assigned_user_id');
+
+            if ($assignedUserId) {
+                $assigned = User::query()->whereKey($assignedUserId)->first();
+                if ($assigned) {
+                    $code = $this->resolveSalesCode($assigned);
+                    if ($code !== '') {
+                        return ['code' => $code, 'user' => $assigned];
+                    }
+
+                    // Assigned ada tapi belum punya kode — tetap laporkan user itu.
+                    return ['code' => '', 'user' => $assigned];
+                }
+            }
+        }
+
+        return [
+            'code' => $this->resolveSalesCode($fallbackUser),
+            'user' => $fallbackUser,
+        ];
+    }
+
+    public function salesCodeOwnerLabel(?User $user = null): string
+    {
+        $user = $user ?? auth()->user();
+
+        return $user?->display_name ?: $user?->user_name ?: 'user ini';
+    }
+
+    public function romanMonth(int $month): string
+    {
+        return [
+            1 => 'I', 2 => 'II', 3 => 'III', 4 => 'IV', 5 => 'V', 6 => 'VI',
+            7 => 'VII', 8 => 'VIII', 9 => 'IX', 10 => 'X', 11 => 'XI', 12 => 'XII',
+        ][$month] ?? 'I';
     }
 
     /**

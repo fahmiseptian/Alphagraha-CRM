@@ -1,10 +1,26 @@
 @if (session('success'))
-    <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 4500)" x-transition
+    <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 8000)" x-transition
          class="mb-5 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-sm">
         <i class="bi bi-check-circle-fill text-green-600"></i>
         <span class="flex-1">{{ session('success') }}</span>
+        @if (session('google_calendar_url'))
+            <a href="{{ session('google_calendar_url') }}" target="_blank" rel="noopener"
+               class="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-green-700 ring-1 ring-green-200 hover:bg-green-100">
+                <i class="bi bi-calendar-plus"></i> Buka Google Calendar
+            </a>
+        @endif
         <button @click="show = false" class="text-green-600 hover:text-green-800"><i class="bi bi-x-lg"></i></button>
     </div>
+@endif
+
+@if (session('google_calendar_url'))
+    <script>
+        (function () {
+            var url = @json(session('google_calendar_url'));
+            if (!url) return;
+            window.open(url, '_blank', 'noopener');
+        })();
+    </script>
 @endif
 
 @if (session('error'))
