@@ -161,6 +161,25 @@ class User extends Authenticatable
         return $this->isFinance() || $this->isSuperAdmin() || $this->isAdmin();
     }
 
+    public function canCreateCustomerContact(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+        ], true);
+    }
+
+    public function canEditCustomerContact(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canDeleteCustomerContact(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     // --- Remember token dinonaktifkan ---------------------------------------
 
     public function getRememberToken(): ?string

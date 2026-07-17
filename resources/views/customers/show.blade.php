@@ -53,16 +53,12 @@
                         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ initials($contact->full_name) }}</span>
                         <div class="min-w-0 flex-1">
                             <p class="text-sm font-medium text-slate-800">{{ $contact->full_name }}</p>
-                            @if (auth()->user()->isAdmin())
-                                <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
-                                @if ($contact->phone)
-                                    <p class="text-xs text-slate-400"><i class="bi bi-telephone mr-0.5"></i>{{ $contact->phone }}</p>
-                                @endif
-                            @else
-                                <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
+                            <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
+                            @if ($contact->phone)
+                                <p class="text-xs text-slate-400"><i class="bi bi-telephone mr-0.5"></i>{{ $contact->phone }}</p>
                             @endif
                         </div>
-                        @if (auth()->user()->isAdmin())
+                        @if (auth()->user()->canEditCustomerContact())
                             <a href="{{ route('contacts.edit', $contact->id) }}" class="crm-icon-btn shrink-0" title="Edit contact"><i class="bi bi-pencil"></i></a>
                         @endif
                     </li>
@@ -72,8 +68,9 @@
             <p class="text-sm text-slate-400">No contacts yet.</p>
         @endif
 
+        @if (auth()->user()->canCreateCustomerContact())
         <div class="mt-4 border-t border-slate-100 pt-4">
-            @if (auth()->user()->isAdmin())
+            @if (auth()->user()->isSuperAdmin())
                 <x-btn href="{{ route('contacts.create', ['account_id' => $account->id]) }}" variant="secondary" icon="bi-person-plus" class="w-full justify-center sm:w-auto">Add Contact</x-btn>
             @else
                 <form method="POST" action="{{ route('customers.contacts.store', $account->id) }}" class="space-y-3">
@@ -100,6 +97,7 @@
                 </form>
             @endif
         </div>
+        @endif
         </x-card>
     </div>
 

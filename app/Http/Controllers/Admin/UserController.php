@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserProfile;
 use App\Services\EspoUserManager;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -143,12 +144,19 @@ class UserController extends Controller
                     optional($user?->profile)->id
                 ),
             ],
+            'sales_target' => [
+                Rule::requiredIf(fn () => $request->input('role') === User::ROLE_SALES),
+                'nullable',
+                'numeric',
+                'min:0',
+            ],
             'password' => [$user ? 'nullable' : 'required', 'confirmed', Password::min(6)],
             'is_active' => ['nullable', 'boolean'],
         ], [
             'sales_code.required' => 'Sales Code wajib diisi untuk role Sales.',
             'sales_code.unique' => 'Sales Code sudah dipakai user lain.',
             'sales_code.regex' => 'Sales Code hanya boleh huruf dan angka.',
+            'sales_target.required' => 'Sales Target wajib diisi untuk role Sales.',
         ]);
 
         $appRole = $validated['role'];
@@ -163,6 +171,9 @@ class UserController extends Controller
             'is_active' => $request->boolean('is_active'),
             'sales_code' => ! empty($validated['sales_code'])
                 ? strtoupper(trim($validated['sales_code']))
+                : null,
+            'sales_target' => $appRole === User::ROLE_SALES
+                ? (float) ($validated['sales_target'] ?? UserProfile::DEFAULT_SALES_TARGET)
                 : null,
         ];
     }

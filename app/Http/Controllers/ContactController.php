@@ -58,6 +58,10 @@ class ContactController extends Controller
 
     public function store(Request $request)
     {
+        if (! auth()->user()?->canCreateCustomerContact()) {
+            abort(403, 'Anda tidak memiliki akses untuk menambah contact.');
+        }
+
         $data = $request->validate([
             'account_id' => ['required', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
             'first_name' => ['required', 'string', 'max:100'],
@@ -76,6 +80,10 @@ class ContactController extends Controller
 
     public function edit(string $id)
     {
+        if (! auth()->user()?->canEditCustomerContact()) {
+            abort(403, 'Anda tidak memiliki akses untuk mengedit contact.');
+        }
+
         $contact = Contact::query()
             ->with(['account', 'emailAddresses', 'phoneNumbers'])
             ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
@@ -90,6 +98,10 @@ class ContactController extends Controller
 
     public function update(Request $request, string $id)
     {
+        if (! auth()->user()?->canEditCustomerContact()) {
+            abort(403, 'Anda tidak memiliki akses untuk mengedit contact.');
+        }
+
         $contact = Contact::query()
             ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
             ->findOrFail($id);

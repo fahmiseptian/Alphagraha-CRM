@@ -54,6 +54,20 @@
             <p class="mt-1 text-xs text-slate-400">Kode unik sales untuk nomor QO otomatis (mis. 0002/<strong>KA</strong>/QO/VII/26).</p>
         @enderror
     </div>
+    @if (($role ?? $user->role) === \App\Models\User::ROLE_SALES || old('role') === \App\Models\User::ROLE_SALES)
+        <div>
+            <label class="mb-1.5 block text-sm font-medium text-slate-700">Sales Target <span class="text-red-500">*</span></label>
+            <input type="number" step="1" min="0" name="sales_target"
+                   value="{{ old('sales_target', $user->profile?->resolvedSalesTarget()) }}"
+                   required
+                   class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_target') border-red-400 @enderror">
+            @error('sales_target')
+                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+            @else
+                <p class="mt-1 text-xs text-slate-400">Target penjualan untuk leaderboard Dashboard (Closed Won). Contoh: 1000000000 = Rp 1 miliar.</p>
+            @enderror
+        </div>
+    @endif
     <div>
         <label class="mb-1.5 block text-sm font-medium text-slate-700">Password @if (($mode ?? 'create') === 'create')<span class="text-red-500">*</span>@else<span class="text-xs font-normal text-slate-400">(leave blank to keep unchanged)</span>@endif</label>
         <input type="password" name="password" {{ ($mode ?? 'create') === 'create' ? 'required' : '' }}

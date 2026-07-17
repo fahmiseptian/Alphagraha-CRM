@@ -49,11 +49,12 @@ class EspoUserManager
             $data['app_role'] ?? null
         );
 
-        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data)) {
+        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data) || array_key_exists('sales_target', $data)) {
             $this->syncProfile(
                 $id,
                 $data['app_role'] ?? User::ROLE_SALES,
-                $data['sales_code'] ?? null
+                $data['sales_code'] ?? null,
+                $data['sales_target'] ?? null
             );
         }
 
@@ -87,11 +88,12 @@ class EspoUserManager
             $this->syncPrimaryEmail($user->id, $data['email']);
         }
 
-        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data)) {
+        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data) || array_key_exists('sales_target', $data)) {
             $this->syncProfile(
                 $user->id,
                 $data['app_role'] ?? $user->role,
-                $data['sales_code'] ?? null
+                $data['sales_code'] ?? null,
+                $data['sales_target'] ?? null
             );
         }
 
@@ -99,9 +101,9 @@ class EspoUserManager
     }
 
     /**
-     * Simpan app_role + sales_code ke profil.
+     * Simpan app_role + sales_code + sales_target ke profil.
      */
-    protected function syncProfile(string $userId, string $appRole, ?string $salesCode): void
+    protected function syncProfile(string $userId, string $appRole, ?string $salesCode, ?float $salesTarget = null): void
     {
         $isSales = $appRole === User::ROLE_SALES;
         $profile = UserProfile::ensureForUser($userId, $isSales, $appRole);
@@ -109,8 +111,12 @@ class EspoUserManager
         $profile->sales_code = ($salesCode !== null && trim($salesCode) !== '')
             ? strtoupper(trim($salesCode))
             : null;
-        if ($isSales && ! $profile->sales_target) {
-            $profile->sales_target = UserProfile::DEFAULT_SALES_TARGET;
+        if ($isSales) {
+            $profile->sales_target = ($salesTarget !== null && $salesTarget > 0)
+                ? $salesTarget
+                : ($profile->sales_target ?: UserProfile::DEFAULT_SALES_TARGET);
+        } else {
+            $profile->sales_target = null;
         }
         $profile->save();
     }

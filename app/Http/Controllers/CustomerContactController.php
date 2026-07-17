@@ -17,6 +17,10 @@ class CustomerContactController extends Controller
 
     public function store(Request $request, string $accountId)
     {
+        if (! auth()->user()?->canCreateCustomerContact()) {
+            abort(403, 'Anda tidak memiliki akses untuk menambah contact.');
+        }
+
         $account = $this->scopeAssigned(Account::query())->findOrFail($accountId);
 
         $data = $request->validate([
