@@ -2,10 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\CrmSetting;
+
 class OpportunityProductPricing
 {
-    public const TAX_MULTIPLIER = 1.11;
-
     public const TAX_WAPU = 'wapu';
 
     public const TAX_NON_WAPU = 'non_wapu';
@@ -14,11 +14,55 @@ class OpportunityProductPricing
 
     public const KIND_JASA = 'jasa';
 
-    public const PPH_RATE = 0.02;
+    /**
+     * Persentase PPN (contoh: 11). Prioritas: DB setting → config → 11.
+     */
+    public static function ppnPercent(): float
+    {
+        return CrmSetting::getFloat(
+            'tax.ppn_percent',
+            (float) config('crm.tax.ppn_percent', 11)
+        );
+    }
+
+    /**
+     * Multiplier include dari exclude (contoh: 1.11).
+     */
+    public static function ppnMultiplier(): float
+    {
+        return 1 + (self::ppnPercent() / 100);
+    }
+
+    /**
+     * Persentase PPH (contoh: 2). Prioritas: DB setting → config → 2.
+     */
+    public static function pphPercent(): float
+    {
+        return CrmSetting::getFloat(
+            'tax.pph_percent',
+            (float) config('crm.tax.pph_percent', 2)
+        );
+    }
+
+    /**
+     * Rate PPH desimal (contoh: 0.02).
+     */
+    public static function pphRate(): float
+    {
+        return self::pphPercent() / 100;
+    }
+
+    /**
+     * Faktor sisa setelah PPH untuk rumus margin (contoh: 0.98).
+     */
+    public static function afterPphFactor(): float
+    {
+        return 1 - self::pphRate();
+    }
 
     public static function includeFromExclude(float $exclude): float
     {
-        return round($exclude * self::TAX_MULTIPLIER, 2);
+        return round($exclude * self::ppnMultiplier(), 2);
     }
 
     public static function excludeFromInclude(float $include): float
@@ -27,7 +71,12 @@ class OpportunityProductPricing
             return 0;
         }
 
-        return round($include / self::TAX_MULTIPLIER, 2);
+        $multiplier = self::ppnMultiplier();
+        if ($multiplier <= 0) {
+            return 0;
+        }
+
+        return round($include / $multiplier, 2);
     }
 
     public static function appliesPph(string $taxCategory, string $itemKind): bool
@@ -45,7 +94,7 @@ class OpportunityProductPricing
             return 0;
         }
 
-        return round($sellExclude * self::PPH_RATE, 2);
+        return round($sellExclude * self::pphRate(), 2);
     }
 
     public static function margin(

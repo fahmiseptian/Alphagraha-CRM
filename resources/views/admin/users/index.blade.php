@@ -1,17 +1,18 @@
 @extends('layouts.app')
-@section('title', 'Users')
+@section('title', $roleLabel.' Users')
 
 @section('content')
-<x-page-header title="User Management" description="Accounts in the EspoCRM user table">
+<x-page-header :title="$roleLabel" description="Kelola akun dengan role {{ $roleLabel }}">
     <x-slot:actions>
         <form method="GET" class="flex items-center gap-2">
+            <input type="hidden" name="role" value="{{ $role }}">
             <div class="crm-search w-full sm:w-56">
                 <i class="bi bi-search"></i>
                 <input type="text" name="search" value="{{ $search }}" placeholder="Search name / username" class="crm-field">
             </div>
             <x-btn type="submit" variant="secondary">Search</x-btn>
         </form>
-        <x-btn href="{{ route('users.create') }}" icon="bi-person-plus">New User</x-btn>
+        <x-btn href="{{ route('users.create', ['role' => $role]) }}" icon="bi-person-plus">New {{ $roleLabel }}</x-btn>
     </x-slot:actions>
 </x-page-header>
 
@@ -22,9 +23,10 @@
                 <tr>
                     <th>Name</th>
                     <th>Username</th>
-                    <th>Sales Code</th>
+                    @if ($role === \App\Models\User::ROLE_SALES)
+                        <th>Sales Code</th>
+                    @endif
                     <th>Email</th>
-                    <th>Role</th>
                     <th>Status</th>
                     <th></th>
                 </tr>
@@ -39,9 +41,10 @@
                             </div>
                         </td>
                         <td class="text-slate-600">{{ $user->user_name }}</td>
-                        <td class="font-mono text-sm text-slate-700">{{ $user->profile?->sales_code ?: '—' }}</td>
+                        @if ($role === \App\Models\User::ROLE_SALES)
+                            <td class="font-mono text-sm text-slate-700">{{ $user->profile?->sales_code ?: '—' }}</td>
+                        @endif
                         <td class="text-slate-600">{{ $user->email ?? '—' }}</td>
-                        <td><x-badge :color="$user->role === 'admin' ? 'purple' : 'blue'">{{ ucfirst($user->role) }}</x-badge></td>
                         <td>
                             @if ($user->is_active)<x-badge color="green">Active</x-badge>@else<x-badge color="slate">Inactive</x-badge>@endif
                         </td>
@@ -55,7 +58,11 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="7" class="py-12 text-center text-slate-400">No users found.</td></tr>
+                    <tr>
+                        <td colspan="{{ $role === \App\Models\User::ROLE_SALES ? 6 : 5 }}" class="py-12 text-center text-slate-400">
+                            Belum ada user dengan role {{ $roleLabel }}.
+                        </td>
+                    </tr>
                 @endforelse
             </tbody>
         </table>

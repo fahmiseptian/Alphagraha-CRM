@@ -30,9 +30,12 @@ class OpportunityController extends Controller
         $selectedUserId = $this->resolveAssignedUserFilter($request);
 
         $query = Opportunity::query()->with(['account', 'assignedUser']);
+        $user = $this->currentUser();
 
-        if ($this->isAdmin()) {
-            if ($selectedUserId !== null) {
+        if ($user?->canViewAllOpportunities()) {
+            if ($user->isPurchasing() || $user->isFinance()) {
+                $query->where('stage', Opportunity::WON_STAGE);
+            } elseif ($this->isAdmin() && $selectedUserId !== null) {
                 $query->where($query->getModel()->getTable().'.assigned_user_id', $selectedUserId);
             }
         } else {
@@ -73,6 +76,10 @@ class OpportunityController extends Controller
 
     public function create(Request $request)
     {
+        if (! auth()->user()?->canCreateOpportunity()) {
+            abort(403, 'Anda tidak memiliki akses untuk membuat Opportunity.');
+        }
+
         $accountId = $request->get('account_id');
         if ($accountId && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
             $accountId = null;
@@ -92,6 +99,10 @@ class OpportunityController extends Controller
 
     public function store(Request $request)
     {
+        if (! auth()->user()?->canCreateOpportunity()) {
+            abort(403, 'Anda tidak memiliki akses untuk membuat Opportunity.');
+        }
+
         $data = $this->validateData($request);
 
         $now = Carbon::now()->format('Y-m-d H:i:s');
@@ -106,20 +117,46 @@ class OpportunityController extends Controller
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
-        return redirect()->route('opportunities.show', $opportunity)
-            ->with('success', 'Opportunity created successfully.');
+        $message = 'Opportunity created successfully.';
+        if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
+            $message .= ' Diskon menunggu approval Superadmin.';
+        }
+
+        return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
     }
 
     public function edit(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
+        $user = auth()->user();
 
-        return view('opportunities.edit', $this->formData($opportunity) + compact('opportunity'));
+        if ($user?->isFinance()) {
+            return redirect()->route('opportunities.show', $opportunity)
+                ->with('error', 'Finance hanya dapat melihat data perhitungan (read-only).');
+        }
+
+        if ($user?->isPurchasing() && $opportunity->stage !== Opportunity::WON_STAGE) {
+            abort(403, 'Purchasing hanya dapat mengedit deal Closed Won.');
+        }
+
+        return view('opportunities.edit', $this->formData($opportunity) + [
+            'opportunity' => $opportunity,
+            'purchasingMode' => (bool) $user?->isPurchasing(),
+        ]);
     }
 
     public function update(Request $request, Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
+        $user = auth()->user();
+
+        if ($user?->isFinance()) {
+            abort(403, 'Finance tidak dapat mengedit opportunity.');
+        }
+
+        if ($user?->isPurchasing()) {
+            return $this->updatePurchasingFields($request, $opportunity);
+        }
 
         $data = $this->validateData($request);
         $this->applyValidatedData($opportunity, $data, $request);
@@ -128,13 +165,148 @@ class OpportunityController extends Controller
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
+        $message = 'Opportunity updated successfully.';
+        if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
+            $message .= ' Diskon menunggu approval Superadmin.';
+        }
+
+        return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
+    }
+
+    public function approveDiscount(Request $request, Opportunity $opportunity)
+    {
+        if (! auth()->user()?->canApproveDiscount()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $opportunity->crm_discount_status = Opportunity::DISCOUNT_APPROVED;
+        $opportunity->crm_discount_reviewed_by = auth()->id();
+        $opportunity->crm_discount_reviewed_at = now();
+        $opportunity->crm_discount_note = $data['note'] ?? $opportunity->crm_discount_note;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        app(\App\Services\NotificationService::class)->notifyDiscountApproved(
+            $opportunity,
+            (float) $opportunity->crm_discount_amount,
+            revised: false,
+            note: $data['note'] ?? null,
+        );
+
+        return back()->with('success', 'Diskon disetujui. Sales mendapat notifikasi.');
+    }
+
+    /**
+     * Superadmin menolak request dengan menyesuaikan nominal → status langsung approved.
+     */
+    public function rejectDiscount(Request $request, Opportunity $opportunity)
+    {
+        if (! auth()->user()?->canApproveDiscount()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        $data = $request->validate([
+            'discount_amount' => ['required', 'numeric', 'min:0'],
+            'note' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'discount_amount.required' => 'Isi nominal diskon yang disetujui.',
+        ]);
+
+        $amount = (float) $data['discount_amount'];
+        $note = $data['note'] ?? 'Diskon disesuaikan oleh Superadmin.';
+
+        if ($amount <= 0) {
+            $opportunity->crm_has_discount = false;
+            $opportunity->crm_discount_amount = null;
+            $opportunity->crm_discount_status = null;
+        } else {
+            $opportunity->crm_has_discount = true;
+            $opportunity->crm_discount_amount = $amount;
+            $opportunity->crm_discount_status = Opportunity::DISCOUNT_APPROVED;
+        }
+
+        $opportunity->crm_discount_reviewed_by = auth()->id();
+        $opportunity->crm_discount_reviewed_at = now();
+        $opportunity->crm_discount_note = $note;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        app(\App\Services\NotificationService::class)->notifyDiscountApproved(
+            $opportunity,
+            $amount,
+            revised: true,
+            note: $note,
+        );
+
+        return back()->with('success', 'Diskon disesuaikan dan disetujui. Sales mendapat notifikasi.');
+    }
+
+    protected function updatePurchasingFields(Request $request, Opportunity $opportunity)
+    {
+        if ($opportunity->stage !== Opportunity::WON_STAGE) {
+            abort(403, 'Purchasing hanya dapat mengedit deal Closed Won.');
+        }
+
+        $data = $request->validate([
+            'products' => ['required', 'array', 'min:1'],
+            'products.*.name' => ['nullable', 'string', 'max:255'],
+            'products.*.quantity' => ['nullable', 'numeric', 'min:0'],
+            'products.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.vendor' => ['nullable', 'string', 'max:255'],
+            'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
+            'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
+        ]);
+
+        $existing = $opportunity->products->values();
+        $rows = collect($data['products'] ?? [])->values()->map(function ($p, $i) use ($existing) {
+            $prev = $existing->get($i, []);
+
+            return OpportunityProductPricing::enrichRow([
+                'name' => $prev['name'] ?? ($p['name'] ?? ''),
+                'quantity' => $prev['quantity'] ?? ($p['quantity'] ?? 1),
+                'vendor' => $p['vendor'] ?? ($prev['vendor'] ?? ''),
+                'tax_category' => $prev['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
+                'item_kind' => $prev['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                // Harga jual dikunci; purchasing hanya ubah modal & vendor.
+                'sell_exclude' => $prev['sell_exclude'] ?? ($p['sell_exclude'] ?? 0),
+                'cost_exclude' => $p['cost_exclude'] ?? ($prev['cost_exclude'] ?? 0),
+            ]);
+        })->filter(fn ($p) => filled($p['name'] ?? null))->values();
+
+        $opportunity->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
+        $opportunity->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
+        $opportunity->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
+        $opportunity->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
+        $opportunity->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
+        $opportunity->crm_tax_category = $rows->pluck('tax_category')->all();
+        $opportunity->crm_item_kind = $rows->pluck('item_kind')->all();
+        $opportunity->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
+        $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
+        $opportunity->syncWonMargin();
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
         return redirect()->route('opportunities.show', $opportunity)
-            ->with('success', 'Opportunity updated successfully.');
+            ->with('success', 'Harga modal & vendor berhasil diperbarui.');
     }
 
     public function updateStage(Request $request, Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
+
+        if (! auth()->user()?->canEditOpportunityFully()) {
+            abort(403, 'Anda tidak dapat mengubah stage.');
+        }
 
         $data = $request->validate([
             'stage' => ['required', 'string', Rule::in(Opportunity::STAGES)],
@@ -156,6 +328,10 @@ class OpportunityController extends Controller
     public function destroy(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
+
+        if (! auth()->user()?->canEditOpportunityFully()) {
+            abort(403, 'Anda tidak dapat menghapus opportunity.');
+        }
 
         if ($opportunity->quotation()->exists()) {
             return back()->with('error', 'Deal tidak bisa dihapus karena masih terhubung ke penawaran.');
@@ -196,7 +372,16 @@ class OpportunityController extends Controller
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
+            'has_discount' => ['nullable', 'boolean'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
         ]);
+
+        $data['has_discount'] = $request->boolean('has_discount');
+        if (! $data['has_discount']) {
+            $data['discount_amount'] = 0;
+        } else {
+            $data['discount_amount'] = (float) ($data['discount_amount'] ?? 0);
+        }
 
         if (! empty($data['contact_id']) && ! empty($data['account_id'])) {
             $belongsToAccount = Contact::query()
@@ -272,7 +457,48 @@ class OpportunityController extends Controller
             }
         }
 
+        $this->applyDiscountData($opportunity, $data, $isNew);
+
         $opportunity->syncWonMargin();
+    }
+
+    protected function applyDiscountData(Opportunity $opportunity, array $data, bool $isNew): void
+    {
+        $hasDiscount = (bool) ($data['has_discount'] ?? false);
+        $amount = (float) ($data['discount_amount'] ?? 0);
+
+        if (! $hasDiscount || $amount <= 0) {
+            $opportunity->crm_has_discount = false;
+            $opportunity->crm_discount_amount = null;
+            $opportunity->crm_discount_status = null;
+            $opportunity->crm_discount_requested_by = null;
+            $opportunity->crm_discount_requested_at = null;
+            $opportunity->crm_discount_reviewed_by = null;
+            $opportunity->crm_discount_reviewed_at = null;
+            $opportunity->crm_discount_note = null;
+
+            return;
+        }
+
+        $previousAmount = (float) ($opportunity->crm_discount_amount ?? 0);
+        $previousStatus = $opportunity->crm_discount_status;
+        $changed = $isNew
+            || ! $opportunity->crm_has_discount
+            || abs($previousAmount - $amount) > 0.009
+            || $previousStatus === Opportunity::DISCOUNT_REJECTED;
+
+        $opportunity->crm_has_discount = true;
+        $opportunity->crm_discount_amount = $amount;
+
+        if ($changed) {
+            // Setiap diskon > 0 wajib approval Superadmin.
+            $opportunity->crm_discount_status = Opportunity::DISCOUNT_PENDING;
+            $opportunity->crm_discount_requested_by = auth()->id();
+            $opportunity->crm_discount_requested_at = now();
+            $opportunity->crm_discount_reviewed_by = null;
+            $opportunity->crm_discount_reviewed_at = null;
+            $opportunity->crm_discount_note = null;
+        }
     }
 
     protected function generateId(): string
@@ -333,9 +559,28 @@ class OpportunityController extends Controller
 
     protected function authorizeAccess(Opportunity $opportunity): void
     {
-        if (! $this->isAdmin() && $opportunity->assigned_user_id !== auth()->id()) {
-            abort(403, 'You do not have access to this opportunity.');
+        $user = auth()->user();
+        if (! $user) {
+            abort(403);
         }
+
+        if ($user->isSuperAdmin() || $user->role === \App\Models\User::ROLE_ADMIN) {
+            return;
+        }
+
+        if ($user->isPurchasing() || $user->isFinance()) {
+            if ($opportunity->stage !== Opportunity::WON_STAGE) {
+                abort(403, 'Akses hanya untuk deal Closed Won.');
+            }
+
+            return;
+        }
+
+        if ($user->isSales() && $opportunity->assigned_user_id === $user->id) {
+            return;
+        }
+
+        abort(403, 'You do not have access to this opportunity.');
     }
 
     /**

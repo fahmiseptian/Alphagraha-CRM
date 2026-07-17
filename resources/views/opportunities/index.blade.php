@@ -4,7 +4,9 @@
 @section('content')
 <x-page-header title="Opportunity / Deal" description="Sales pipeline & deal progress">
     <x-slot:actions>
-        <x-btn href="{{ route('opportunities.create') }}" icon="bi-plus-lg">New Opportunity</x-btn>
+        @if (auth()->user()->canCreateOpportunity())
+            <x-btn href="{{ route('opportunities.create') }}" icon="bi-plus-lg">New Opportunity</x-btn>
+        @endif
     </x-slot:actions>
 </x-page-header>
 

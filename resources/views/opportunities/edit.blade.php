@@ -8,5 +8,6 @@
     'action' => route('opportunities.update', $opportunity),
     'method' => 'PUT',
     'cancelUrl' => route('opportunities.show', $opportunity),
+    'purchasingMode' => $purchasingMode ?? false,
 ])
 @endsection

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActivityMediaController;
+use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\TemplateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\LoginController;
@@ -10,6 +11,7 @@ use App\Http\Controllers\CustomerContactController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LeadController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OpportunityController;
 use App\Http\Controllers\OpportunityDocumentController;
 use App\Http\Controllers\OpportunityNoteController;
@@ -31,6 +33,12 @@ Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth')->
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
+    // Notifikasi
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::post('/notifications/dismiss-popups', [NotificationController::class, 'dismissPopups'])->name('notifications.dismiss-popups');
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+
     // Pelanggan (data EspoCRM)
     Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
     Route::get('/customers/create', [CustomerController::class, 'create'])->name('customers.create');
@@ -40,8 +48,8 @@ Route::middleware('auth')->group(function () {
     Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
     Route::post('/customers/{account}/contacts', [CustomerContactController::class, 'store'])->name('customers.contacts.store');
 
-    // Contact persons (admin)
-    Route::middleware('role:admin')->group(function () {
+    // Contact persons (superadmin)
+    Route::middleware('role:superadmin')->group(function () {
         Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
         Route::get('/contacts/create', [ContactController::class, 'create'])->name('contacts.create');
         Route::post('/contacts', [ContactController::class, 'store'])->name('contacts.store');
@@ -66,6 +74,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/opportunities/{opportunity}/edit', [OpportunityController::class, 'edit'])->name('opportunities.edit');
     Route::put('/opportunities/{opportunity}', [OpportunityController::class, 'update'])->name('opportunities.update');
     Route::patch('/opportunities/{opportunity}/stage', [OpportunityController::class, 'updateStage'])->name('opportunities.stage');
+    Route::post('/opportunities/{opportunity}/discount/approve', [OpportunityController::class, 'approveDiscount'])->name('opportunities.discount.approve');
+    Route::post('/opportunities/{opportunity}/discount/reject', [OpportunityController::class, 'rejectDiscount'])->name('opportunities.discount.reject');
     Route::delete('/opportunities/{opportunity}', [OpportunityController::class, 'destroy'])->name('opportunities.destroy');
     Route::post('/opportunities/{opportunity}/documents', [OpportunityDocumentController::class, 'store'])->name('opportunities.documents.store');
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
@@ -92,10 +102,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/profile/signature', [ProfileController::class, 'uploadSignature'])->name('profile.signature.store');
     Route::delete('/profile/signature', [ProfileController::class, 'destroySignature'])->name('profile.signature.destroy');
 
-    // Area administrator
-    Route::middleware('role:admin')->group(function () {
+    // Area administrator (Superadmin only)
+    Route::middleware('role:superadmin')->group(function () {
         Route::resource('templates', TemplateController::class);
         Route::resource('users', UserController::class)->except(['show']);
+        Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');
+        Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
     });
 });
 

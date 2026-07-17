@@ -15,6 +15,9 @@
         'name' => $c->full_name,
         'account_id' => $c->account_id,
     ])->values();
+    $ppnPercent = \App\Support\OpportunityProductPricing::ppnPercent();
+    $pphPercent = \App\Support\OpportunityProductPricing::pphPercent();
+    $purchasingMode = $purchasingMode ?? false;
 @endphp
 <form method="POST" action="{{ $action }}"
       x-data="opportunityForm({{ \Illuminate\Support\Js::from([
@@ -24,12 +27,22 @@
           'accountId' => old('account_id', $opportunity->account_id),
           'contactId' => old('contact_id', $opportunity->contact_id),
           'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
+          'ppnPercent' => $ppnPercent,
+          'pphPercent' => $pphPercent,
+          'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
+          'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
+          'purchasingMode' => $purchasingMode,
       ]) }})">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
 
-    @if ($errors->any())
-        <div class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    @if ($purchasingMode)
+        <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Mode Purchasing: Anda hanya dapat mengubah <strong>harga modal (beli exclude)</strong> dan <strong>vendor</strong> pada deal Closed Won.
+        </div>
+    @endif
+
+    @if ($errors->any())        <div class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <ul class="list-inside list-disc space-y-1">
                 @foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach
             </ul>
@@ -40,89 +53,131 @@
         {{-- Kolom utama --}}
         <div class="space-y-5 lg:col-span-2">
             <x-card>
-                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2" @if($purchasingMode) aria-disabled="true"@endif>
                     <div>
                         <label class="crm-label">Company <span class="text-red-500">*</span></label>
-                        <select name="company" required class="select2 w-full" data-placeholder="— Select —">
+                        <select name="company" required class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
                             <option value="">— Select —</option>
                             @foreach ($companies as $co)
                                 <option value="{{ $co }}" @selected(old('company', $opportunity->company) === $co)>{{ $co }}</option>
                             @endforeach
                         </select>
+                        @if ($purchasingMode)<input type="hidden" name="company" value="{{ $opportunity->company }}">@endif
                     </div>
                     <div>
                         <label class="crm-label">Type <span class="text-red-500">*</span></label>
-                        <select name="type" required class="select2 w-full" data-placeholder="— Select —">
+                        <select name="type" required class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
                             <option value="">— Select —</option>
                             @foreach ($types as $t)
                                 <option value="{{ $t }}" @selected(old('type', $opportunity->type) === $t)>{{ $t }}</option>
                             @endforeach
                         </select>
+                        @if ($purchasingMode)<input type="hidden" name="type" value="{{ $opportunity->type }}">@endif
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Opportunity Name <span class="text-red-500">*</span></label>
                         <input type="text" name="name" value="{{ old('name', $opportunity->name) }}" required
-                               class="crm-field">
+                               class="crm-field" @readonly($purchasingMode)>
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Account</label>
-                        <select name="account_id" class="select2 w-full" data-placeholder="— Select —">
+                        <select name="account_id" class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
                             <option value="">— Select —</option>
                             @foreach ($accounts as $acc)
                                 <option value="{{ $acc->id }}" @selected(old('account_id', $opportunity->account_id) === $acc->id)>{{ $acc->name }}</option>
                             @endforeach
                         </select>
+                        @if ($purchasingMode)<input type="hidden" name="account_id" value="{{ $opportunity->account_id }}">@endif
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Contact</label>
-                        <select name="contact_id" class="select2 w-full" data-placeholder="Select account first" :disabled="!accountId">
+                        <select name="contact_id" class="select2 w-full" data-placeholder="Select account first" :disabled="!accountId || purchasingMode">
                             <option value="">— No contact —</option>
                         </select>
-                        <p class="mt-1 text-xs text-slate-400" x-show="accountId">Auto-filled from account. You can clear or pick another contact.</p>
+                        @if ($purchasingMode)<input type="hidden" name="contact_id" value="{{ $opportunity->contact_id }}">@endif
+                        <p class="mt-1 text-xs text-slate-400" x-show="accountId && !purchasingMode">Auto-filled from account. You can clear or pick another contact.</p>
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Lead Source</label>
-                        <select name="lead_source" class="select2 w-full" data-placeholder="— Select —">
+                        <select name="lead_source" class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
                             <option value="">— Select —</option>
                             @foreach ($leadSources as $src)
                                 <option value="{{ $src }}" @selected(old('lead_source', $opportunity->lead_source) === $src)>{{ $src }}</option>
                             @endforeach
                         </select>
+                        @if ($purchasingMode)<input type="hidden" name="lead_source" value="{{ $opportunity->lead_source }}">@endif
                     </div>
                     <div>
                         <label class="crm-label">Stage</label>
-                        <select name="stage" class="select2 w-full">
+                        <select name="stage" class="select2 w-full" @disabled($purchasingMode)>
                             @foreach ($stages as $st)
                                 <option value="{{ $st }}" @selected(old('stage', $opportunity->stage) === $st)>{{ $st }}</option>
                             @endforeach
                         </select>
+                        @if ($purchasingMode)<input type="hidden" name="stage" value="{{ $opportunity->stage }}">@endif
                     </div>
                     <div>
                         <label class="crm-label">Amount <span class="text-red-500">*</span></label>
                         <div class="flex gap-2">
                             <input type="number" step="0.01" min="0" name="amount" x-model.number="amount" required
-                                   class="crm-field min-w-[200px] flex-1" :readonly="products.length > 0">
-                            <select name="amount_currency" class="select2 select2-compact w-28 shrink-0">
+                                   class="crm-field min-w-[200px] flex-1" :readonly="products.length > 0 || purchasingMode">
+                            <select name="amount_currency" class="select2 select2-compact w-28 shrink-0" @disabled($purchasingMode)>
                                 @foreach (['IDR', 'USD', 'EUR', 'SGD'] as $cur)
                                     <option value="{{ $cur }}" @selected(old('amount_currency', $opportunity->amount_currency ?: 'IDR') === $cur)>{{ $cur }}</option>
                                 @endforeach
                             </select>
+                            @if ($purchasingMode)
+                                <input type="hidden" name="amount_currency" value="{{ $opportunity->amount_currency ?: 'IDR' }}">
+                            @endif
                         </div>
                         <p class="mt-1 text-xs text-slate-400" x-show="products.length > 0">Calculated automatically from line items.</p>
                     </div>
+                    @unless ($purchasingMode)
+                    <div class="sm:col-span-2">
+                        <label class="crm-label">Diskon tambahan</label>
+                        <div class="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                            <label class="flex items-center gap-2 text-sm text-slate-700">
+                                <input type="hidden" name="has_discount" value="0">
+                                <input type="checkbox" name="has_discount" value="1" x-model="hasDiscount"
+                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                       @checked(old('has_discount', $opportunity->crm_has_discount))>
+                                Aktifkan diskon tambahan (nominal)
+                            </label>
+                            <div x-show="hasDiscount" x-cloak class="mt-3 grid gap-3 sm:grid-cols-2">
+                                <div>
+                                    <label class="mb-1 block text-xs font-medium text-slate-500">Nominal diskon</label>
+                                    <input type="number" step="0.01" min="0" name="discount_amount" x-model.number="discountAmount"
+                                           class="crm-field w-full" placeholder="0">
+                                    <p class="mt-1 text-xs text-slate-400">Setiap diskon &gt; 0 wajib approval Superadmin.</p>
+                                </div>
+                                <div>
+                                    <label class="mb-1 block text-xs font-medium text-slate-500">Persentase (info)</label>
+                                    <p class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                                       x-text="discountPercentLabel"></p>
+                                    <p class="mt-1 text-xs text-slate-400">Persentase ditampilkan juga saat proses approval.</p>
+                                </div>
+                            </div>
+                            @if ($opportunity->exists && $opportunity->hasActiveDiscount())
+                                <p class="mt-2 text-xs text-slate-500">
+                                    Status: <span class="font-medium">{{ $opportunity->discountStatusLabel() }}</span>
+                                </p>
+                            @endif
+                        </div>
+                    </div>
+                    @endunless
                     <div>
                         <label class="crm-label">Probability, % <span class="text-red-500">*</span></label>
                         <input type="number" min="0" max="100" name="probability" value="{{ old('probability', $opportunity->probability ?? 10) }}" required
-                               class="crm-field">
+                               class="crm-field" @readonly($purchasingMode)>
                     </div>
                     <div>
                         <label class="crm-label">Close Date <span class="text-red-500">*</span></label>
                         <input type="date" name="close_date" value="{{ old('close_date', $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->format('Y-m-d') : '') }}" required
-                               class="crm-field">
+                               class="crm-field" @readonly($purchasingMode)>
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Description</label>
-                        <textarea name="description" rows="4" class="crm-field">{{ old('description', $opportunity->description) }}</textarea>
+                        <textarea name="description" rows="4" class="crm-field" @readonly($purchasingMode)>{{ old('description', $opportunity->description) }}</textarea>
                     </div>
                 </div>
             </x-card>
@@ -130,7 +185,7 @@
             {{-- Line items --}}
             <x-card>
                 {{-- Langkah 1: pilih kategori saja --}}
-                <div x-show="!selectedTaxCategory" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
+                <div x-show="!selectedTaxCategory && !purchasingMode" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
                     <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori terlebih dahulu</p>
                     <div class="flex flex-wrap justify-center gap-3">
                         <button type="button" @click="selectTaxCategory('non_wapu')"
@@ -145,13 +200,13 @@
                 </div>
 
                 {{-- Langkah 2: form item setelah kategori dipilih --}}
-                <div x-show="selectedTaxCategory" x-cloak>
+                <div x-show="selectedTaxCategory || purchasingMode" x-cloak>
                     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                         <div class="flex items-center gap-2">
                             <span class="text-sm text-slate-500">Kategori:</span>
                             <span class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="selectedTaxCategory === 'wapu' ? 'Wapu' : 'Non Wapu'"></span>
                         </div>
-                        <button type="button" x-show="products.length === 0" @click="selectedTaxCategory = null"
+                        <button type="button" x-show="products.length === 0 && !purchasingMode" @click="selectedTaxCategory = null"
                                 class="text-xs font-medium text-slate-500 hover:text-slate-700">
                             <i class="bi bi-arrow-left"></i> Ganti kategori
                         </button>
@@ -165,25 +220,25 @@
                                 <div class="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12">
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Barang / Jasa</label>
-                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" @change="onItemKindChange(p)" class="crm-field w-full text-sm">
+                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" @change="onItemKindChange(p)" class="crm-field w-full text-sm" :disabled="purchasingMode">
                                             <option value="barang">Barang</option>
                                             <option value="jasa">Jasa</option>
                                         </select>
                                     </div>
                                     <div class="sm:col-span-5">
                                         <label class="crm-label text-xs">Item</label>
-                                        <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full">
+                                        <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
                                     <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Qty</label>
-                                        <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity" class="crm-field w-full text-right">
+                                        <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity" class="crm-field w-full text-right" :readonly="purchasingMode">
                                     </div>
                                     <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Vendor</label>
                                         <input type="text" :name="`products[${i}][vendor]`" x-model="p.vendor" placeholder="Vendor" class="crm-field w-full">
                                     </div>
                                     <div class="flex items-end justify-end sm:col-span-1">
-                                        <button type="button" @click="removeProduct(i)" class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i class="bi bi-trash"></i></button>
+                                        <button type="button" x-show="!purchasingMode" @click="removeProduct(i)" class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i class="bi bi-trash"></i></button>
                                     </div>
                                 </div>
 
@@ -202,7 +257,7 @@
                                             <td class="py-2 pr-3">
                                                 <input type="number" step="0.01" min="0" :name="`products[${i}][sell_exclude]`" x-model.number="p.sell_exclude"
                                                        @input="onSellChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right">
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right" :readonly="purchasingMode">
                                             </td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly :value="formatNumber(sellInclude(p))"
@@ -222,8 +277,8 @@
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">PPH 2%</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">Exclude × 2%</td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH ' + pphPercent + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Exclude × ' + pphPercent + '%'"></td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly :value="formatNumber(pphAmount(p))"
                                                        class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
@@ -241,7 +296,8 @@
                                                                x-model.number="p.margin_percent"
                                                                @input="onMarginPercentChange(p)"
                                                                class="crm-field w-20 bg-white text-right text-sm"
-                                                               title="Ubah % margin untuk hitung ulang harga jual">
+                                                               title="Ubah % margin untuk hitung ulang harga jual"
+                                                               :readonly="purchasingMode">
                                                         <span class="text-xs font-semibold text-slate-600">%</span>
                                                     </div>
                                                 </div>
@@ -255,8 +311,8 @@
                         <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">Belum ada item. Klik tombol + di bawah untuk menambahkan.</p>
                     </div>
                     <div class="mt-3 flex items-center justify-between">
-                        <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()">Add Item</x-btn>
-                        <div class="text-sm">
+                        <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()" x-show="!purchasingMode">Add Item</x-btn>
+                        <div class="text-sm" :class="purchasingMode ? 'ml-auto' : ''">
                             <span class="text-slate-500">Total (Include):&nbsp;</span>
                             <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
                         </div>
@@ -268,7 +324,7 @@
         {{-- Sidebar --}}
         <div class="space-y-5">
             <x-card title="Assigned User">
-                @if (auth()->user()->isAdmin())
+                @if (auth()->user()->isAdmin() && ! $purchasingMode)
                     <select name="assigned_user_id" class="select2 w-full" data-placeholder="— Select —">
                         <option value="">— Select —</option>
                         @foreach ($salesUsers as $u)
@@ -276,11 +332,12 @@
                         @endforeach
                     </select>
                 @else
-                    <p class="text-sm text-slate-700">{{ auth()->user()->display_name }}</p>
+                    <p class="text-sm text-slate-700">{{ optional($opportunity->assignedUser)->display_name ?: auth()->user()->display_name }}</p>
                     <input type="hidden" name="assigned_user_id" value="{{ old('assigned_user_id', $opportunity->assigned_user_id ?: auth()->id()) }}">
                 @endif
             </x-card>
 
+            @unless ($purchasingMode)
             <x-card title="Teams">
                 <select name="team_ids[]" multiple class="select2 w-full" data-placeholder="— Select teams —">
                     @foreach ($teams as $team)
@@ -289,6 +346,7 @@
                 </select>
                 <p class="mt-1.5 text-xs text-slate-400">Type to search, select one or more teams.</p>
             </x-card>
+            @endunless
 
     <div class="flex flex-col gap-2">
                 <x-btn type="submit" class="w-full justify-center" icon="bi-save">Save</x-btn>
@@ -300,7 +358,11 @@
 
 <script>
     function opportunityForm(config) {
-        const TAX_MULTIPLIER = 1.11;
+        const PPN_PERCENT = Number(config.ppnPercent) || 11;
+        const PPH_PERCENT = Number(config.pphPercent) || 2;
+        const TAX_MULTIPLIER = 1 + (PPN_PERCENT / 100);
+        const PPH_RATE = PPH_PERCENT / 100;
+        const AFTER_PPH_FACTOR = 1 - PPH_RATE;
 
         const initialProducts = (config.products || []).map(p => {
             const taxCategory = p.tax_category ?? 'non_wapu';
@@ -308,7 +370,7 @@
             const sell = Number(p.sell_exclude) || 0;
             const cost = Number(p.cost_exclude) || 0;
             const appliesPph = !(taxCategory === 'non_wapu' && itemKind === 'barang');
-            const pph = appliesPph ? Math.round(sell * 0.02 * 100) / 100 : 0;
+            const pph = appliesPph ? Math.round(sell * PPH_RATE * 100) / 100 : 0;
             const margin = Math.round((appliesPph ? (sell - pph - cost) : (sell - cost)) * 100) / 100;
             const marginPercent = sell > 0 ? Math.round((margin / sell) * 10000) / 100 : 0;
 
@@ -332,13 +394,24 @@
             accountId: config.accountId || '',
             contactId: config.contactId || '',
             currency: config.currency || 'IDR',
+            ppnPercent: PPN_PERCENT,
+            pphPercent: PPH_PERCENT,
             amount: {{ (float) old('amount', $opportunity->amount ?? 0) }},
+            hasDiscount: !!config.hasDiscount,
+            discountAmount: Number(config.discountAmount) || 0,
+            purchasingMode: !!config.purchasingMode,
             get filteredContacts() {
                 if (!this.accountId) return [];
                 return this.contacts.filter(c => c.account_id === this.accountId);
             },
             get productsTotal() {
                 return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * this.sellInclude(p), 0);
+            },
+            get discountPercentLabel() {
+                const base = this.products.length > 0 ? this.productsTotal : (Number(this.amount) || 0);
+                const disc = Number(this.discountAmount) || 0;
+                if (!this.hasDiscount || base <= 0 || disc <= 0) return '—';
+                return (Math.round((disc / base) * 10000) / 100).toFixed(2) + '% dari amount';
             },
             round(value) {
                 return Math.round((Number(value) || 0) * 100) / 100;
@@ -354,7 +427,7 @@
             },
             pphAmount(p) {
                 if (!this.appliesPph(p)) return 0;
-                return this.round((Number(p.sell_exclude) || 0) * 0.02);
+                return this.round((Number(p.sell_exclude) || 0) * PPH_RATE);
             },
             marginAmount(p) {
                 const sell = Number(p.sell_exclude) || 0;
@@ -380,7 +453,7 @@
             /**
              * Dari % margin target + modal → hitung harga jual exclude.
              * Tanpa PPH: sell = cost / (1 - pct/100)
-             * Dengan PPH 2%: sell = cost / (0.98 - pct/100)
+             * Dengan PPH: sell = cost / (afterPphFactor - pct/100)
              */
             sellFromMarginPercent(p) {
                 const pct = Number(p.margin_percent) || 0;
@@ -389,7 +462,7 @@
                     return Number(p.sell_exclude) || 0;
                 }
 
-                const factor = this.appliesPph(p) ? 0.98 : 1;
+                const factor = this.appliesPph(p) ? AFTER_PPH_FACTOR : 1;
                 const denom = factor - (pct / 100);
                 if (denom <= 0) {
                     return Number(p.sell_exclude) || 0;
@@ -410,7 +483,9 @@
             },
             onMarginPercentChange(p) {
                 let pct = Number(p.margin_percent) || 0;
-                const maxPct = this.appliesPph(p) ? 97.99 : 99.99;
+                const maxPct = this.appliesPph(p)
+                    ? Math.max(AFTER_PPH_FACTOR * 100 - 0.01, 0)
+                    : 99.99;
                 if (pct < 0) pct = 0;
                 if (pct > maxPct) pct = maxPct;
                 p.margin_percent = pct;

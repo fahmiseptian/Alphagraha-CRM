@@ -9,28 +9,105 @@
         <p class="crm-page-desc">{{ optional($opportunity->account)->name ?: $opportunity->company ?: 'Opportunity' }}</p>
     </div>
     <div class="flex shrink-0 flex-wrap items-center gap-2">
-        @if ($nextStage)
-            <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
-                @csrf @method('PATCH')
-                <input type="hidden" name="stage" value="{{ $nextStage }}">
-                <x-btn type="submit" icon="bi-arrow-right-circle">Move to {{ $nextStage }}</x-btn>
-            </form>
-        @elseif (! empty($closingStages))
-            @foreach ($closingStages as $stage)
+        @if (auth()->user()->canEditOpportunityFully())
+            @if ($nextStage)
                 <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
                     @csrf @method('PATCH')
-                    <input type="hidden" name="stage" value="{{ $stage }}">
-                    @if ($stage === \App\Models\Espo\Opportunity::WON_STAGE)
-                        <x-btn type="submit" icon="bi-trophy" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Closed Won</x-btn>
-                    @else
-                        <x-btn type="submit" variant="secondary" icon="bi-x-circle" class="!border-red-200 !text-red-600 hover:!bg-red-50">Closed Lost</x-btn>
-                    @endif
+                    <input type="hidden" name="stage" value="{{ $nextStage }}">
+                    <x-btn type="submit" icon="bi-arrow-right-circle">Move to {{ $nextStage }}</x-btn>
                 </form>
-            @endforeach
+            @elseif (! empty($closingStages))
+                @foreach ($closingStages as $stage)
+                    <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
+                        @csrf @method('PATCH')
+                        <input type="hidden" name="stage" value="{{ $stage }}">
+                        @if ($stage === \App\Models\Espo\Opportunity::WON_STAGE)
+                            <x-btn type="submit" icon="bi-trophy" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Closed Won</x-btn>
+                        @else
+                            <x-btn type="submit" variant="secondary" icon="bi-x-circle" class="!border-red-200 !text-red-600 hover:!bg-red-50">Closed Lost</x-btn>
+                        @endif
+                    </form>
+                @endforeach
+            @endif
         @endif
-        <x-btn href="{{ route('opportunities.edit', $opportunity) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
+        @if (auth()->user()->canEditOpportunityFully() || (auth()->user()->isPurchasing() && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE))
+            <x-btn href="{{ route('opportunities.edit', $opportunity) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
+        @endif
     </div>
 </div>
+
+@if ($opportunity->hasActiveDiscount())
+    @php
+        $discStatus = $opportunity->crm_discount_status;
+        $discPct = $opportunity->discountPercent();
+        $isPending = $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_PENDING;
+        $isRejected = $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_REJECTED;
+        $isApproved = $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_APPROVED;
+    @endphp
+    <div @class([
+        'mb-4 rounded-lg border px-4 py-3 text-sm',
+        'border-amber-200 bg-amber-50 text-amber-900' => $isPending,
+        'border-red-200 bg-red-50 text-red-800' => $isRejected,
+        'border-green-200 bg-green-50 text-green-800' => $isApproved,
+        'border-slate-200 bg-slate-50 text-slate-700' => ! $isPending && ! $isRejected && ! $isApproved,
+    ])>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+                <p class="font-semibold">
+                    @if ($isPending)
+                        <i class="bi bi-hourglass-split mr-1"></i> Diskon menunggu approval Superadmin
+                    @elseif ($isRejected)
+                        <i class="bi bi-x-circle mr-1"></i> Diskon ditolak (legacy)
+                    @elseif ($isApproved)
+                        <i class="bi bi-check-circle mr-1"></i> Diskon disetujui
+                    @else
+                        Diskon tambahan
+                    @endif
+                </p>
+                <p class="mt-1">
+                    Nominal: <strong>{{ money($opportunity->crm_discount_amount, $opportunity->amount_currency ?: 'IDR') }}</strong>
+                    @if ($discPct !== null)
+                        &nbsp;·&nbsp; Persentase: <strong>{{ number_format($discPct, 2, ',', '.') }}%</strong> dari amount
+                    @endif
+                </p>
+                @if ($opportunity->crm_discount_note)
+                    <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_discount_note }}</p>
+                @endif
+            </div>
+            @if ($isPending && auth()->user()->canApproveDiscount())
+                <div class="flex w-full max-w-md shrink-0 flex-col gap-3">
+                    <form method="POST" action="{{ route('opportunities.discount.approve', $opportunity) }}" class="flex flex-wrap items-center gap-2">
+                        @csrf
+                        <input type="text" name="note" placeholder="Catatan approve (opsional)"
+                               class="min-w-[10rem] flex-1 rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <x-btn type="submit" icon="bi-check-lg" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Approve</x-btn>
+                    </form>
+                    <div class="rounded-lg border border-amber-200 bg-white p-3">
+                        <p class="mb-2 text-xs font-semibold text-amber-800">Tolak request — sesuaikan nominal lalu setujui</p>
+                        <form method="POST" action="{{ route('opportunities.discount.reject', $opportunity) }}" class="space-y-2">
+                            @csrf
+                            <div>
+                                <label class="mb-0.5 block text-[11px] text-slate-500">Nominal diskon yang disetujui</label>
+                                <input type="number" step="0.01" min="0" name="discount_amount" required
+                                       value="{{ old('discount_amount', $opportunity->crm_discount_amount) }}"
+                                       class="w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm text-slate-700">
+                            </div>
+                            <div>
+                                <label class="mb-0.5 block text-[11px] text-slate-500">Catatan ke sales</label>
+                                <input type="text" name="note" placeholder="Mis. diskon diturunkan sesuai kebijakan"
+                                       value="{{ old('note') }}"
+                                       class="w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                            </div>
+                            <x-btn type="submit" variant="secondary" icon="bi-pencil-square" class="w-full justify-center !border-amber-300 !text-amber-800 hover:!bg-amber-50">
+                                Sesuaikan &amp; Setujui
+                            </x-btn>
+                        </form>
+                    </div>
+                </div>
+            @endif
+        </div>
+    </div>
+@endif
 
 @if ($duplicates->isNotEmpty())
     <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -77,6 +154,23 @@
                 <div><dt class="text-slate-400">Account / Customer</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->account)->name ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Type</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->type ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Amount</dt><dd class="mt-0.5 font-semibold text-slate-800">{{ money($opportunity->amount, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
+                @if ($opportunity->hasActiveDiscount())
+                    <div>
+                        <dt class="text-slate-400">Diskon tambahan</dt>
+                        <dd class="mt-0.5 font-medium text-slate-700">
+                            {{ money($opportunity->crm_discount_amount, $opportunity->amount_currency ?: 'IDR') }}
+                            @if ($opportunity->discountPercent() !== null)
+                                <span class="text-slate-500">({{ number_format($opportunity->discountPercent(), 2, ',', '.') }}%)</span>
+                            @endif
+                            <x-badge class="ml-1" :color="match($opportunity->crm_discount_status) {
+                                'approved' => 'green',
+                                'rejected' => 'red',
+                                'pending' => 'amber',
+                                default => 'slate',
+                            }">{{ $opportunity->discountStatusLabel() }}</x-badge>
+                        </dd>
+                    </div>
+                @endif
                 @if ($opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE && $opportunity->crm_won_margin !== null)
                     <div><dt class="text-slate-400">Won Margin</dt><dd class="mt-0.5 font-semibold text-green-700">{{ money($opportunity->crm_won_margin, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
                 @endif
@@ -114,7 +208,7 @@
                                 <th class="text-right">Jual Incl</th>
                                 <th class="text-right">Beli Excl</th>
                                 <th class="text-right">Beli Incl</th>
-                                <th class="text-right">PPH 2%</th>
+                                <th class="text-right">PPH {{ rtrim(rtrim(number_format(\App\Support\OpportunityProductPricing::pphPercent(), 2, ',', '.'), '0'), ',') }}%</th>
                                 <th class="text-right">Margin</th>
                                 <th class="text-right">%</th>
                                 <th>Vendor</th>

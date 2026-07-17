@@ -43,7 +43,15 @@ class LoginController extends Controller
         }
 
         Auth::login($user);
+        $user->load('profile');
         $request->session()->regenerate();
+
+        try {
+            app(\App\Services\NotificationService::class)->syncUpcomingForUser($user);
+            $request->session()->put('crm_notif_synced_at', now()->timestamp);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         if ($user->isSales()) {
             session()->flash('show_deadline_popup', true);

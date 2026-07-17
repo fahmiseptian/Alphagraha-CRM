@@ -16,7 +16,7 @@
     $config = [
         'items' => $initialItems,
         'discount' => (float) old('discount', $quotation->discount ?? 0),
-        'taxPercent' => 11,
+        'taxPercent' => (float) old('tax_percent', $quotation->tax_percent ?? \App\Support\OpportunityProductPricing::ppnPercent()),
         'currency' => old('currency', $quotation->currency ?? 'IDR'),
         'accounts' => $accountMap,
         'accountId' => (string) old('account_id', $quotation->account_id),
@@ -24,6 +24,7 @@
         'companyName' => old('company_name', $quotation->company_name) ?? '',
         'customerAddress' => old('customer_address', $quotation->customer_address) ?? '',
     ];
+    $ppnPercent = $config['taxPercent'];
 @endphp
 
 <form method="POST" action="{{ $action }}"
@@ -144,7 +145,7 @@
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Terms & Conditions @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
-                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Harga sudah termasuk PPN 11%\n2. Harga dan ketersediaan barang dapat berubah sewaktu-waktu tanpa pemberitahuan terlebih dahulu.") }}</textarea>
+                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Harga sudah termasuk PPN {$ppnPercent}%\n2. Harga dan ketersediaan barang dapat berubah sewaktu-waktu tanpa pemberitahuan terlebih dahulu.") }}</textarea>
                     </div>
                 </div>
             </x-card>
@@ -233,9 +234,9 @@
                     </div>
                     <div class="flex items-center justify-between">
                         <dt class="text-slate-500">Tax (PPN)</dt>
-                        <dd class="font-medium text-slate-700">11%</dd>
+                        <dd class="font-medium text-slate-700" x-text="taxPercent + '%'"></dd>
                     </div>
-                    <input type="hidden" name="tax_percent" value="11">
+                    <input type="hidden" name="tax_percent" :value="taxPercent">
                     <div class="flex justify-between text-slate-500">
                         <dt>Tax Amount</dt>
                         <dd x-text="formatMoney(taxAmount)"></dd>

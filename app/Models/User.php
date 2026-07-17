@@ -12,13 +12,30 @@ use Illuminate\Support\Facades\DB;
 /**
  * Pengguna aplikasi = user EspoCRM (tabel `user`).
  *
- * Autentikasi memakai algoritma hashing EspoCRM (lihat App\Services\EspoPassword),
- * sehingga login tidak melalui Auth::attempt bawaan melainkan Auth::login().
- * Role diturunkan dari kolom `type`: admin -> Administrator, selain itu -> Sales.
+ * Role aplikasi disimpan di crm_user_profiles.app_role.
+ * Espo `user.type` tetap admin/regular untuk kompatibilitas EspoCRM.
  */
 class User extends Authenticatable
 {
     use Notifiable;
+
+    public const ROLE_SUPERADMIN = 'superadmin';
+
+    public const ROLE_ADMIN = 'admin';
+
+    public const ROLE_SALES = 'sales';
+
+    public const ROLE_PURCHASING = 'purchasing';
+
+    public const ROLE_FINANCE = 'finance';
+
+    public const ROLES = [
+        self::ROLE_SUPERADMIN => 'Superadmin',
+        self::ROLE_ADMIN => 'Admin',
+        self::ROLE_SALES => 'Sales',
+        self::ROLE_PURCHASING => 'Purchasing',
+        self::ROLE_FINANCE => 'Finance',
+    ];
 
     protected $table = 'user';
     protected $keyType = 'string';
@@ -42,9 +59,6 @@ class User extends Authenticatable
         });
     }
 
-    /**
-     * Hanya user internal aktif yang relevan (bukan API/portal/system).
-     */
     public function scopeInternalActive(Builder $query): Builder
     {
         return $query->where('is_active', 1)->whereIn('type', ['regular', 'admin']);
@@ -54,20 +68,100 @@ class User extends Authenticatable
 
     public function getRoleAttribute(): string
     {
-        return $this->type === 'admin' ? 'admin' : 'sales';
+        $this->loadMissing('profile');
+
+        $appRole = $this->profile?->app_role;
+        if ($appRole && isset(self::ROLES[$appRole])) {
+            return $appRole;
+        }
+
+        // Fallback legacy: Espo admin → superadmin, selain itu sales.
+        return $this->type === 'admin' ? self::ROLE_SUPERADMIN : self::ROLE_SALES;
     }
 
+    public function roleLabel(): string
+    {
+        return self::ROLES[$this->role] ?? ucfirst($this->role);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === self::ROLE_SUPERADMIN;
+    }
+
+    /**
+     * Superadmin atau Admin (bisa lihat semua opportunity).
+     */
     public function isAdmin(): bool
     {
-        return $this->type === 'admin';
+        return in_array($this->role, [self::ROLE_SUPERADMIN, self::ROLE_ADMIN], true);
     }
 
     public function isSales(): bool
     {
-        return ! $this->isAdmin();
+        return $this->role === self::ROLE_SALES;
     }
 
-    // --- Remember token dinonaktifkan (kolom tidak ada di tabel EspoCRM) -----
+    public function isPurchasing(): bool
+    {
+        return $this->role === self::ROLE_PURCHASING;
+    }
+
+    public function isFinance(): bool
+    {
+        return $this->role === self::ROLE_FINANCE;
+    }
+
+    public function canAccessAdministration(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canCreateOpportunity(): bool
+    {
+        return in_array($this->role, [self::ROLE_SUPERADMIN, self::ROLE_SALES], true);
+    }
+
+    public function canCreateQuotation(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+        ], true);
+    }
+
+    public function canViewAllOpportunities(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_PURCHASING,
+            self::ROLE_FINANCE,
+        ], true);
+    }
+
+    public function canEditOpportunityFully(): bool
+    {
+        return in_array($this->role, [self::ROLE_SUPERADMIN, self::ROLE_ADMIN, self::ROLE_SALES], true);
+    }
+
+    public function canApproveDiscount(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canEditWonCostVendor(): bool
+    {
+        return $this->isPurchasing() || $this->isSuperAdmin();
+    }
+
+    public function canViewWonFinance(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin() || $this->isAdmin();
+    }
+
+    // --- Remember token dinonaktifkan ---------------------------------------
 
     public function getRememberToken(): ?string
     {
@@ -93,9 +187,6 @@ class User extends Authenticatable
             ?: (string) $this->user_name;
     }
 
-    /**
-     * Email primary user dari EspoCRM (entity_email_address -> email_address).
-     */
     public function getEmailAttribute(): ?string
     {
         $emailId = DB::table('entity_email_address')
@@ -127,6 +218,11 @@ class User extends Authenticatable
         return $this->hasOne(UserProfile::class, 'user_id', 'id');
     }
 
+    public function crmNotifications(): HasMany
+    {
+        return $this->hasMany(CrmNotification::class, 'user_id', 'id');
+    }
+
     public function hasDigitalSignature(): bool
     {
         $this->loadMissing('profile');
@@ -139,5 +235,15 @@ class User extends Authenticatable
         $this->loadMissing('profile');
 
         return $this->profile?->signatureAbsolutePath();
+    }
+
+    /**
+     * Map app_role → Espo user.type.
+     */
+    public static function espoTypeForRole(string $appRole): string
+    {
+        return in_array($appRole, [self::ROLE_SUPERADMIN, self::ROLE_ADMIN], true)
+            ? 'admin'
+            : 'regular';
     }
 }

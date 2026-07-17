@@ -29,20 +29,29 @@
     </div>
     <div>
         <label class="mb-1.5 block text-sm font-medium text-slate-700">Role <span class="text-red-500">*</span></label>
-        <select name="role" class="select2 w-full">
-            <option value="sales" @selected(old('role', $user->role) === 'sales')>Sales (regular)</option>
-            <option value="admin" @selected(old('role', $user->role) === 'admin')>Administrator (admin)</option>
-        </select>
+        @if ($lockRole ?? false)
+            <input type="hidden" name="role" value="{{ old('role', $role ?? $user->role) }}">
+            <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                {{ \App\Models\User::ROLES[old('role', $role ?? $user->role)] ?? ucfirst($role ?? $user->role) }}
+            </p>
+        @else
+            <select name="role" class="select2 w-full">
+                @foreach (\App\Models\User::ROLES as $key => $label)
+                    <option value="{{ $key }}" @selected(old('role', $role ?? $user->role) === $key)>{{ $label }}</option>
+                @endforeach
+            </select>
+            <p class="mt-1 text-xs text-slate-400">Ubah role akan memindahkan user ke submenu role tersebut.</p>
+        @endif
     </div>
     <div>
-        <label class="mb-1.5 block text-sm font-medium text-slate-700">Sales Code <span class="text-red-500">*</span></label>
+        <label class="mb-1.5 block text-sm font-medium text-slate-700">Sales Code <span class="text-xs font-normal text-slate-400">(wajib untuk Sales)</span></label>
         <input type="text" name="sales_code" value="{{ old('sales_code', $user->profile?->sales_code) }}"
-               placeholder="Contoh: KA" maxlength="20" required
+               placeholder="Contoh: KA" maxlength="20"
                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm uppercase focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_code') border-red-400 @enderror">
         @error('sales_code')
             <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
         @else
-            <p class="mt-1 text-xs text-slate-400">Kode unik sales untuk nomor QO otomatis (mis. 0002/<strong>KA</strong>/QO/VII/26). Wajib diisi untuk user yang membuat quotation.</p>
+            <p class="mt-1 text-xs text-slate-400">Kode unik sales untuk nomor QO otomatis (mis. 0002/<strong>KA</strong>/QO/VII/26).</p>
         @enderror
     </div>
     <div>
@@ -66,5 +75,5 @@
 
 <div class="flex items-center gap-2 border-t border-slate-100 pt-4">
     <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
-    <a href="{{ route('users.index') }}" class="rounded-lg border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</a>
+    <a href="{{ route('users.index', ['role' => $role ?? $user->role]) }}" class="rounded-lg border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</a>
 </div>

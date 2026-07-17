@@ -98,4 +98,14 @@ return [
         'prefix' => 'QO',
         'sequence_pad' => 4,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Fallback tarif pajak (jika belum ada di DB crm_settings)
+    |--------------------------------------------------------------------------
+    */
+    'tax' => [
+        'ppn_percent' => (float) env('CRM_PPN_PERCENT', 11),
+        'pph_percent' => (float) env('CRM_PPH_PERCENT', 2),
+    ],
 ];

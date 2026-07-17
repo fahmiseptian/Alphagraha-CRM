@@ -13,23 +13,27 @@ class UserProfile extends Model
     protected $table = 'crm_user_profiles';
 
     protected $fillable = [
-        'user_id', 'signature_path', 'job_position', 'sales_code', 'sales_target',
+        'user_id', 'app_role', 'signature_path', 'job_position', 'sales_code', 'sales_target',
     ];
 
     protected $casts = [
         'sales_target' => 'float',
     ];
 
-    public static function ensureForUser(string $userId, bool $isSales = true): self
+    public static function ensureForUser(string $userId, bool $isSales = true, ?string $appRole = null): self
     {
-        if (! $isSales) {
-            return static::query()->firstOrCreate(['user_id' => $userId]);
+        $defaults = [];
+        if ($appRole) {
+            $defaults['app_role'] = $appRole;
+        } elseif ($isSales) {
+            $defaults['app_role'] = User::ROLE_SALES;
         }
 
-        return static::query()->firstOrCreate(
-            ['user_id' => $userId],
-            ['sales_target' => self::DEFAULT_SALES_TARGET]
-        );
+        if ($isSales) {
+            $defaults['sales_target'] = self::DEFAULT_SALES_TARGET;
+        }
+
+        return static::query()->firstOrCreate(['user_id' => $userId], $defaults);
     }
 
     public function resolvedSalesTarget(): float

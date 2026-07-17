@@ -43,10 +43,18 @@ class EspoUserManager
             $this->syncPrimaryEmail($id, $data['email']);
         }
 
-        UserProfile::ensureForUser($id, ($data['type'] ?? '') === 'regular');
+        UserProfile::ensureForUser(
+            $id,
+            ($data['app_role'] ?? '') === User::ROLE_SALES,
+            $data['app_role'] ?? null
+        );
 
-        if (array_key_exists('sales_code', $data)) {
-            $this->syncSalesCode($id, $data['sales_code'] ?? null, ($data['type'] ?? '') === 'regular');
+        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data)) {
+            $this->syncProfile(
+                $id,
+                $data['app_role'] ?? User::ROLE_SALES,
+                $data['sales_code'] ?? null
+            );
         }
 
         return User::query()->whereKey($id)->first();
@@ -79,11 +87,11 @@ class EspoUserManager
             $this->syncPrimaryEmail($user->id, $data['email']);
         }
 
-        if (array_key_exists('sales_code', $data)) {
-            $this->syncSalesCode(
+        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data)) {
+            $this->syncProfile(
                 $user->id,
-                $data['sales_code'] ?? null,
-                ($data['type'] ?? $user->type) === 'regular'
+                $data['app_role'] ?? $user->role,
+                $data['sales_code'] ?? null
             );
         }
 
@@ -91,16 +99,28 @@ class EspoUserManager
     }
 
     /**
-     * Simpan Sales Code ke profil (buat profil bila belum ada).
+     * Simpan app_role + sales_code ke profil.
+     */
+    protected function syncProfile(string $userId, string $appRole, ?string $salesCode): void
+    {
+        $isSales = $appRole === User::ROLE_SALES;
+        $profile = UserProfile::ensureForUser($userId, $isSales, $appRole);
+        $profile->app_role = $appRole;
+        $profile->sales_code = ($salesCode !== null && trim($salesCode) !== '')
+            ? strtoupper(trim($salesCode))
+            : null;
+        if ($isSales && ! $profile->sales_target) {
+            $profile->sales_target = UserProfile::DEFAULT_SALES_TARGET;
+        }
+        $profile->save();
+    }
+
+    /**
+     * @deprecated diganti syncProfile
      */
     protected function syncSalesCode(string $userId, ?string $salesCode, bool $isSales = true): void
     {
-        $code = $salesCode !== null && trim($salesCode) !== ''
-            ? strtoupper(trim($salesCode))
-            : null;
-
-        $profile = UserProfile::ensureForUser($userId, $isSales);
-        $profile->forceFill(['sales_code' => $code])->save();
+        $this->syncProfile($userId, $isSales ? User::ROLE_SALES : User::ROLE_ADMIN, $salesCode);
     }
 
     /**

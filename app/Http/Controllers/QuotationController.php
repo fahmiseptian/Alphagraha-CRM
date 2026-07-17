@@ -27,6 +27,10 @@ class QuotationController extends Controller
 
     public function index(Request $request)
     {
+        if (! auth()->user()?->canCreateQuotation()) {
+            abort(403, 'Anda tidak memiliki akses ke Quotations.');
+        }
+
         $search = trim((string) $request->get('q'));
         $status = $request->get('status');
 
@@ -60,6 +64,10 @@ class QuotationController extends Controller
 
     public function create(Request $request)
     {
+        if (! auth()->user()?->canCreateQuotation()) {
+            abort(403, 'Anda tidak memiliki akses untuk membuat Quotation.');
+        }
+
         $opportunityId = $request->get('opportunity_id');
         $salesContext = $this->service->resolveSalesCodeContext(
             $opportunityId ? (string) $opportunityId : null,
@@ -77,7 +85,7 @@ class QuotationController extends Controller
             'quotation_date' => now()->toDateString(),
             'valid_until' => now()->addDays(14)->toDateString(),
             'currency' => config('crm.default_currency', 'IDR'),
-            'tax_percent' => 11,
+            'tax_percent' => \App\Support\OpportunityProductPricing::ppnPercent(),
             'status' => 'draft',
         ]);
 
@@ -85,7 +93,11 @@ class QuotationController extends Controller
 
         // Prefill dari Opportunity (1 opportunity : 1 penawaran).
         if ($opportunityId) {
-            $opportunity = $this->scopeAssigned(Opportunity::query())->with(['account', 'quotation'])->find($opportunityId);
+            $opportunity = Opportunity::query()->with(['account', 'quotation']);
+            if (auth()->user()?->isSales()) {
+                $opportunity->where('assigned_user_id', auth()->id());
+            }
+            $opportunity = $opportunity->find($opportunityId);
 
             if ($opportunity) {
                 if ($opportunity->quotation) {
@@ -160,6 +172,10 @@ class QuotationController extends Controller
 
     public function store(Request $request)
     {
+        if (! auth()->user()?->canCreateQuotation()) {
+            abort(403, 'Anda tidak memiliki akses untuk membuat Quotation.');
+        }
+
         $data = $this->validateData($request);
 
         try {
@@ -407,6 +423,7 @@ class QuotationController extends Controller
             'notes' => ['nullable', 'string'],
             'terms' => [$isCreate ? 'required' : 'nullable', 'string'],
             'status' => ['required', Rule::in(array_keys(Quotation::STATUSES))],
+            'tax_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.name' => ['required', 'string', 'max:255'],
             'items.*.description' => ['nullable', 'string'],
@@ -422,10 +439,14 @@ class QuotationController extends Controller
         $data = $request->validate($rules);
 
         $data['discount'] = $data['discount'] ?? 0;
-        $data['tax_percent'] = 11;
+        $data['tax_percent'] = array_key_exists('tax_percent', $data) && $data['tax_percent'] !== null && $data['tax_percent'] !== ''
+            ? (float) $data['tax_percent']
+            : ($quotation?->tax_percent ?? OpportunityProductPricing::ppnPercent());
 
         if ($isCreate) {
             unset($data['number']);
+            // Quotation baru selalu ikut tarif PPN terkini dari settings.
+            $data['tax_percent'] = OpportunityProductPricing::ppnPercent();
         }
 
         return $data;

@@ -30,6 +30,9 @@ class Opportunity extends Model implements HasMedia
         'contact_id', 'vendor',
         'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_won_margin',
+        'crm_has_discount', 'crm_discount_amount', 'crm_discount_status',
+        'crm_discount_requested_by', 'crm_discount_requested_at',
+        'crm_discount_reviewed_by', 'crm_discount_reviewed_at', 'crm_discount_note',
     ];
 
     protected $casts = [
@@ -43,7 +46,17 @@ class Opportunity extends Model implements HasMedia
         'crm_sell_exclude' => 'array',
         'crm_cost_exclude' => 'array',
         'crm_won_margin' => 'float',
+        'crm_has_discount' => 'boolean',
+        'crm_discount_amount' => 'float',
+        'crm_discount_requested_at' => 'datetime',
+        'crm_discount_reviewed_at' => 'datetime',
     ];
+
+    public const DISCOUNT_PENDING = 'pending';
+
+    public const DISCOUNT_APPROVED = 'approved';
+
+    public const DISCOUNT_REJECTED = 'rejected';
 
     public const OPEN_STAGES = ['Prospecting', 'Qualification', 'Proposal', 'Negotiation'];
     public const WON_STAGE = 'Closed Won';
@@ -246,6 +259,38 @@ class Opportunity extends Model implements HasMedia
         $this->crm_won_margin = $this->stage === self::WON_STAGE
             ? $this->totalProductsMargin()
             : null;
+    }
+
+    public function hasActiveDiscount(): bool
+    {
+        return (bool) $this->crm_has_discount && (float) $this->crm_discount_amount > 0;
+    }
+
+    public function discountPercent(): ?float
+    {
+        $amount = (float) $this->amount;
+        $discount = (float) $this->crm_discount_amount;
+        if ($amount <= 0 || $discount <= 0) {
+            return null;
+        }
+
+        return round(($discount / $amount) * 100, 2);
+    }
+
+    public function discountStatusLabel(): string
+    {
+        return match ($this->crm_discount_status) {
+            self::DISCOUNT_PENDING => 'Menunggu Approval',
+            self::DISCOUNT_APPROVED => 'Disetujui',
+            self::DISCOUNT_REJECTED => 'Ditolak',
+            default => '—',
+        };
+    }
+
+    public function discountNeedsAttention(): bool
+    {
+        return $this->hasActiveDiscount()
+            && $this->crm_discount_status === self::DISCOUNT_PENDING;
     }
 
     public function stageColor(): string

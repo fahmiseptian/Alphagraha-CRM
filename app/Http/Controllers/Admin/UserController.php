@@ -11,7 +11,8 @@ use Illuminate\Validation\Rules\Password;
 
 /**
  * Kelola pengguna langsung pada tabel `user` EspoCRM.
- * Role disimpan sebagai kolom `type` (admin / regular).
+ * Role aplikasi disimpan di crm_user_profiles.app_role.
+ * Daftar user difilter per role (submenu Administration).
  */
 class UserController extends Controller
 {
@@ -21,11 +22,15 @@ class UserController extends Controller
 
     public function index(Request $request)
     {
+        $role = $this->resolveRoleFilter($request);
         $search = trim((string) $request->get('search'));
 
         $users = User::query()
             ->with('profile')
             ->whereIn('type', ['regular', 'admin'])
+            ->when($role, function ($query) use ($role) {
+                $query->whereHas('profile', fn ($q) => $q->where('app_role', $role));
+            })
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
@@ -37,14 +42,25 @@ class UserController extends Controller
             ->paginate(20)
             ->withQueryString();
 
-        return view('admin.users.index', compact('users', 'search'));
+        return view('admin.users.index', [
+            'users' => $users,
+            'search' => $search,
+            'role' => $role,
+            'roleLabel' => User::ROLES[$role] ?? 'Users',
+        ]);
     }
 
-    public function create()
+    public function create(Request $request)
     {
-        $user = new User(['type' => 'regular', 'is_active' => true]);
+        $role = $this->resolveRoleFilter($request) ?? User::ROLE_SALES;
+        $user = new User(['type' => User::espoTypeForRole($role), 'is_active' => true]);
 
-        return view('admin.users.create', compact('user'));
+        return view('admin.users.create', [
+            'user' => $user,
+            'role' => $role,
+            'roleLabel' => User::ROLES[$role] ?? 'User',
+            'lockRole' => true,
+        ]);
     }
 
     public function store(Request $request)
@@ -54,14 +70,22 @@ class UserController extends Controller
 
         $this->manager->create($data);
 
-        return redirect()->route('users.index')->with('success', 'User created successfully.');
+        return redirect()
+            ->route('users.index', ['role' => $data['app_role']])
+            ->with('success', 'User created successfully.');
     }
 
     public function edit(User $user)
     {
         $user->load('profile');
+        $role = $user->role;
 
-        return view('admin.users.edit', compact('user'));
+        return view('admin.users.edit', [
+            'user' => $user,
+            'role' => $role,
+            'roleLabel' => User::ROLES[$role] ?? 'User',
+            'lockRole' => false,
+        ]);
     }
 
     public function update(Request $request, User $user)
@@ -71,7 +95,9 @@ class UserController extends Controller
 
         $this->manager->update($user, $data);
 
-        return redirect()->route('users.index')->with('success', 'User updated successfully.');
+        return redirect()
+            ->route('users.index', ['role' => $data['app_role']])
+            ->with('success', 'User updated successfully.');
     }
 
     public function destroy(User $user)
@@ -84,9 +110,12 @@ class UserController extends Controller
             return back()->with('error', 'The main administrator account cannot be deleted.');
         }
 
+        $role = $user->role;
         $this->manager->delete($user);
 
-        return back()->with('success', 'User deleted.');
+        return redirect()
+            ->route('users.index', ['role' => $role])
+            ->with('success', 'User deleted.');
     }
 
     /**
@@ -103,9 +132,10 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'user_name' => ['required', 'string', 'max:50', $userNameRule],
             'email' => ['nullable', 'email', 'max:255'],
-            'role' => ['required', Rule::in(['admin', 'sales'])],
+            'role' => ['required', Rule::in(array_keys(User::ROLES))],
             'sales_code' => [
-                'required',
+                Rule::requiredIf(fn () => $request->input('role') === User::ROLE_SALES),
+                'nullable',
                 'string',
                 'max:20',
                 'regex:/^[A-Za-z0-9]+$/',
@@ -116,19 +146,34 @@ class UserController extends Controller
             'password' => [$user ? 'nullable' : 'required', 'confirmed', Password::min(6)],
             'is_active' => ['nullable', 'boolean'],
         ], [
-            'sales_code.required' => 'Sales Code wajib diisi.',
+            'sales_code.required' => 'Sales Code wajib diisi untuk role Sales.',
             'sales_code.unique' => 'Sales Code sudah dipakai user lain.',
             'sales_code.regex' => 'Sales Code hanya boleh huruf dan angka.',
         ]);
+
+        $appRole = $validated['role'];
 
         return [
             'name' => $validated['name'],
             'user_name' => $validated['user_name'],
             'email' => $validated['email'] ?? null,
-            'type' => $validated['role'] === 'admin' ? 'admin' : 'regular',
+            'app_role' => $appRole,
+            'type' => User::espoTypeForRole($appRole),
             'password' => $validated['password'] ?? null,
             'is_active' => $request->boolean('is_active'),
-            'sales_code' => strtoupper(trim($validated['sales_code'])),
+            'sales_code' => ! empty($validated['sales_code'])
+                ? strtoupper(trim($validated['sales_code']))
+                : null,
         ];
+    }
+
+    /**
+     * Ambil filter role dari query; default Sales.
+     */
+    protected function resolveRoleFilter(Request $request): string
+    {
+        $role = (string) $request->get('role', User::ROLE_SALES);
+
+        return isset(User::ROLES[$role]) ? $role : User::ROLE_SALES;
     }
 }

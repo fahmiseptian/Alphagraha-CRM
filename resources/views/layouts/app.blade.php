@@ -60,14 +60,21 @@
 
         <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-4 text-sm">
             @php
+                $user = auth()->user();
                 $nav = [
                     ['dashboard', 'Dashboard', 'bi-grid-1x2'],
-                    ['customers.index', 'Customers', 'bi-people'],
-                    ['leads.index', 'Leads', 'bi-funnel'],
-                    ['opportunities.index', 'Opportunities', 'bi-briefcase'],
-                    ['activities.index', 'Activities', 'bi-calendar-check'],
-                    ['quotations.index', 'Quotations', 'bi-file-earmark-text'],
                 ];
+                if (! $user->isPurchasing() && ! $user->isFinance()) {
+                    $nav[] = ['customers.index', 'Customers', 'bi-people'];
+                    $nav[] = ['leads.index', 'Leads', 'bi-funnel'];
+                }
+                $nav[] = ['opportunities.index', 'Opportunities', 'bi-briefcase'];
+                if (! $user->isPurchasing() && ! $user->isFinance()) {
+                    $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
+                }
+                if ($user->canCreateQuotation()) {
+                    $nav[] = ['quotations.index', 'Quotations', 'bi-file-earmark-text'];
+                }
             @endphp
             @foreach ($nav as [$route, $label, $icon])
                 @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
@@ -79,24 +86,57 @@
                 </a>
             @endforeach
 
-            @if (auth()->user()->isAdmin())
+            @if (auth()->user()->canAccessAdministration())
                 <div class="px-3 pt-5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Administration</div>
                 @php
-                    $adminNav = [
-                        ['contacts.index', 'Contacts', 'bi-person-lines-fill'],
-                        ['templates.index', 'Quotation Templates', 'bi-file-earmark-richtext'],
-                        ['users.index', 'Users', 'bi-person-gear'],
-                    ];
+                    $userRoles = \App\Models\User::ROLES;
+                    $usersMenuOpen = request()->routeIs('users.*');
+                    $routeUser = request()->route('user');
+                    $activeUserRole = request()->query('role')
+                        ?? (is_object($routeUser) ? $routeUser->role : null)
+                        ?? (request()->routeIs('users.create') ? request()->query('role', \App\Models\User::ROLE_SALES) : null);
                 @endphp
-                @foreach ($adminNav as [$route, $label, $icon])
-                    @php $active = request()->routeIs(Str::before($route, '.').'.*'); @endphp
-                    <a href="{{ route($route) }}"
-                       class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
-                              {{ $active ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                        <i class="bi {{ $icon }} text-base"></i>
-                        <span>{{ $label }}</span>
-                    </a>
-                @endforeach
+
+                <a href="{{ route('contacts.index') }}"
+                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('contacts.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-person-lines-fill text-base"></i>
+                    <span>Contacts</span>
+                </a>
+                <a href="{{ route('templates.index') }}"
+                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('templates.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-file-earmark-richtext text-base"></i>
+                    <span>Quotation Templates</span>
+                </a>
+
+                <div x-data="{ open: {{ $usersMenuOpen ? 'true' : 'false' }} }" class="space-y-0.5">
+                    <button type="button" @click="open = !open"
+                            class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
+                                   {{ $usersMenuOpen ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                        <i class="bi bi-person-gear text-base"></i>
+                        <span class="flex-1 text-left">Users</span>
+                        <i class="bi text-xs transition-transform" :class="open ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
+                    </button>
+                    <div x-show="open" x-cloak class="ml-3 space-y-0.5 border-l border-white/10 pl-3">
+                        @foreach ($userRoles as $roleKey => $roleLabel)
+                            @php $roleActive = $usersMenuOpen && $activeUserRole === $roleKey; @endphp
+                            <a href="{{ route('users.index', ['role' => $roleKey]) }}"
+                               class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                      {{ $roleActive ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                                <i class="bi bi-person text-xs"></i>
+                                <span>{{ $roleLabel }}</span>
+                            </a>
+                        @endforeach
+                    </div>
+                </div>
+
+                <a href="{{ route('settings.edit') }}"
+                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('settings.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-percent text-base"></i>
+                    <span>Tax Settings</span>
+                </a>
             @endif
         </nav>
     </aside>
@@ -112,10 +152,14 @@
             <h1 class="text-base font-semibold text-slate-800">@yield('title', 'Dashboard')</h1>
 
             <div class="ml-auto flex items-center gap-3">
-                <a href="{{ route('opportunities.create') }}"
-                   class="hidden items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 sm:inline-flex">
-                    <i class="bi bi-plus-lg"></i> New Opportunity
-                </a>
+                @if (auth()->user()->canCreateOpportunity())
+                    <a href="{{ route('opportunities.create') }}"
+                       class="hidden items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 sm:inline-flex">
+                        <i class="bi bi-plus-lg"></i> New Opportunity
+                    </a>
+                @endif
+
+                @include('partials.notification-bell')
 
                 <div x-data="{ open: false }" class="relative">
                     <button @click="open = !open" class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-100">
@@ -124,7 +168,7 @@
                         </span>
                         <span class="hidden text-left sm:block">
                             <span class="block text-sm font-medium leading-tight text-slate-800">{{ auth()->user()->name }}</span>
-                            <span class="block text-[11px] capitalize leading-tight text-slate-400">{{ auth()->user()->role }}</span>
+                            <span class="block text-[11px] leading-tight text-slate-400">{{ auth()->user()->roleLabel() }}</span>
                         </span>
                         <i class="bi bi-chevron-down text-xs text-slate-400"></i>
                     </button>
@@ -159,6 +203,9 @@
         </main>
     </div>
 </div>
+
+@include('partials.notification-popup')
+
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 <script src="{{ asset('js/crm-select2.js') }}"></script>
