@@ -119,6 +119,7 @@ class QuotationController extends Controller
                 }
 
                 // Isi item penawaran dari daftar produk opportunity.
+                // Unit price di QO = harga jual EXCLUDE (PPN dihitung terpisah di ringkasan).
                 $products = $opportunity->products;
                 if ($products->isNotEmpty()) {
                     $seedItems = $products->map(fn ($p) => [
@@ -126,11 +127,11 @@ class QuotationController extends Controller
                         'description' => '',
                         'quantity' => $p['quantity'] ?: 1,
                         'unit' => '',
-                        'unit_price' => $p['sell_include'],
+                        'unit_price' => (float) $p['sell_exclude'],
                         'tax_category' => $p['tax_category'],
                         'item_kind' => $p['item_kind'],
-                        'sell_exclude' => $p['sell_exclude'],
-                        'cost_exclude' => $p['cost_exclude'],
+                        'sell_exclude' => (float) $p['sell_exclude'],
+                        'cost_exclude' => (float) $p['cost_exclude'],
                         'vendor' => $p['vendor'],
                     ])->all();
                 } elseif ((float) $opportunity->amount > 0) {
@@ -139,7 +140,7 @@ class QuotationController extends Controller
                         'description' => '',
                         'quantity' => 1,
                         'unit' => '',
-                        'unit_price' => (float) $opportunity->amount,
+                        'unit_price' => OpportunityProductPricing::excludeFromInclude((float) $opportunity->amount),
                     ]];
                 }
 
@@ -223,6 +224,12 @@ class QuotationController extends Controller
     public function show(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+
+        // Rapikan histori ganda yang sempat terbentuk saat masih draft.
+        if (! $quotation->hasBeenSent() && $quotation->revisions()->count() > 1) {
+            $this->refreshDraftSnapshot($quotation);
+        }
+
         $quotation->load(['items', 'creator', 'template', 'revisions.creator', 'account']);
 
         return view('quotations.show', compact('quotation'));
@@ -265,22 +272,24 @@ class QuotationController extends Controller
                 return ['changed' => false, 'document_revision' => (int) $quotation->document_revision];
             }
 
-            if ($wasSent) {
-                $quotation->document_revision = (int) $quotation->document_revision + 1;
-                $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
-                $quotation->base_number = $base;
-                $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
+            // Masih draft (belum pernah sent): jangan buat histori revisi baru.
+            // Cukup overwrite snapshot tunggal agar tetap satu QO.
+            if (! $wasSent) {
+                $this->refreshDraftSnapshot($quotation);
+
+                return ['changed' => true, 'document_revision' => 0, 'is_revision' => false];
             }
 
+            $quotation->document_revision = (int) $quotation->document_revision + 1;
+            $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
+            $quotation->base_number = $base;
+            $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
             $quotation->revision = (int) $quotation->revision + 1;
             $quotation->save();
 
-            $note = $wasSent
-                ? 'Revisi dokumen R'.$quotation->document_revision
-                : 'Quotation updated';
-            $this->snapshotRevision($quotation, $note);
+            $this->snapshotRevision($quotation, 'Revisi dokumen R'.$quotation->document_revision);
 
-            return ['changed' => true, 'document_revision' => (int) $quotation->document_revision];
+            return ['changed' => true, 'document_revision' => (int) $quotation->document_revision, 'is_revision' => true];
         });
 
         if (! $result['changed']) {
@@ -288,7 +297,7 @@ class QuotationController extends Controller
                 ->with('success', 'Tidak ada perubahan pada quotation.');
         }
 
-        $msg = $result['document_revision'] > 0
+        $msg = ! empty($result['is_revision'])
             ? 'Quotation diperbarui menjadi '.$quotation->fresh()->number.'.'
             : 'Quotation updated successfully.';
 
@@ -491,10 +500,12 @@ class QuotationController extends Controller
 
         foreach (array_values($items) as $index => $item) {
             $quantity = (float) $item['quantity'];
-            $unitPrice = (float) $item['unit_price'];
-            $sellExclude = isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null
-                ? (float) $item['sell_exclude']
-                : OpportunityProductPricing::excludeFromInclude($unitPrice);
+
+            // unit_price di form QO = harga jual EXCLUDE (sebelum PPN).
+            $sellExclude = (float) ($item['unit_price'] ?? 0);
+            if (isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null) {
+                $sellExclude = (float) $item['sell_exclude'];
+            }
 
             $enriched = OpportunityProductPricing::enrichRow([
                 'name' => $item['name'],
@@ -511,8 +522,8 @@ class QuotationController extends Controller
                 'description' => $item['description'] ?? null,
                 'quantity' => $quantity,
                 'unit' => $item['unit'] ?? null,
-                'unit_price' => $enriched['sell_include'],
-                'total' => round($quantity * $enriched['sell_include'], 2),
+                'unit_price' => $enriched['sell_exclude'],
+                'total' => round($quantity * $enriched['sell_exclude'], 2),
                 'tax_category' => $enriched['tax_category'],
                 'item_kind' => $enriched['item_kind'],
                 'sell_exclude' => $enriched['sell_exclude'],
@@ -531,19 +542,57 @@ class QuotationController extends Controller
 
         $quotation->revisions()->create([
             'revision' => $quotation->revision,
-            'snapshot' => [
-                'number' => $quotation->number,
-                'base_number' => $quotation->base_number,
-                'document_revision' => $quotation->document_revision,
-                'customer_name' => $quotation->customer_name,
-                'company_name' => $quotation->company_name,
-                'total' => $quotation->total,
-                'items' => $quotation->items->map->only(['name', 'quantity', 'unit_price', 'total'])->all(),
-            ],
+            'snapshot' => $this->revisionSnapshotPayload($quotation),
             'rendered_html' => $rendered,
             'note' => $note,
             'created_by' => auth()->id(),
         ]);
+    }
+
+    /**
+     * Saat masih draft: update snapshot pertama saja, hapus entri histori ekstra.
+     */
+    protected function refreshDraftSnapshot(Quotation $quotation): void
+    {
+        $quotation->load('items');
+        $template = $this->resolveTemplate($quotation);
+        $rendered = $this->service->render($quotation, $template->body_html, $template);
+        $payload = $this->revisionSnapshotPayload($quotation);
+
+        $existing = $quotation->revisions()->orderBy('id')->first();
+
+        if ($existing) {
+            $existing->update([
+                'revision' => 1,
+                'snapshot' => $payload,
+                'rendered_html' => $rendered,
+                'note' => 'Quotation created',
+            ]);
+
+            $quotation->revisions()->where('id', '!=', $existing->id)->delete();
+        } else {
+            $quotation->revision = 1;
+            $quotation->save();
+            $this->snapshotRevision($quotation, 'Quotation created');
+        }
+
+        if ((int) $quotation->revision !== 1) {
+            $quotation->revision = 1;
+            $quotation->save();
+        }
+    }
+
+    protected function revisionSnapshotPayload(Quotation $quotation): array
+    {
+        return [
+            'number' => $quotation->number,
+            'base_number' => $quotation->base_number,
+            'document_revision' => $quotation->document_revision,
+            'customer_name' => $quotation->customer_name,
+            'company_name' => $quotation->company_name,
+            'total' => $quotation->total,
+            'items' => $quotation->items->map->only(['name', 'quantity', 'unit_price', 'total'])->all(),
+        ];
     }
 
     protected function templateHtml(Quotation $quotation): string

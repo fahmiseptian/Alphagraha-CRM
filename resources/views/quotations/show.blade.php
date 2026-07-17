@@ -44,7 +44,7 @@
                         <tr class="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
                             <th class="px-5 py-3 font-medium">Item</th>
                             <th class="px-5 py-3 text-center font-medium">Qty</th>
-                            <th class="px-5 py-3 text-right font-medium">Price</th>
+                            <th class="px-5 py-3 text-right font-medium">Harga Exclude</th>
                             <th class="px-5 py-3 text-right font-medium">Amount</th>
                         </tr>
                     </thead>
@@ -80,7 +80,7 @@
         </x-card>
         @endif
 
-        <x-card title="Revision History" :padding="false">
+        <x-card title="{{ $quotation->hasBeenSent() ? 'Revision History' : 'Dokumen' }}" :padding="false">
             @forelse ($quotation->revisions as $rev)
                 <div class="flex items-center justify-between border-b border-slate-50 px-5 py-3 last:border-0">
                     <div>
@@ -102,8 +102,13 @@
                     </div>
                 </div>
             @empty
-                <div class="px-5 py-6 text-center text-sm text-slate-400">No revision history yet.</div>
+                <div class="px-5 py-6 text-center text-sm text-slate-400">Belum ada dokumen.</div>
             @endforelse
+            @if (! $quotation->hasBeenSent())
+                <p class="border-t border-slate-50 px-5 py-2 text-xs text-slate-400">
+                    Revisi nomor (-R1, -R2, …) baru dibuat setelah status pernah <strong>Sent</strong> lalu isi dokumen diubah.
+                </p>
+            @endif
         </x-card>
     </div>
 

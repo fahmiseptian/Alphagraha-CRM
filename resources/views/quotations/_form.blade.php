@@ -3,7 +3,11 @@
     $initialItems = old('items', $quotation->exists
         ? $quotation->items->map(fn ($i) => [
             'name' => $i->name, 'description' => $i->description,
-            'quantity' => (float) $i->quantity, 'unit' => $i->unit, 'unit_price' => (float) $i->unit_price,
+            'quantity' => (float) $i->quantity, 'unit' => $i->unit,
+            // Form menampilkan harga exclude; fallback ke unit_price untuk data lama.
+            'unit_price' => (float) ($i->sell_exclude !== null && $i->sell_exclude !== ''
+                ? $i->sell_exclude
+                : $i->unit_price),
           ])->values()->all()
         : ($seedItems ?? []));
     if (empty($initialItems)) {
@@ -115,9 +119,10 @@
                                            class="w-full rounded-lg border border-slate-300 py-2 px-2 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
                                 <div class="col-span-5 sm:col-span-3">
-                                    <input type="number" step="0.01" min="0" :name="`items[${index}][unit_price]`" x-model.number="item.unit_price" placeholder="Unit price"
+                                    <input type="number" step="0.01" min="0" :name="`items[${index}][unit_price]`" x-model.number="item.unit_price" placeholder="Harga exclude"
                                            @if ($isCreate) required @endif
-                                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
+                                           title="Harga jual exclude (sebelum PPN)">
                                 </div>
                                 <div class="col-span-12 flex items-center justify-between sm:col-span-1 sm:justify-center">
                                     <span class="text-sm font-medium text-slate-700 sm:hidden" x-text="formatMoney(item.quantity * item.unit_price)"></span>
@@ -145,7 +150,7 @@
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Terms & Conditions @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
-                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Harga sudah termasuk PPN {$ppnPercent}%\n2. Harga dan ketersediaan barang dapat berubah sewaktu-waktu tanpa pemberitahuan terlebih dahulu.") }}</textarea>
+                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Harga di atas belum termasuk PPN {$ppnPercent}%\n2. Harga dan ketersediaan barang dapat berubah sewaktu-waktu tanpa pemberitahuan terlebih dahulu.") }}</textarea>
                     </div>
                 </div>
             </x-card>
