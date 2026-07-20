@@ -66,7 +66,7 @@ class NotificationService
         $currency = $opportunity->amount_currency ?: 'IDR';
         $formatted = function_exists('money') ? money($amount, $currency) : number_format($amount, 0, ',', '.');
         $pct = $opportunity->discountPercent();
-        $pctLabel = $pct !== null ? ' ('.number_format($pct, 2, ',', '.').'%)' : '';
+        $pctLabel = $pct !== null ? ' ('.number_format($pct, 2, ',', '.').'% dari margin)' : '';
 
         $type = $revised
             ? CrmNotification::TYPE_DISCOUNT_REVISED
@@ -100,6 +100,146 @@ class NotificationService
                     'amount' => $amount,
                     'revised' => $revised,
                 ],
+            );
+        }
+    }
+
+    /**
+     * Popup + bell untuk semua Superadmin saat sales request diskon tambahan.
+     */
+    public function notifyDiscountRequested(Opportunity $opportunity): void
+    {
+        $amount = (float) ($opportunity->crm_discount_amount ?? 0);
+        if ($amount <= 0) {
+            return;
+        }
+
+        $currency = $opportunity->amount_currency ?: 'IDR';
+        $formatted = function_exists('money') ? money($amount, $currency) : number_format($amount, 0, ',', '.');
+        $pct = $opportunity->discountPercent();
+        $pctLabel = $pct !== null ? ' ('.number_format($pct, 2, ',', '.').'% dari margin)' : '';
+
+        $requesterId = $opportunity->crm_discount_requested_by;
+        $requester = $requesterId
+            ? User::query()->whereKey($requesterId)->first()
+            : null;
+        $requesterName = $requester?->display_name ?? 'Sales';
+
+        $link = route('opportunities.show', $opportunity);
+        $title = 'Request diskon tambahan';
+        $body = $requesterName.' mengajukan diskon '.$formatted.$pctLabel.' pada Opportunity "'.$opportunity->name.'".';
+
+        $superAdminIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SUPERADMIN))
+            ->pluck('id')
+            ->filter(fn ($id) => $id !== $requesterId)
+            ->values();
+
+        foreach ($superAdminIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_DISCOUNT_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'discount_request:'.$opportunity->id.':'.uniqid('', true),
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'amount' => $amount,
+                    'requested_by' => $requesterId,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Notifikasi ke sales saat Superadmin menolak request diskon (dengan nominal counter-offer).
+     */
+    public function notifyDiscountRejected(
+        Opportunity $opportunity,
+        float $approvedAmount,
+        ?string $note = null,
+        ?float $requestedAmount = null
+    ): void {
+        $userIds = collect([
+            $opportunity->assigned_user_id,
+            $opportunity->crm_discount_requested_by,
+        ])->filter()->unique()->values();
+
+        $currency = $opportunity->amount_currency ?: 'IDR';
+        $formattedApproved = function_exists('money')
+            ? money($approvedAmount, $currency)
+            : number_format($approvedAmount, 0, ',', '.');
+
+        $title = 'Diskon ditolak';
+        if ($approvedAmount > 0) {
+            $body = 'Permintaan diskon Opportunity "'.$opportunity->name.'" ditolak. Nominal yang disetujui: '.$formattedApproved.'.';
+        } else {
+            $body = 'Permintaan diskon Opportunity "'.$opportunity->name.'" ditolak.';
+        }
+
+        if ($requestedAmount !== null && $requestedAmount > 0 && abs($requestedAmount - $approvedAmount) > 0.009) {
+            $formattedRequested = function_exists('money')
+                ? money($requestedAmount, $currency)
+                : number_format($requestedAmount, 0, ',', '.');
+            $body .= ' (diajukan: '.$formattedRequested.')';
+        }
+
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $link = route('opportunities.show', $opportunity);
+
+        foreach ($userIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_DISCOUNT_REJECTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'discount_reject:'.$opportunity->id.':'.uniqid('', true),
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'approved_amount' => $approvedAmount,
+                    'requested_amount' => $requestedAmount,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Notifikasi ke sales saat Superadmin mengembalikan ke pending.
+     */
+    public function notifyDiscountReverted(Opportunity $opportunity, ?string $note = null): void
+    {
+        $userIds = collect([
+            $opportunity->assigned_user_id,
+            $opportunity->crm_discount_requested_by,
+        ])->filter()->unique()->values();
+
+        $title = 'Diskon dikembalikan ke pending';
+        $body = 'Keputusan diskon Opportunity "'.$opportunity->name.'" dikembalikan ke menunggu approval.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $link = route('opportunities.show', $opportunity);
+
+        foreach ($userIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_DISCOUNT_REVERTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'discount_revert:'.$opportunity->id.':'.uniqid('', true),
+                data: ['opportunity_id' => $opportunity->id],
             );
         }
     }

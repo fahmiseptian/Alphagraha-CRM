@@ -5,6 +5,7 @@
             'quantity' => $p['quantity'],
             'sell_exclude' => $p['sell_exclude'],
             'cost_exclude' => $p['cost_exclude'],
+            'discount_exclude' => $p['discount_exclude'] ?? 0,
             'vendor' => $p['vendor'],
             'tax_category' => $p['tax_category'],
             'item_kind' => $p['item_kind'],
@@ -132,39 +133,6 @@
                         </div>
                         <p class="mt-1 text-xs text-slate-400" x-show="products.length > 0">Calculated automatically from line items.</p>
                     </div>
-                    @unless ($purchasingMode)
-                    <div class="sm:col-span-2">
-                        <label class="crm-label">Diskon tambahan</label>
-                        <div class="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
-                            <label class="flex items-center gap-2 text-sm text-slate-700">
-                                <input type="hidden" name="has_discount" value="0">
-                                <input type="checkbox" name="has_discount" value="1" x-model="hasDiscount"
-                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                                       @checked(old('has_discount', $opportunity->crm_has_discount))>
-                                Aktifkan diskon tambahan (nominal)
-                            </label>
-                            <div x-show="hasDiscount" x-cloak class="mt-3 grid gap-3 sm:grid-cols-2">
-                                <div>
-                                    <label class="mb-1 block text-xs font-medium text-slate-500">Nominal diskon</label>
-                                    <input type="number" step="0.01" min="0" name="discount_amount" x-model.number="discountAmount"
-                                           class="crm-field w-full" placeholder="0">
-                                    <p class="mt-1 text-xs text-slate-400">Setiap diskon &gt; 0 wajib approval Superadmin.</p>
-                                </div>
-                                <div>
-                                    <label class="mb-1 block text-xs font-medium text-slate-500">Persentase (info)</label>
-                                    <p class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                                       x-text="discountPercentLabel"></p>
-                                    <p class="mt-1 text-xs text-slate-400">Persentase ditampilkan juga saat proses approval.</p>
-                                </div>
-                            </div>
-                            @if ($opportunity->exists && $opportunity->hasActiveDiscount())
-                                <p class="mt-2 text-xs text-slate-500">
-                                    Status: <span class="font-medium">{{ $opportunity->discountStatusLabel() }}</span>
-                                </p>
-                            @endif
-                        </div>
-                    </div>
-                    @endunless
                     <div>
                         <label class="crm-label">Probability, % <span class="text-red-500">*</span></label>
                         <input type="number" min="0" max="100" name="probability" value="{{ old('probability', $opportunity->probability ?? 10) }}" required
@@ -210,7 +178,7 @@
                                 class="text-xs font-medium text-slate-500 hover:text-slate-700">
                             <i class="bi bi-arrow-left"></i> Ganti kategori
                         </button>
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Exclude &amp; % margin bisa diubah (putih). Ubah % margin → harga jual ikut. Include / PPH / nilai margin (kuning) otomatis.</p>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Exclude &amp; % margin bisa diubah (putih). Diskon item = harga net; bila &gt; 0 margin = diskon − modal. Include / PPH / nilai margin (kuning) otomatis.</p>
                     </div>
 
                     <div class="space-y-4">
@@ -231,7 +199,9 @@
                                     </div>
                                     <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Qty</label>
-                                        <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity" class="crm-field w-full text-right" :readonly="purchasingMode">
+                                        <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity"
+                                               @input="refreshDiscountFromMargin()"
+                                               class="crm-field w-full text-right" :readonly="purchasingMode">
                                     </div>
                                     <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Vendor</label>
@@ -265,6 +235,22 @@
                                             </td>
                                         </tr>
                                         <tr>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                Diskon Item
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Harga net (0 = pakai harga jual)</span>
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="number" step="0.01" min="0" :name="`products[${i}][discount_exclude]`" x-model.number="p.discount_exclude"
+                                                       @input="onDiscountItemChange(p)"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right" :readonly="purchasingMode"
+                                                       placeholder="0">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatNumber(discountInclude(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr>
                                             <td class="py-2 pr-3 font-medium text-slate-600">Harga Beli / Modal</td>
                                             <td class="py-2 pr-3">
                                                 <input type="number" step="0.01" min="0" :name="`products[${i}][cost_exclude]`" x-model.number="p.cost_exclude"
@@ -278,7 +264,7 @@
                                         </tr>
                                         <tr x-show="appliesPph(p)">
                                             <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH ' + pphPercent + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Exclude × ' + pphPercent + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pphPercent + '%'"></td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly :value="formatNumber(pphAmount(p))"
                                                        class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
@@ -296,7 +282,7 @@
                                                                x-model.number="p.margin_percent"
                                                                @input="onMarginPercentChange(p)"
                                                                class="crm-field w-20 bg-white text-right text-sm"
-                                                               title="Ubah % margin untuk hitung ulang harga jual"
+                                                               title="Ubah % margin untuk hitung ulang harga jual / diskon"
                                                                :readonly="purchasingMode">
                                                         <span class="text-xs font-semibold text-slate-600">%</span>
                                                     </div>
@@ -315,10 +301,55 @@
                         <div class="text-sm" :class="purchasingMode ? 'ml-auto' : ''">
                             <span class="text-slate-500">Total (Include):&nbsp;</span>
                             <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
+                            <span class="mx-2 text-slate-300">·</span>
+                            <span class="text-slate-500">Total Margin:&nbsp;</span>
+                            <span class="font-semibold text-green-700" x-text="formatMoney(productsMarginTotal)"></span>
                         </div>
                     </div>
                 </div>
             </x-card>
+
+            @unless ($purchasingMode)
+            <x-card title="Diskon tambahan">
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="hidden" name="has_discount" value="0">
+                    <input type="checkbox" name="has_discount" value="1" x-model="hasDiscount"
+                           class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                           @checked(old('has_discount', $opportunity->crm_has_discount))>
+                    Aktifkan diskon tambahan
+                </label>
+                <div x-show="hasDiscount" x-cloak class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                        <label class="mb-1 block text-xs font-medium text-slate-500">Persentase dari margin</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" step="0.01" min="0" x-model.number="discountPercent"
+                                   @input="onDiscountPercentChange()"
+                                   class="crm-field w-full" placeholder="0">
+                            <span class="shrink-0 text-sm font-semibold text-slate-600">%</span>
+                        </div>
+                        <p class="mt-1 text-xs text-slate-400">Isi % → nominal terisi otomatis dari total margin.</p>
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-xs font-medium text-slate-500">Nominal diskon</label>
+                        <input type="number" step="0.01" min="0" name="discount_amount" x-model.number="discountAmount"
+                               @input="onDiscountAmountChange()"
+                               class="crm-field w-full" placeholder="0">
+                        <p class="mt-1 text-xs text-slate-400">Setiap diskon &gt; 0 wajib approval Superadmin.</p>
+                    </div>
+                </div>
+                <p class="mt-2 text-xs text-slate-500" x-show="hasDiscount && productsMarginTotal > 0">
+                    Basis: total margin <span class="font-medium" x-text="formatMoney(productsMarginTotal)"></span>
+                </p>
+                <p class="mt-2 text-xs text-amber-600" x-show="hasDiscount && productsMarginTotal <= 0">
+                    Isi harga jual &amp; modal produk dulu agar % diskon bisa dihitung dari margin.
+                </p>
+                @if ($opportunity->exists && $opportunity->hasActiveDiscount())
+                    <p class="mt-2 text-xs text-slate-500">
+                        Status: <span class="font-medium">{{ $opportunity->discountStatusLabel() }}</span>
+                    </p>
+                @endif
+            </x-card>
+            @endunless
         </div>
 
         {{-- Sidebar --}}
@@ -369,16 +400,19 @@
             const itemKind = p.item_kind ?? 'barang';
             const sell = Number(p.sell_exclude) || 0;
             const cost = Number(p.cost_exclude) || 0;
+            const discount = Number(p.discount_exclude) || 0;
+            const base = discount > 0 ? discount : sell;
             const appliesPph = !(taxCategory === 'non_wapu' && itemKind === 'barang');
-            const pph = appliesPph ? Math.round(sell * PPH_RATE * 100) / 100 : 0;
-            const margin = Math.round((appliesPph ? (sell - pph - cost) : (sell - cost)) * 100) / 100;
-            const marginPercent = sell > 0 ? Math.round((margin / sell) * 10000) / 100 : 0;
+            const pph = appliesPph ? Math.round(base * PPH_RATE * 100) / 100 : 0;
+            const margin = Math.round((appliesPph ? (base - pph - cost) : (base - cost)) * 100) / 100;
+            const marginPercent = base > 0 ? Math.round((margin / base) * 10000) / 100 : 0;
 
             return {
                 name: p.name ?? '',
                 quantity: Number(p.quantity) || 0,
                 sell_exclude: sell,
                 cost_exclude: cost,
+                discount_exclude: discount,
                 vendor: p.vendor ?? '',
                 tax_category: taxCategory,
                 item_kind: itemKind,
@@ -399,19 +433,55 @@
             amount: {{ (float) old('amount', $opportunity->amount ?? 0) }},
             hasDiscount: !!config.hasDiscount,
             discountAmount: Number(config.discountAmount) || 0,
+            discountPercent: 0,
+            _lockDiscountPercent: false,
             purchasingMode: !!config.purchasingMode,
             get filteredContacts() {
                 if (!this.accountId) return [];
                 return this.contacts.filter(c => c.account_id === this.accountId);
             },
             get productsTotal() {
-                return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * this.sellInclude(p), 0);
+                return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * this.effectiveSellInclude(p), 0);
             },
-            get discountPercentLabel() {
-                const base = this.products.length > 0 ? this.productsTotal : (Number(this.amount) || 0);
+            get productsMarginTotal() {
+                return this.round(this.products.reduce(
+                    (s, p) => s + (Number(p.quantity) || 0) * this.marginAmount(p),
+                    0
+                ));
+            },
+            syncDiscountPercentFromAmount() {
+                const margin = this.productsMarginTotal;
                 const disc = Number(this.discountAmount) || 0;
-                if (!this.hasDiscount || base <= 0 || disc <= 0) return '—';
-                return (Math.round((disc / base) * 10000) / 100).toFixed(2) + '% dari amount';
+                if (margin > 0 && disc > 0) {
+                    this.discountPercent = this.round((disc / margin) * 100);
+                } else if (!this._lockDiscountPercent) {
+                    this.discountPercent = disc > 0 ? this.discountPercent : 0;
+                }
+            },
+            onDiscountPercentChange() {
+                this._lockDiscountPercent = true;
+                let pct = Number(this.discountPercent) || 0;
+                if (pct < 0) pct = 0;
+                this.discountPercent = pct;
+                const margin = this.productsMarginTotal;
+                if (margin > 0) {
+                    this.discountAmount = this.round(margin * pct / 100);
+                }
+            },
+            onDiscountAmountChange() {
+                this._lockDiscountPercent = false;
+                this.syncDiscountPercentFromAmount();
+            },
+            refreshDiscountFromMargin() {
+                if (!this.hasDiscount) return;
+                if (this._lockDiscountPercent && (Number(this.discountPercent) || 0) > 0) {
+                    const margin = this.productsMarginTotal;
+                    if (margin > 0) {
+                        this.discountAmount = this.round(margin * (Number(this.discountPercent) || 0) / 100);
+                    }
+                } else {
+                    this.syncDiscountPercentFromAmount();
+                }
             },
             round(value) {
                 return Math.round((Number(value) || 0) * 100) / 100;
@@ -419,67 +489,99 @@
             sellInclude(p) {
                 return this.round((Number(p.sell_exclude) || 0) * TAX_MULTIPLIER);
             },
+            discountInclude(p) {
+                return this.round((Number(p.discount_exclude) || 0) * TAX_MULTIPLIER);
+            },
             costInclude(p) {
                 return this.round((Number(p.cost_exclude) || 0) * TAX_MULTIPLIER);
+            },
+            /** Basis harga net: diskon item bila > 0, selain itu harga jual. */
+            effectiveSellExclude(p) {
+                const discount = Number(p.discount_exclude) || 0;
+                return discount > 0 ? discount : (Number(p.sell_exclude) || 0);
+            },
+            effectiveSellInclude(p) {
+                return this.round(this.effectiveSellExclude(p) * TAX_MULTIPLIER);
             },
             appliesPph(p) {
                 return !(p.tax_category === 'non_wapu' && p.item_kind === 'barang');
             },
             pphAmount(p) {
                 if (!this.appliesPph(p)) return 0;
-                return this.round((Number(p.sell_exclude) || 0) * PPH_RATE);
+                return this.round(this.effectiveSellExclude(p) * PPH_RATE);
             },
             marginAmount(p) {
-                const sell = Number(p.sell_exclude) || 0;
+                const base = this.effectiveSellExclude(p);
                 const cost = Number(p.cost_exclude) || 0;
                 if (!this.appliesPph(p)) {
-                    return this.round(sell - cost);
+                    return this.round(base - cost);
                 }
-                return this.round(sell - this.pphAmount(p) - cost);
+                return this.round(base - this.pphAmount(p) - cost);
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
-                const sell = Number(p.sell_exclude) || 0;
-                return sell > 0 ? this.round((margin / sell) * 100) : 0;
+                const base = this.effectiveSellExclude(p);
+                return base > 0 ? this.round((margin / base) * 100) : 0;
             },
             marginPercent(p) {
                 return Number(p.margin_percent) || 0;
             },
             marginLabel(p) {
+                const hasItemDiscount = (Number(p.discount_exclude) || 0) > 0;
+                if (hasItemDiscount) {
+                    return this.appliesPph(p)
+                        ? 'Diskon − PPH − Modal'
+                        : 'Diskon − Modal';
+                }
                 return this.appliesPph(p)
                     ? 'Jual Exclude − PPH − Modal'
                     : 'Jual Exclude − Beli Exclude';
             },
             /**
-             * Dari % margin target + modal → hitung harga jual exclude.
-             * Tanpa PPH: sell = cost / (1 - pct/100)
-             * Dengan PPH: sell = cost / (afterPphFactor - pct/100)
+             * Dari % margin target + modal → hitung harga basis (jual atau diskon).
+             * Tanpa PPH: base = cost / (1 - pct/100)
+             * Dengan PPH: base = cost / (afterPphFactor - pct/100)
              */
             sellFromMarginPercent(p) {
                 const pct = Number(p.margin_percent) || 0;
                 const cost = Number(p.cost_exclude) || 0;
                 if (cost <= 0 || pct <= 0) {
-                    return Number(p.sell_exclude) || 0;
+                    return this.effectiveSellExclude(p);
                 }
 
                 const factor = this.appliesPph(p) ? AFTER_PPH_FACTOR : 1;
                 const denom = factor - (pct / 100);
                 if (denom <= 0) {
-                    return Number(p.sell_exclude) || 0;
+                    return this.effectiveSellExclude(p);
                 }
 
                 return this.round(cost / denom);
             },
+            applyMarginPercentToPrice(p) {
+                const next = this.sellFromMarginPercent(p);
+                if ((Number(p.discount_exclude) || 0) > 0) {
+                    p.discount_exclude = next;
+                } else {
+                    p.sell_exclude = next;
+                }
+            },
             onSellChange(p) {
                 p._lockMarginPercent = false;
                 p.margin_percent = this.calcMarginPercent(p);
+                this.refreshDiscountFromMargin();
+            },
+            onDiscountItemChange(p) {
+                p._lockMarginPercent = false;
+                p.margin_percent = this.calcMarginPercent(p);
+                this.refreshDiscountFromMargin();
             },
             onCostChange(p) {
                 if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0) {
-                    p.sell_exclude = this.sellFromMarginPercent(p);
+                    this.applyMarginPercentToPrice(p);
                 } else {
                     p.margin_percent = this.calcMarginPercent(p);
                 }
+                this.refreshDiscountFromMargin();
             },
             onMarginPercentChange(p) {
                 let pct = Number(p.margin_percent) || 0;
@@ -492,15 +594,17 @@
                 p._lockMarginPercent = true;
 
                 if ((Number(p.cost_exclude) || 0) > 0 && pct > 0) {
-                    p.sell_exclude = this.sellFromMarginPercent(p);
+                    this.applyMarginPercentToPrice(p);
                 }
+                this.refreshDiscountFromMargin();
             },
             onItemKindChange(p) {
                 if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0 && (Number(p.cost_exclude) || 0) > 0) {
-                    p.sell_exclude = this.sellFromMarginPercent(p);
+                    this.applyMarginPercentToPrice(p);
                 } else {
                     p.margin_percent = this.calcMarginPercent(p);
                 }
+                this.refreshDiscountFromMargin();
             },
             formatNumber(value) {
                 value = Number(value) || 0;
@@ -548,6 +652,7 @@
                     quantity: 1,
                     sell_exclude: 0,
                     cost_exclude: 0,
+                    discount_exclude: 0,
                     vendor: '',
                     tax_category: this.selectedTaxCategory,
                     item_kind: 'barang',
@@ -555,7 +660,10 @@
                     _lockMarginPercent: false,
                 });
             },
-            removeProduct(i) { this.products.splice(i, 1); },
+            removeProduct(i) {
+                this.products.splice(i, 1);
+                this.refreshDiscountFromMargin();
+            },
             init() {
                 this.$watch('products', () => { if (this.products.length > 0) this.amount = this.productsTotal; }, { deep: true });
                 if (this.products.length > 0) this.amount = this.productsTotal;
@@ -582,6 +690,7 @@
                     }
 
                     this.refreshContactSelect();
+                    this.syncDiscountPercentFromAmount();
                 });
             },
             formatMoney(value) {

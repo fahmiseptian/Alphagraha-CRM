@@ -4,14 +4,18 @@
         ? $quotation->items->map(fn ($i) => [
             'name' => $i->name, 'description' => $i->description,
             'quantity' => (float) $i->quantity, 'unit' => $i->unit,
-            // Form menampilkan harga exclude; fallback ke unit_price untuk data lama.
-            'unit_price' => (float) ($i->sell_exclude !== null && $i->sell_exclude !== ''
-                ? $i->sell_exclude
-                : $i->unit_price),
+            // Form menampilkan harga yang ditagihkan (setelah diskon item bila ada).
+            'unit_price' => (float) $i->unit_price,
+            'sell_exclude' => (float) $i->listSellExclude(),
+            'discount_exclude' => (float) ($i->discount_exclude ?? 0),
+            'cost_exclude' => (float) ($i->cost_exclude ?? 0),
+            'tax_category' => $i->tax_category,
+            'item_kind' => $i->item_kind,
+            'vendor' => $i->vendor,
           ])->values()->all()
         : ($seedItems ?? []));
     if (empty($initialItems)) {
-        $initialItems = [['name' => '', 'description' => '', 'quantity' => 1, 'unit' => '', 'unit_price' => 0]];
+        $initialItems = [['name' => '', 'description' => '', 'quantity' => 1, 'unit' => '', 'unit_price' => 0, 'sell_exclude' => 0, 'discount_exclude' => 0]];
     }
     $accountMap = $accounts->mapWithKeys(fn ($a) => [$a->id => [
         'name' => $a->name,
@@ -104,6 +108,12 @@
                 <div class="space-y-3">
                     <template x-for="(item, index) in items" :key="index">
                         <div class="rounded-lg border border-slate-200 p-3">
+                            <input type="hidden" :name="`items[${index}][sell_exclude]`" x-model.number="item.sell_exclude">
+                            <input type="hidden" :name="`items[${index}][discount_exclude]`" x-model.number="item.discount_exclude">
+                            <input type="hidden" :name="`items[${index}][cost_exclude]`" x-model.number="item.cost_exclude">
+                            <input type="hidden" :name="`items[${index}][tax_category]`" x-model="item.tax_category">
+                            <input type="hidden" :name="`items[${index}][item_kind]`" x-model="item.item_kind">
+                            <input type="hidden" :name="`items[${index}][vendor]`" x-model="item.vendor">
                             <div class="grid grid-cols-12 gap-2">
                                 <div class="col-span-12 sm:col-span-5">
                                     <input type="text" :name="`items[${index}][name]`" x-model="item.name" placeholder="Product/service name" @if ($isCreate) required @endif
@@ -122,7 +132,7 @@
                                     <input type="number" step="0.01" min="0" :name="`items[${index}][unit_price]`" x-model.number="item.unit_price" placeholder="Harga exclude"
                                            @if ($isCreate) required @endif
                                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
-                                           title="Harga jual exclude (sebelum PPN)">
+                                           title="Harga jual exclude (setelah diskon item bila ada)">
                                 </div>
                                 <div class="col-span-12 flex items-center justify-between sm:col-span-1 sm:justify-center">
                                     <span class="text-sm font-medium text-slate-700 sm:hidden" x-text="formatMoney(item.quantity * item.unit_price)"></span>
@@ -131,6 +141,10 @@
                                 <div class="col-span-12">
                                     <input type="text" :name="`items[${index}][description]`" x-model="item.description" placeholder="Specification (optional)"
                                            class="w-full rounded-lg border border-slate-200 py-1.5 px-3 text-xs text-slate-500 focus:border-brand-500 focus:ring-1 focus:ring-brand-200">
+                                    <p class="mt-1 text-[11px] text-amber-700" x-show="(Number(item.discount_exclude) || 0) > 0">
+                                        Diskon item: list <span x-text="formatMoney(item.sell_exclude)"></span>
+                                        → setelah diskon <span x-text="formatMoney(item.unit_price)"></span>
+                                    </p>
                                 </div>
                             </div>
                             <div class="mt-2 hidden text-right text-sm text-slate-500 sm:block">
@@ -223,6 +237,12 @@
                                 </option>
                             @endforeach
                         </select>
+                        @if (! empty($templateCompany))
+                            <p class="mt-1 text-xs text-slate-400">Hanya template kategori <strong>{{ $templateCompany }}</strong>.</p>
+                        @endif
+                        @if ($templates->isEmpty())
+                            <p class="mt-1 text-xs text-amber-600">Belum ada template aktif untuk kategori ini. Buat di Quotation Templates.</p>
+                        @endif
                     </div>
                 </div>
             </x-card>
@@ -262,8 +282,22 @@
 
 <script>
     function quotationForm(config) {
+        const items = (config.items || []).map(item => ({
+            name: item.name ?? '',
+            description: item.description ?? '',
+            quantity: Number(item.quantity) || 0,
+            unit: item.unit ?? '',
+            unit_price: Number(item.unit_price) || 0,
+            sell_exclude: Number(item.sell_exclude ?? item.unit_price) || 0,
+            discount_exclude: Number(item.discount_exclude) || 0,
+            cost_exclude: Number(item.cost_exclude) || 0,
+            tax_category: item.tax_category ?? '',
+            item_kind: item.item_kind ?? '',
+            vendor: item.vendor ?? '',
+        }));
+
         return {
-            items: config.items,
+            items,
             discount: config.discount,
             taxPercent: config.taxPercent,
             currency: config.currency,
@@ -284,7 +318,11 @@
                 return Math.max(this.subtotal - (Number(this.discount) || 0), 0) + this.taxAmount;
             },
             addItem() {
-                this.items.push({ name: '', description: '', quantity: 1, unit: '', unit_price: 0 });
+                this.items.push({
+                    name: '', description: '', quantity: 1, unit: '', unit_price: 0,
+                    sell_exclude: 0, discount_exclude: 0, cost_exclude: 0,
+                    tax_category: '', item_kind: '', vendor: '',
+                });
             },
             removeItem(index) {
                 this.items.splice(index, 1);

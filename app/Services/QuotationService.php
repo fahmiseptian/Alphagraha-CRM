@@ -217,6 +217,8 @@ class QuotationService
             'items_rows' => $this->renderItemsRows($quotation),
             'items_table_idr' => $this->renderItemsTableIndo($quotation),
             'items_rows_idr' => $this->renderItemsRowsIndo($quotation),
+            'items_table_diskon_item' => $this->renderItemsTableDiskonItem($quotation),
+            'items_rows_diskon_item' => $this->renderItemsRowsDiskonItem($quotation),
             'company_legal_name' => $company['legal_name'] ?? '',
             'company_address' => $company['address'] ?? '',
             'company_phone' => $company['phone'] ?? '',
@@ -379,12 +381,17 @@ class QuotationService
 
     protected function companyConfigForTemplate(?QuotationTemplate $template): array
     {
-        $key = match ($template?->code) {
-            'agc-indo' => 'agc',
-            'eps-indo' => 'eps',
-            'psi-indo' => 'psi',
-            default => 'agc',
-        };
+        $map = config('crm.quotation_company_map', []);
+        $key = $map[$template?->category ?? ''] ?? null;
+
+        if (! $key) {
+            $key = match ($template?->code) {
+                'agc-indo' => 'agc',
+                'eps-indo' => 'eps',
+                'psi-indo' => 'psi',
+                default => 'agc',
+            };
+        }
 
         return config("crm.quotation_companies.{$key}", config('crm.quotation_companies.agc', []));
     }
@@ -542,6 +549,82 @@ class QuotationService
             .'</tr></thead><tbody>'
             .$this->renderItemsRowsIndo($quotation)
             .$this->renderItemsTableIndoSummary($quotation)
+            .'</tbody></table>';
+    }
+
+    protected function renderItemsRowsDiskonItem(Quotation $quotation): string
+    {
+        $quotation->loadMissing(['items', 'opportunity']);
+        $oppProducts = $quotation->opportunity?->products?->values() ?? collect();
+
+        $rows = '';
+        $no = 1;
+
+        foreach ($quotation->items as $index => $item) {
+            $unitLabel = trim((string) $item->unit) ?: 'Unit';
+            $qty = (float) $item->quantity;
+
+            // Prefer harga dari opportunity agar Harga Exclude = harga jual list,
+            // bukan harga setelah diskon (sering tersimpan salah di item QO lama).
+            $opp = $oppProducts->get($index);
+            if (! $opp || ($opp['name'] ?? '') !== $item->name) {
+                $opp = $oppProducts->firstWhere('name', $item->name);
+            }
+
+            if ($opp) {
+                $hargaExclude = (float) ($opp['sell_exclude'] ?? 0);
+                $disc = (float) ($opp['discount_exclude'] ?? 0);
+                $hargaSetelahDiskon = $disc > 0
+                    ? $disc
+                    : (float) ($opp['effective_sell_exclude'] ?? $hargaExclude);
+            } else {
+                $hargaExclude = $item->listSellExclude();
+                $hargaSetelahDiskon = $item->afterDiscountExclude();
+            }
+
+            // Jika QO menyimpan list = setelah diskon, tetap tampilkan unit_price sebagai setelah diskon.
+            if ($hargaExclude <= 0) {
+                $hargaExclude = $item->listSellExclude();
+            }
+            if ($hargaSetelahDiskon <= 0) {
+                $hargaSetelahDiskon = $item->afterDiscountExclude();
+            }
+
+            $total = round($qty * $hargaSetelahDiskon, 2);
+
+            $rows .= '<tr>'
+                .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
+                .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
+                .($item->description ? '<span style="display:block; height:4px;"></span><small>'.nl2br(e($item->description)).'</small>' : '')
+                .'</td>'
+                .'<td style="'.$this->cellStyle('center').'">'
+                .rtrim(rtrim(number_format($qty, 2), '0'), '.').' '.e($unitLabel).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($hargaExclude, $quotation->currency).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($hargaSetelahDiskon, $quotation->currency).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($total, $quotation->currency).'</td>'
+                .'</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="6" style="'.$this->cellStyle('center').'color:#999;">Belum ada item.</td></tr>';
+        }
+
+        return $rows;
+    }
+
+    protected function renderItemsTableDiskonItem(Quotation $quotation): string
+    {
+        return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0; line-height: 1;">'
+            .'<thead><tr>'
+            .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
+            .'<th style="'.$this->cellStyle('center', true).'">Spesifikasi</th>'
+            .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga Exclude</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:130px;">Harga Setelah Diskon</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga</th>'
+            .'</tr></thead><tbody>'
+            .$this->renderItemsRowsDiskonItem($quotation)
+            .$this->renderItemsTableSummary($quotation, 4)
             .'</tbody></table>';
     }
 }

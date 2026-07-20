@@ -13,6 +13,12 @@ class CrmNotification extends Model
 
     public const TYPE_DISCOUNT_REVISED = 'discount_revised';
 
+    public const TYPE_DISCOUNT_REJECTED = 'discount_rejected';
+
+    public const TYPE_DISCOUNT_REVERTED = 'discount_reverted';
+
+    public const TYPE_DISCOUNT_REQUESTED = 'discount_requested';
+
     public const TYPE_ACTIVITY_DUE = 'activity_due';
 
     public const TYPE_OPPORTUNITY_DEADLINE = 'opportunity_deadline';
@@ -50,7 +56,8 @@ class CrmNotification extends Model
     public function icon(): string
     {
         return match ($this->type) {
-            self::TYPE_DISCOUNT_APPROVED, self::TYPE_DISCOUNT_REVISED => 'bi-percent',
+            self::TYPE_DISCOUNT_APPROVED, self::TYPE_DISCOUNT_REVISED, self::TYPE_DISCOUNT_REJECTED,
+            self::TYPE_DISCOUNT_REVERTED, self::TYPE_DISCOUNT_REQUESTED => 'bi-percent',
             self::TYPE_ACTIVITY_DUE => 'bi-calendar-event',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bi-briefcase',
             default => 'bi-bell',
@@ -62,6 +69,9 @@ class CrmNotification extends Model
         return match ($this->type) {
             self::TYPE_DISCOUNT_APPROVED => 'bg-green-50 text-green-600',
             self::TYPE_DISCOUNT_REVISED => 'bg-amber-50 text-amber-600',
+            self::TYPE_DISCOUNT_REJECTED => 'bg-red-50 text-red-600',
+            self::TYPE_DISCOUNT_REVERTED => 'bg-slate-100 text-slate-600',
+            self::TYPE_DISCOUNT_REQUESTED => 'bg-rose-50 text-rose-600',
             self::TYPE_ACTIVITY_DUE => 'bg-blue-50 text-blue-600',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bg-rose-50 text-rose-600',
             default => 'bg-slate-100 text-slate-600',

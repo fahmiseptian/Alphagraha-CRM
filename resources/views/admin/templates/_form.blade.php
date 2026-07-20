@@ -8,7 +8,7 @@
                 {{-- Insert placeholder toolbar --}}
                 <div class="mb-3 flex flex-wrap gap-1.5">
                     <span class="mr-1 self-center text-xs text-slate-400">Insert:</span>
-                    @foreach (['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','total_price','sales_name','sales_job_position','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'] as $ph)
+                    @foreach (['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','items_table_diskon_item','total_price','sales_name','sales_job_position','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'] as $ph)
                         @php $placeholderTag = '{'.'{ '.$ph.' }'.'}'; @endphp
                         <button type="button" onclick="insertPlaceholder('{{ $ph }}')"
                                 class="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-brand-700 hover:bg-brand-50">
@@ -34,6 +34,17 @@
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Template Name <span class="text-red-500">*</span></label>
                         <input type="text" name="name" value="{{ old('name', $template->name) }}" required
                                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    </div>
+                    <div>
+                        <label class="mb-1.5 block text-sm font-medium text-slate-700">Kategori Perusahaan <span class="text-red-500">*</span></label>
+                        <select name="category" required
+                                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                            <option value="">— Pilih kategori —</option>
+                            @foreach (\App\Models\QuotationTemplate::CATEGORIES as $category)
+                                <option value="{{ $category }}" @selected(old('category', $template->category) === $category)>{{ $category }}</option>
+                            @endforeach
+                        </select>
+                        <p class="mt-1 text-xs text-slate-400">Template hanya muncul di QO opportunity dengan company yang sama.</p>
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Description</label>

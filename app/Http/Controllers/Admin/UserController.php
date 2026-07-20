@@ -150,6 +150,15 @@ class UserController extends Controller
                 'numeric',
                 'min:0',
             ],
+            'sales_target_period' => [
+                Rule::requiredIf(fn () => $request->input('role') === User::ROLE_SALES),
+                'nullable',
+                Rule::in(array_keys(UserProfile::TARGET_PERIODS)),
+            ],
+            'sales_target_deadline' => [
+                'nullable',
+                'date',
+            ],
             'password' => [$user ? 'nullable' : 'required', 'confirmed', Password::min(6)],
             'is_active' => ['nullable', 'boolean'],
         ], [
@@ -157,6 +166,7 @@ class UserController extends Controller
             'sales_code.unique' => 'Sales Code sudah dipakai user lain.',
             'sales_code.regex' => 'Sales Code hanya boleh huruf dan angka.',
             'sales_target.required' => 'Sales Target wajib diisi untuk role Sales.',
+            'sales_target_period.required' => 'Periode target wajib diisi untuk role Sales.',
         ]);
 
         $appRole = $validated['role'];
@@ -174,6 +184,12 @@ class UserController extends Controller
                 : null,
             'sales_target' => $appRole === User::ROLE_SALES
                 ? (float) ($validated['sales_target'] ?? UserProfile::DEFAULT_SALES_TARGET)
+                : null,
+            'sales_target_period' => $appRole === User::ROLE_SALES
+                ? ($validated['sales_target_period'] ?? UserProfile::TARGET_PERIOD_1_YEAR)
+                : null,
+            'sales_target_deadline' => $appRole === User::ROLE_SALES
+                ? (! empty($validated['sales_target_deadline']) ? $validated['sales_target_deadline'] : null)
                 : null,
         ];
     }

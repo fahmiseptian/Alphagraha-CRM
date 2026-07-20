@@ -57,7 +57,10 @@
                     @if ($isPending)
                         <i class="bi bi-hourglass-split mr-1"></i> Diskon menunggu approval Superadmin
                     @elseif ($isRejected)
-                        <i class="bi bi-x-circle mr-1"></i> Diskon ditolak (legacy)
+                        <i class="bi bi-x-circle mr-1"></i> Diskon ditolak
+                        @if ((float) $opportunity->crm_discount_amount > 0)
+                            <span class="font-normal">— nominal disetujui {{ money($opportunity->crm_discount_amount, $opportunity->amount_currency ?: 'IDR') }}</span>
+                        @endif
                     @elseif ($isApproved)
                         <i class="bi bi-check-circle mr-1"></i> Diskon disetujui
                     @else
@@ -67,7 +70,10 @@
                 <p class="mt-1">
                     Nominal: <strong>{{ money($opportunity->crm_discount_amount, $opportunity->amount_currency ?: 'IDR') }}</strong>
                     @if ($discPct !== null)
-                        &nbsp;·&nbsp; Persentase: <strong>{{ number_format($discPct, 2, ',', '.') }}%</strong> dari amount
+                        &nbsp;·&nbsp; Persentase: <strong>{{ number_format($discPct, 2, ',', '.') }}%</strong> dari margin
+                    @endif
+                    @if ($opportunity->totalProductsMargin() > 0)
+                        &nbsp;·&nbsp; Margin: <strong>{{ money($opportunity->totalProductsMargin(), $opportunity->amount_currency ?: 'IDR') }}</strong>
                     @endif
                 </p>
                 @if ($opportunity->crm_discount_note)
@@ -75,35 +81,110 @@
                 @endif
             </div>
             @if ($isPending && auth()->user()->canApproveDiscount())
-                <div class="flex w-full max-w-md shrink-0 flex-col gap-3">
-                    <form method="POST" action="{{ route('opportunities.discount.approve', $opportunity) }}" class="flex flex-wrap items-center gap-2">
-                        @csrf
-                        <input type="text" name="note" placeholder="Catatan approve (opsional)"
-                               class="min-w-[10rem] flex-1 rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
-                        <x-btn type="submit" icon="bi-check-lg" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Approve</x-btn>
-                    </form>
-                    <div class="rounded-lg border border-amber-200 bg-white p-3">
-                        <p class="mb-2 text-xs font-semibold text-amber-800">Tolak request — sesuaikan nominal lalu setujui</p>
-                        <form method="POST" action="{{ route('opportunities.discount.reject', $opportunity) }}" class="space-y-2">
+                @php $marginTotal = $opportunity->totalProductsMargin(); @endphp
+                <div class="flex w-full max-w-md shrink-0 flex-col gap-3"
+                     x-data="{
+                         adjustMode: false,
+                         marginTotal: {{ json_encode($marginTotal) }},
+                         discountPercent: {{ json_encode($discPct ?? 0) }},
+                         discountAmount: {{ json_encode((float) old('discount_amount', $opportunity->crm_discount_amount)) }},
+                         round(n) { return Math.round(n * 100) / 100; },
+                         onDiscountPercentChange() {
+                             const pct = Number(this.discountPercent) || 0;
+                             if (this.marginTotal > 0) {
+                                 this.discountAmount = this.round(this.marginTotal * pct / 100);
+                             }
+                         },
+                         onDiscountAmountChange() {
+                             const disc = Number(this.discountAmount) || 0;
+                             if (this.marginTotal > 0 && disc >= 0) {
+                                 this.discountPercent = disc > 0
+                                     ? this.round((disc / this.marginTotal) * 100)
+                                     : 0;
+                             }
+                         },
+                     }">
+                    <div x-show="!adjustMode" x-cloak class="space-y-2">
+                        <form method="POST" action="{{ route('opportunities.discount.approve', $opportunity) }}" class="space-y-2">
                             @csrf
-                            <div>
-                                <label class="mb-0.5 block text-[11px] text-slate-500">Nominal diskon yang disetujui</label>
-                                <input type="number" step="0.01" min="0" name="discount_amount" required
-                                       value="{{ old('discount_amount', $opportunity->crm_discount_amount) }}"
-                                       class="w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm text-slate-700">
+                            <input type="text" name="note" placeholder="Catatan approve (opsional)"
+                                   class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                            <div class="flex flex-wrap gap-2">
+                                <x-btn type="submit" icon="bi-check-lg" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Approve</x-btn>
+                                <button type="button" @click="adjustMode = true"
+                                        class="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50">
+                                    <i class="bi bi-sliders"></i> Sesuaikan
+                                </button>
                             </div>
+                        </form>
+                    </div>
+                    <div x-show="adjustMode" x-cloak class="rounded-lg border border-green-200 bg-white p-3">
+                        <p class="mb-2 text-xs font-semibold text-green-800">Sesuaikan diskon — isi nominal atau % margin</p>
+                        <form method="POST" action="{{ route('opportunities.discount.approve', $opportunity) }}" class="space-y-2">
+                            @csrf
+                            <div class="grid gap-2 sm:grid-cols-2">
+                                <div>
+                                    <label class="mb-0.5 block text-[11px] text-slate-500">% dari margin</label>
+                                    <div class="flex items-center gap-1.5">
+                                        <input type="number" step="0.01" min="0"
+                                               x-model.number="discountPercent"
+                                               @input="onDiscountPercentChange()"
+                                               class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-sm text-slate-700"
+                                               placeholder="0">
+                                        <span class="shrink-0 text-xs font-semibold text-slate-500">%</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="mb-0.5 block text-[11px] text-slate-500">Nominal diskon <span class="text-red-500">*</span></label>
+                                    <input type="number" step="0.01" min="0" name="discount_amount" required
+                                           x-model.number="discountAmount"
+                                           @input="onDiscountAmountChange()"
+                                           class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-sm text-slate-700">
+                                </div>
+                            </div>
+                            @if ($marginTotal > 0)
+                                {{-- <p class="text-[11px] text-slate-400">
+                                    Basis margin: <strong>{{ money($marginTotal, $opportunity->amount_currency ?: 'IDR') }}</strong>
+                                    — isi % atau nominal, keduanya sinkron otomatis.
+                                </p> --}}
+                            @else
+                                <p class="text-[11px] text-amber-600">Margin belum tersedia; isi nominal langsung.</p>
+                            @endif
+                            <p class="text-[11px] text-slate-400">Isi 0 lalu submit untuk menolak diskon sepenuhnya.</p>
                             <div>
                                 <label class="mb-0.5 block text-[11px] text-slate-500">Catatan ke sales</label>
                                 <input type="text" name="note" placeholder="Mis. diskon diturunkan sesuai kebijakan"
                                        value="{{ old('note') }}"
-                                       class="w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                                       class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
                             </div>
-                            <x-btn type="submit" variant="secondary" icon="bi-pencil-square" class="w-full justify-center !border-amber-300 !text-amber-800 hover:!bg-amber-50">
-                                Sesuaikan &amp; Setujui
-                            </x-btn>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="submit"
+                                        class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition"
+                                        :class="discountAmount > 0
+                                            ? 'border-transparent bg-green-600 text-white hover:bg-green-700'
+                                            : 'border-transparent bg-red-600 text-white hover:bg-red-700'">
+                                    <i class="bi" :class="discountAmount > 0 ? 'bi-check-lg' : 'bi-x-lg'"></i>
+                                    <span x-text="discountAmount > 0 ? 'Setujui' : 'Tolak sepenuhnya'"></span>
+                                </button>
+                                <button type="button" @click="adjustMode = false"
+                                        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                                    <i class="bi bi-arrow-left"></i> Kembali
+                                </button>
+                            </div>
                         </form>
                     </div>
                 </div>
+            @elseif (($isApproved || $isRejected) && auth()->user()->canApproveDiscount() && $opportunity->hasActiveDiscount())
+                <form method="POST" action="{{ route('opportunities.discount.revert', $opportunity) }}"
+                      onsubmit="return confirm('Kembalikan diskon ke status menunggu approval?')"
+                      class="flex w-full max-w-md shrink-0 flex-col gap-2">
+                    @csrf
+                    <input type="text" name="note" placeholder="Catatan (opsional)"
+                           class="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                    <x-btn type="submit" variant="secondary" icon="bi-arrow-counterclockwise" class="w-full justify-center">
+                        Kembalikan ke Pending
+                    </x-btn>
+                </form>
             @endif
         </div>
     </div>
@@ -160,7 +241,7 @@
                         <dd class="mt-0.5 font-medium text-slate-700">
                             {{ money($opportunity->crm_discount_amount, $opportunity->amount_currency ?: 'IDR') }}
                             @if ($opportunity->discountPercent() !== null)
-                                <span class="text-slate-500">({{ number_format($opportunity->discountPercent(), 2, ',', '.') }}%)</span>
+                                <span class="text-slate-500">({{ number_format($opportunity->discountPercent(), 2, ',', '.') }}% dari margin)</span>
                             @endif
                             <x-badge class="ml-1" :color="match($opportunity->crm_discount_status) {
                                 'approved' => 'green',
@@ -197,7 +278,7 @@
             </div>
             @if ($products->count())
                 <div class="mt-3 overflow-x-auto">
-                    <table class="crm-table min-w-[960px]">
+                    <table class="crm-table min-w-[1080px]">
                         <thead>
                             <tr>
                                 <th>Kategori</th>
@@ -205,6 +286,7 @@
                                 <th>Item</th>
                                 <th class="text-right">Qty</th>
                                 <th class="text-right">Jual Excl</th>
+                                <th class="text-right">Diskon Item</th>
                                 <th class="text-right">Jual Incl</th>
                                 <th class="text-right">Beli Excl</th>
                                 <th class="text-right">Beli Incl</th>
@@ -223,7 +305,14 @@
                                     <td class="text-slate-700">{{ $p['name'] }}</td>
                                     <td class="text-right text-slate-600">{{ rtrim(rtrim(number_format($p['quantity'], 2, ',', '.'), '0'), ',') }}</td>
                                     <td class="text-right text-slate-600">{{ money($p['sell_exclude'], $opportunity->amount_currency ?: 'IDR') }}</td>
-                                    <td class="text-right text-slate-600">{{ money($p['sell_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">
+                                        @if (($p['discount_exclude'] ?? 0) > 0)
+                                            {{ money($p['discount_exclude'], $opportunity->amount_currency ?: 'IDR') }}
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
+                                    <td class="text-right text-slate-600">{{ money($p['effective_sell_include'] ?? $p['sell_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                     <td class="text-right text-slate-400">{{ money($p['cost_exclude'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                     <td class="text-right text-slate-400">{{ money($p['cost_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                     <td class="text-right text-slate-600">
@@ -242,7 +331,7 @@
                         </tbody>
                         <tfoot>
                             <tr class="bg-slate-50">
-                                <td class="font-semibold text-slate-700" colspan="12">Total</td>
+                                <td class="font-semibold text-slate-700" colspan="13">Total</td>
                                 <td class="text-right font-bold text-slate-900">{{ money($products->sum('subtotal'), $opportunity->amount_currency ?: 'IDR') }}</td>
                             </tr>
                         </tfoot>

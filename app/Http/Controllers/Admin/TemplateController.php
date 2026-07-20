@@ -60,10 +60,14 @@ class TemplateController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            'category' => ['required', 'string', 'in:'.implode(',', QuotationTemplate::CATEGORIES)],
             'description' => ['nullable', 'string'],
             'body_html' => ['required', 'string'],
             'is_active' => ['nullable', 'boolean'],
             'is_default' => ['nullable', 'boolean'],
+        ], [
+            'category.required' => 'Pilih kategori perusahaan untuk template ini.',
+            'category.in' => 'Kategori tidak valid.',
         ]);
 
         $data['is_active'] = $request->boolean('is_active');
@@ -73,12 +77,15 @@ class TemplateController extends Controller
     }
 
     /**
-     * Pastikan hanya ada satu template default.
+     * Pastikan hanya ada satu template default per kategori.
      */
     protected function ensureSingleDefault(QuotationTemplate $template): void
     {
         if ($template->is_default) {
-            QuotationTemplate::where('id', '<>', $template->id)->update(['is_default' => false]);
+            QuotationTemplate::query()
+                ->where('id', '<>', $template->id)
+                ->where('category', $template->category)
+                ->update(['is_default' => false]);
         }
     }
 }

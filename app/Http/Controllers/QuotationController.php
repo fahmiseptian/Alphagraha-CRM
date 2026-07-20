@@ -90,6 +90,7 @@ class QuotationController extends Controller
         ]);
 
         $seedItems = null;
+        $opportunityCompany = null;
 
         // Prefill dari Opportunity (1 opportunity : 1 penawaran).
         if ($opportunityId) {
@@ -105,6 +106,7 @@ class QuotationController extends Controller
                         ->with('success', 'This opportunity already has a quotation.');
                 }
 
+                $opportunityCompany = $opportunity->company;
                 $account = $opportunity->account;
                 $quotation->opportunity_id = $opportunity->id;
                 $quotation->currency = $opportunity->amount_currency ?: $quotation->currency;
@@ -127,10 +129,11 @@ class QuotationController extends Controller
                         'description' => '',
                         'quantity' => $p['quantity'] ?: 1,
                         'unit' => '',
-                        'unit_price' => (float) $p['sell_exclude'],
+                        'unit_price' => (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude']),
                         'tax_category' => $p['tax_category'],
                         'item_kind' => $p['item_kind'],
                         'sell_exclude' => (float) $p['sell_exclude'],
+                        'discount_exclude' => (float) ($p['discount_exclude'] ?? 0),
                         'cost_exclude' => (float) $p['cost_exclude'],
                         'vendor' => $p['vendor'],
                     ])->all();
@@ -163,7 +166,7 @@ class QuotationController extends Controller
             }
         }
 
-        return view('quotations.create', $this->formData() + [
+        return view('quotations.create', $this->formData($opportunityCompany) + [
             'quotation' => $quotation,
             'seedItems' => $seedItems,
             'resolvedSalesCode' => $salesContext['code'],
@@ -238,9 +241,9 @@ class QuotationController extends Controller
     public function edit(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
-        $quotation->load('items');
+        $quotation->load(['items', 'opportunity']);
 
-        return view('quotations.edit', $this->formData() + ['quotation' => $quotation]);
+        return view('quotations.edit', $this->formData($quotation->opportunity?->company) + ['quotation' => $quotation]);
     }
 
     public function update(Request $request, Quotation $quotation)
@@ -439,6 +442,12 @@ class QuotationController extends Controller
             'items.*.quantity' => ['required', 'numeric', $isCreate ? 'min:0.01' : 'min:0'],
             'items.*.unit' => ['nullable', 'string', 'max:50'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
+            'items.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
+            'items.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'items.*.tax_category' => ['nullable', 'string', 'max:20'],
+            'items.*.item_kind' => ['nullable', 'string', 'max:20'],
+            'items.*.vendor' => ['nullable', 'string', 'max:255'],
         ];
 
         if (! $isCreate) {
@@ -498,13 +507,53 @@ class QuotationController extends Controller
     {
         $quotation->items()->delete();
 
+        $oppProducts = null;
+        if ($quotation->opportunity_id) {
+            $opportunity = Opportunity::query()->find($quotation->opportunity_id);
+            $oppProducts = $opportunity?->products;
+        }
+
         foreach (array_values($items) as $index => $item) {
             $quantity = (float) $item['quantity'];
+            $unitPrice = (float) ($item['unit_price'] ?? 0);
+            $incomingDiscount = (float) ($item['discount_exclude'] ?? 0);
+            $incomingList = isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null
+                ? (float) $item['sell_exclude']
+                : null;
 
-            // unit_price di form QO = harga jual EXCLUDE (sebelum PPN).
-            $sellExclude = (float) ($item['unit_price'] ?? 0);
-            if (isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null) {
-                $sellExclude = (float) $item['sell_exclude'];
+            // Sumber kebenaran harga list/diskon: opportunity (bila terhubung).
+            $opp = $oppProducts?->values()->get($index);
+            if ($opp) {
+                $oppList = (float) ($opp['sell_exclude'] ?? 0);
+                $oppDiscount = (float) ($opp['discount_exclude'] ?? 0);
+                if ($oppList > 0) {
+                    $incomingList = $oppList;
+                }
+                if ($oppDiscount > 0) {
+                    $incomingDiscount = $oppDiscount;
+                }
+            }
+
+            // unit_price di form = harga yang ditagihkan (setelah diskon item bila ada).
+            if ($incomingDiscount > 0) {
+                $listPrice = $incomingList !== null && $incomingList > 0 ? $incomingList : $unitPrice;
+                // Pertahankan harga setelah diskon dari opportunity; jangan timpa dengan unit_price
+                // kecuali user mengubah harga tagihan menjauh dari diskon opportunity.
+                if ($opp && abs($unitPrice - $incomingDiscount) < 0.009) {
+                    $discountExclude = $incomingDiscount;
+                } elseif ($opp && abs($unitPrice - (float) ($opp['effective_sell_exclude'] ?? 0)) < 0.009) {
+                    $discountExclude = $incomingDiscount;
+                } else {
+                    // User mengedit harga tagihan di form QO.
+                    $discountExclude = $unitPrice;
+                }
+            } else {
+                $listPrice = $incomingList !== null && $incomingList > 0 ? $incomingList : $unitPrice;
+                $discountExclude = 0;
+                // Tanpa diskon item, list = harga tagihan.
+                if ($incomingDiscount <= 0 && ($incomingList === null || abs(($incomingList ?? 0) - $unitPrice) < 0.009)) {
+                    $listPrice = $unitPrice;
+                }
             }
 
             $enriched = OpportunityProductPricing::enrichRow([
@@ -513,21 +562,25 @@ class QuotationController extends Controller
                 'vendor' => $item['vendor'] ?? '',
                 'tax_category' => $item['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $item['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
-                'sell_exclude' => $sellExclude,
-                'cost_exclude' => (float) ($item['cost_exclude'] ?? 0),
+                'sell_exclude' => $listPrice,
+                'cost_exclude' => (float) ($item['cost_exclude'] ?? ($opp['cost_exclude'] ?? 0)),
+                'discount_exclude' => $discountExclude,
             ]);
+
+            $billedPrice = $discountExclude > 0 ? $discountExclude : $listPrice;
 
             $quotation->items()->create([
                 'name' => $item['name'],
                 'description' => $item['description'] ?? null,
                 'quantity' => $quantity,
                 'unit' => $item['unit'] ?? null,
-                'unit_price' => $enriched['sell_exclude'],
-                'total' => round($quantity * $enriched['sell_exclude'], 2),
+                'unit_price' => $billedPrice,
+                'total' => round($quantity * $billedPrice, 2),
                 'tax_category' => $enriched['tax_category'],
                 'item_kind' => $enriched['item_kind'],
-                'sell_exclude' => $enriched['sell_exclude'],
+                'sell_exclude' => $listPrice,
                 'cost_exclude' => $enriched['cost_exclude'],
+                'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,
                 'vendor' => $enriched['vendor'] ?: null,
                 'sort_order' => $index,
             ]);
@@ -602,13 +655,32 @@ class QuotationController extends Controller
 
     protected function resolveTemplate(Quotation $quotation): QuotationTemplate
     {
-        $template = $quotation->template
-            ?? QuotationTemplate::where('is_default', true)->where('is_active', true)->first()
-            ?? QuotationTemplate::where('is_active', true)->first();
+        if (! $quotation->relationLoaded('opportunity')) {
+            $quotation->load('opportunity');
+        }
+
+        $company = $quotation->opportunity?->company;
+        $template = $quotation->template;
+
+        // Jika template tidak cocok dengan company opportunity, cari default kategori tersebut.
+        if (! $template || ($company && $template->category && $template->category !== $company)) {
+            $template = QuotationTemplate::query()
+                ->where('is_active', true)
+                ->forCompany($company)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->first();
+        }
+
+        if (! $template) {
+            $template = QuotationTemplate::where('is_default', true)->where('is_active', true)->first()
+                ?? QuotationTemplate::where('is_active', true)->first();
+        }
 
         if (! $template) {
             $template = new QuotationTemplate([
                 'code' => 'agc-indo',
+                'category' => 'Alpha Graha Computindo',
                 'body_html' => '<p>{{ customer_name }}</p>{{ items_table_idr }}<p>Total: {{ total_price }}</p>',
             ]);
         }
@@ -622,23 +694,12 @@ class QuotationController extends Controller
             return null;
         }
 
-        $map = config('crm.quotation_company_map', []);
-        $key = $map[$company] ?? null;
-
-        if (! $key) {
-            return null;
-        }
-
-        $code = match ($key) {
-            'agc' => 'agc-indo',
-            'eps' => 'eps-indo',
-            'psi' => 'psi-indo',
-            default => null,
-        };
-
-        return $code
-            ? QuotationTemplate::query()->where('code', $code)->where('is_active', true)->value('id')
-            : null;
+        return QuotationTemplate::query()
+            ->where('is_active', true)
+            ->forCompany($company)
+            ->orderByDesc('is_default')
+            ->orderBy('name')
+            ->value('id');
     }
 
     protected function ensureCreatorSignature(Quotation $quotation): void
@@ -664,18 +725,24 @@ class QuotationController extends Controller
         }
     }
 
-    protected function formData(): array
+    protected function formData(?string $company = null): array
     {
         $accounts = $this->scopeAssigned(Account::query())
             ->orderBy('name')
             ->get(['id', 'name', 'billing_address_street', 'billing_address_city', 'billing_address_state', 'billing_address_country', 'billing_address_postal_code']);
 
-        $templates = QuotationTemplate::where('is_active', true)->orderByDesc('is_default')->orderBy('name')->get();
+        $templates = QuotationTemplate::query()
+            ->where('is_active', true)
+            ->forCompany($company)
+            ->orderByDesc('is_default')
+            ->orderBy('name')
+            ->get();
 
         return [
             'accounts' => $accounts,
             'templates' => $templates,
             'statuses' => Quotation::STATUSES,
+            'templateCompany' => $company,
         ];
     }
 

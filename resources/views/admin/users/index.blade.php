@@ -26,6 +26,8 @@
                     @if ($role === \App\Models\User::ROLE_SALES)
                         <th>Sales Code</th>
                         <th>Sales Target</th>
+                        <th>Periode</th>
+                        <th>Tenggat</th>
                     @endif
                     <th>Email</th>
                     <th>Status</th>
@@ -45,6 +47,18 @@
                         @if ($role === \App\Models\User::ROLE_SALES)
                             <td class="font-mono text-sm text-slate-700">{{ $user->profile?->sales_code ?: '—' }}</td>
                             <td class="text-sm text-slate-700">{{ money($user->profile?->resolvedSalesTarget() ?? 0) }}</td>
+                            <td class="text-sm text-slate-700">{{ $user->profile?->salesTargetPeriodLabel() ?? '—' }}</td>
+                            <td class="text-sm text-slate-700">
+                                @php $autoDeadline = $user->profile?->resolvedSalesTargetDeadline(); @endphp
+                                @if ($autoDeadline)
+                                    {{ $autoDeadline->format('d M Y') }}
+                                    @unless ($user->profile?->hasManualSalesTargetDeadline())
+                                        <span class="block text-[10px] text-slate-400">otomatis</span>
+                                    @endunless
+                                @else
+                                    —
+                                @endif
+                            </td>
                         @endif
                         <td class="text-slate-600">{{ $user->email ?? '—' }}</td>
                         <td>
@@ -61,7 +75,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="{{ $role === \App\Models\User::ROLE_SALES ? 7 : 5 }}" class="py-12 text-center text-slate-400">
+                        <td colspan="{{ $role === \App\Models\User::ROLE_SALES ? 9 : 5 }}" class="py-12 text-center text-slate-400">
                             Belum ada user dengan role {{ $roleLabel }}.
                         </td>
                     </tr>

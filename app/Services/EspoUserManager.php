@@ -49,12 +49,14 @@ class EspoUserManager
             $data['app_role'] ?? null
         );
 
-        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data) || array_key_exists('sales_target', $data)) {
+        if ($this->shouldSyncProfile($data)) {
             $this->syncProfile(
                 $id,
                 $data['app_role'] ?? User::ROLE_SALES,
                 $data['sales_code'] ?? null,
-                $data['sales_target'] ?? null
+                $data['sales_target'] ?? null,
+                $data['sales_target_period'] ?? null,
+                $data['sales_target_deadline'] ?? null
             );
         }
 
@@ -88,23 +90,40 @@ class EspoUserManager
             $this->syncPrimaryEmail($user->id, $data['email']);
         }
 
-        if (array_key_exists('app_role', $data) || array_key_exists('sales_code', $data) || array_key_exists('sales_target', $data)) {
+        if ($this->shouldSyncProfile($data)) {
             $this->syncProfile(
                 $user->id,
                 $data['app_role'] ?? $user->role,
                 $data['sales_code'] ?? null,
-                $data['sales_target'] ?? null
+                $data['sales_target'] ?? null,
+                $data['sales_target_period'] ?? null,
+                $data['sales_target_deadline'] ?? null
             );
         }
 
         return $user->fresh(['profile']);
     }
 
-    /**
-     * Simpan app_role + sales_code + sales_target ke profil.
-     */
-    protected function syncProfile(string $userId, string $appRole, ?string $salesCode, ?float $salesTarget = null): void
+    protected function shouldSyncProfile(array $data): bool
     {
+        return array_key_exists('app_role', $data)
+            || array_key_exists('sales_code', $data)
+            || array_key_exists('sales_target', $data)
+            || array_key_exists('sales_target_period', $data)
+            || array_key_exists('sales_target_deadline', $data);
+    }
+
+    /**
+     * Simpan app_role + sales_code + sales_target (+ periode & tenggat) ke profil.
+     */
+    protected function syncProfile(
+        string $userId,
+        string $appRole,
+        ?string $salesCode,
+        ?float $salesTarget = null,
+        ?string $salesTargetPeriod = null,
+        ?string $salesTargetDeadline = null
+    ): void {
         $isSales = $appRole === User::ROLE_SALES;
         $profile = UserProfile::ensureForUser($userId, $isSales, $appRole);
         $profile->app_role = $appRole;
@@ -115,8 +134,14 @@ class EspoUserManager
             $profile->sales_target = ($salesTarget !== null && $salesTarget > 0)
                 ? $salesTarget
                 : ($profile->sales_target ?: UserProfile::DEFAULT_SALES_TARGET);
+            $profile->sales_target_period = ($salesTargetPeriod && array_key_exists($salesTargetPeriod, UserProfile::TARGET_PERIODS))
+                ? $salesTargetPeriod
+                : ($profile->sales_target_period ?: UserProfile::TARGET_PERIOD_1_YEAR);
+            $profile->sales_target_deadline = $salesTargetDeadline ?: null;
         } else {
             $profile->sales_target = null;
+            $profile->sales_target_period = null;
+            $profile->sales_target_deadline = null;
         }
         $profile->save();
     }

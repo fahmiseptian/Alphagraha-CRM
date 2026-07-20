@@ -13,7 +13,7 @@ class QuotationItem extends Model
     protected $fillable = [
         'quotation_id', 'name', 'description', 'quantity', 'unit',
         'unit_price', 'total', 'sort_order',
-        'tax_category', 'item_kind', 'sell_exclude', 'cost_exclude', 'vendor',
+        'tax_category', 'item_kind', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'vendor',
     ];
 
     protected $casts = [
@@ -22,6 +22,7 @@ class QuotationItem extends Model
         'total' => 'decimal:2',
         'sell_exclude' => 'decimal:2',
         'cost_exclude' => 'decimal:2',
+        'discount_exclude' => 'decimal:2',
     ];
 
     public function quotation(): BelongsTo
@@ -30,18 +31,40 @@ class QuotationItem extends Model
     }
 
     /**
+     * Harga jual exclude (list) sebelum diskon item.
+     */
+    public function listSellExclude(): float
+    {
+        if ($this->sell_exclude !== null && $this->sell_exclude !== '') {
+            return (float) $this->sell_exclude;
+        }
+
+        return (float) $this->unit_price;
+    }
+
+    /**
+     * Harga setelah diskon item (exclude). Jika tidak ada diskon = harga list.
+     */
+    public function afterDiscountExclude(): float
+    {
+        $discount = (float) ($this->discount_exclude ?? 0);
+
+        return $discount > 0 ? $discount : $this->listSellExclude();
+    }
+
+    /**
      * Margin per baris item (margin satuan × qty).
      */
     public function lineMargin(): float
     {
-        $sellExclude = $this->sell_exclude !== null && $this->sell_exclude !== ''
-            ? (float) $this->sell_exclude
-            : OpportunityProductPricing::excludeFromInclude((float) $this->unit_price);
+        $sellExclude = $this->listSellExclude();
+        $discountExclude = (float) ($this->discount_exclude ?? 0);
 
         $enriched = OpportunityProductPricing::enrichRow([
             'quantity' => (float) $this->quantity,
             'sell_exclude' => $sellExclude,
             'cost_exclude' => (float) ($this->cost_exclude ?? 0),
+            'discount_exclude' => $discountExclude,
             'tax_category' => $this->tax_category ?? OpportunityProductPricing::TAX_NON_WAPU,
             'item_kind' => $this->item_kind ?? OpportunityProductPricing::KIND_BARANG,
         ]);

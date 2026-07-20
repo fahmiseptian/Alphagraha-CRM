@@ -97,26 +97,40 @@ class OpportunityProductPricing
         return round($sellExclude * self::pphRate(), 2);
     }
 
+    /**
+     * Basis harga untuk margin: diskon item (harga net) bila > 0, selain itu harga jual.
+     */
+    public static function effectiveSellExclude(float $sellExclude, float $itemDiscount = 0): float
+    {
+        return $itemDiscount > 0 ? $itemDiscount : $sellExclude;
+    }
+
     public static function margin(
         float $sellExclude,
         float $costExclude,
         string $taxCategory,
-        string $itemKind
+        string $itemKind,
+        float $itemDiscount = 0
     ): float {
+        $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+
         if (! self::appliesPph($taxCategory, $itemKind)) {
-            return round($sellExclude - $costExclude, 2);
+            return round($base - $costExclude, 2);
         }
 
-        $pph = self::pph($sellExclude, $taxCategory, $itemKind);
+        $pph = self::pph($base, $taxCategory, $itemKind);
 
-        return round($sellExclude - $pph - $costExclude, 2);
+        return round($base - $pph - $costExclude, 2);
     }
 
     public static function marginPercent(
         float $margin,
         float $sellExclude,
+        float $itemDiscount = 0,
     ): ?float {
-        return $sellExclude > 0 ? round(($margin / $sellExclude) * 100, 2) : null;
+        $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+
+        return $base > 0 ? round(($margin / $base) * 100, 2) : null;
     }
 
     /**
@@ -129,11 +143,15 @@ class OpportunityProductPricing
         $itemKind = $row['item_kind'] ?? self::KIND_BARANG;
         $sellExclude = (float) ($row['sell_exclude'] ?? 0);
         $costExclude = (float) ($row['cost_exclude'] ?? 0);
+        $itemDiscount = (float) ($row['discount_exclude'] ?? $row['item_discount'] ?? 0);
+        $effectiveSell = self::effectiveSellExclude($sellExclude, $itemDiscount);
         $sellInclude = self::includeFromExclude($sellExclude);
         $costInclude = self::includeFromExclude($costExclude);
-        $pph = self::pph($sellExclude, $taxCategory, $itemKind);
-        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind);
-        $marginPercent = self::marginPercent($margin, $sellExclude);
+        $discountInclude = self::includeFromExclude($itemDiscount);
+        $effectiveInclude = self::includeFromExclude($effectiveSell);
+        $pph = self::pph($effectiveSell, $taxCategory, $itemKind);
+        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
+        $marginPercent = self::marginPercent($margin, $sellExclude, $itemDiscount);
         $qty = (float) ($row['quantity'] ?? 1);
 
         return array_merge($row, [
@@ -141,15 +159,20 @@ class OpportunityProductPricing
             'item_kind' => $itemKind,
             'sell_exclude' => $sellExclude,
             'cost_exclude' => $costExclude,
-            'price' => $sellInclude,
+            'discount_exclude' => $itemDiscount,
+            'item_discount' => $itemDiscount,
+            'effective_sell_exclude' => $effectiveSell,
+            'price' => $effectiveInclude,
             'cost' => $costInclude,
             'sell_include' => $sellInclude,
+            'effective_sell_include' => $effectiveInclude,
             'cost_include' => $costInclude,
+            'discount_include' => $discountInclude,
             'pph' => $pph,
             'pph_applicable' => self::appliesPph($taxCategory, $itemKind),
             'margin' => $margin,
             'margin_percent' => $marginPercent,
-            'subtotal' => round($qty * $sellInclude, 2),
+            'subtotal' => round($qty * $effectiveInclude, 2),
         ]);
     }
 }

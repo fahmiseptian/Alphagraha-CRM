@@ -64,7 +64,41 @@
             @error('sales_target')
                 <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
             @else
-                <p class="mt-1 text-xs text-slate-400">Target penjualan untuk leaderboard Dashboard (Closed Won). Contoh: 1000000000 = Rp 1 miliar.</p>
+                <p class="mt-1 text-xs text-slate-400">Target penjualan Closed Won. Contoh: 1000000000 = Rp 1 miliar.</p>
+            @enderror
+        </div>
+        <div>
+            <label class="mb-1.5 block text-sm font-medium text-slate-700">Periode Target <span class="text-red-500">*</span></label>
+            <select name="sales_target_period" required
+                    class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_target_period') border-red-400 @enderror">
+                @foreach (\App\Models\UserProfile::TARGET_PERIODS as $periodKey => $periodLabel)
+                    <option value="{{ $periodKey }}" @selected(old('sales_target_period', $user->profile?->resolvedSalesTargetPeriod()) === $periodKey)>
+                        {{ $periodLabel }}
+                    </option>
+                @endforeach
+            </select>
+            @error('sales_target_period')
+                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+            @else
+                <p class="mt-1 text-xs text-slate-400">Target selalu dihitung dari awal tahun, per segmen sesuai periode.</p>
+            @enderror
+        </div>
+        <div>
+            <label class="mb-1.5 block text-sm font-medium text-slate-700">Tenggat Waktu <span class="text-xs font-normal text-slate-400">(opsional)</span></label>
+            <input type="date" name="sales_target_deadline"
+                   value="{{ old('sales_target_deadline', optional($user->profile?->sales_target_deadline)->format('Y-m-d')) }}"
+                   class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_target_deadline') border-red-400 @enderror">
+            @error('sales_target_deadline')
+                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+            @else
+                <p class="mt-1 text-xs text-slate-400">
+                    Kosongkan agar otomatis dari awal tahun.
+                    Contoh: 3 bulan → Maret, Juni, September, Desember · 6 bulan → Juni, Desember.
+                    @if ($user->profile)
+                        Sekarang: <strong>{{ $user->profile->salesTargetAutoDeadlineScheduleLabel() }}</strong>
+                        (tenggat berjalan {{ $user->profile->resolvedSalesTargetDeadline()->format('d M Y') }}).
+                    @endif
+                </p>
             @enderror
         </div>
     @endif

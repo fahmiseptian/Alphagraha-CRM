@@ -114,8 +114,13 @@ class OpportunityController extends Controller
         $opportunity->created_by_id = auth()->id();
 
         $this->applyValidatedData($opportunity, $data, $request, isNew: true);
+        $notifyDiscount = $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING;
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
+
+        if ($notifyDiscount) {
+            app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
+        }
 
         $message = 'Opportunity created successfully.';
         if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
@@ -160,10 +165,16 @@ class OpportunityController extends Controller
 
         $data = $this->validateData($request);
         $this->applyValidatedData($opportunity, $data, $request);
+        $notifyDiscount = $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING
+            && ($opportunity->isDirty('crm_discount_status') || $opportunity->isDirty('crm_discount_amount'));
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
+
+        if ($notifyDiscount) {
+            app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
+        }
 
         $message = 'Opportunity updated successfully.';
         if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
@@ -180,58 +191,52 @@ class OpportunityController extends Controller
         }
         $this->authorizeAccess($opportunity);
 
+        if ($opportunity->crm_discount_status !== Opportunity::DISCOUNT_PENDING) {
+            return back()->with('error', 'Diskon tidak dalam status menunggu approval.');
+        }
+
         $data = $request->validate([
             'note' => ['nullable', 'string', 'max:1000'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
         ]);
+
+        $note = $data['note'] ?? null;
+        $requestedAmount = (float) $opportunity->crm_discount_amount;
+
+        if ($request->filled('discount_amount')) {
+            $approvedAmount = (float) $data['discount_amount'];
+
+            if ($approvedAmount <= 0) {
+                return $this->rejectDiscount($request, $opportunity);
+            }
+
+            $revised = abs($approvedAmount - $requestedAmount) > 0.009;
+
+            $opportunity->crm_has_discount = true;
+            $opportunity->crm_discount_amount = $approvedAmount;
+            $opportunity->crm_discount_status = Opportunity::DISCOUNT_APPROVED;
+            $opportunity->crm_discount_reviewed_by = auth()->id();
+            $opportunity->crm_discount_reviewed_at = now();
+            $opportunity->crm_discount_note = $note;
+            $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+            $opportunity->modified_by_id = auth()->id();
+            $opportunity->save();
+
+            app(\App\Services\NotificationService::class)->notifyDiscountApproved(
+                $opportunity,
+                $approvedAmount,
+                revised: $revised,
+                note: $note,
+            );
+
+            $message = $revised
+                ? 'Diskon disesuaikan & disetujui. Sales mendapat notifikasi.'
+                : 'Diskon disetujui. Sales mendapat notifikasi.';
+
+            return back()->with('success', $message);
+        }
 
         $opportunity->crm_discount_status = Opportunity::DISCOUNT_APPROVED;
-        $opportunity->crm_discount_reviewed_by = auth()->id();
-        $opportunity->crm_discount_reviewed_at = now();
-        $opportunity->crm_discount_note = $data['note'] ?? $opportunity->crm_discount_note;
-        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
-        $opportunity->modified_by_id = auth()->id();
-        $opportunity->save();
-
-        app(\App\Services\NotificationService::class)->notifyDiscountApproved(
-            $opportunity,
-            (float) $opportunity->crm_discount_amount,
-            revised: false,
-            note: $data['note'] ?? null,
-        );
-
-        return back()->with('success', 'Diskon disetujui. Sales mendapat notifikasi.');
-    }
-
-    /**
-     * Superadmin menolak request dengan menyesuaikan nominal → status langsung approved.
-     */
-    public function rejectDiscount(Request $request, Opportunity $opportunity)
-    {
-        if (! auth()->user()?->canApproveDiscount()) {
-            abort(403);
-        }
-        $this->authorizeAccess($opportunity);
-
-        $data = $request->validate([
-            'discount_amount' => ['required', 'numeric', 'min:0'],
-            'note' => ['nullable', 'string', 'max:1000'],
-        ], [
-            'discount_amount.required' => 'Isi nominal diskon yang disetujui.',
-        ]);
-
-        $amount = (float) $data['discount_amount'];
-        $note = $data['note'] ?? 'Diskon disesuaikan oleh Superadmin.';
-
-        if ($amount <= 0) {
-            $opportunity->crm_has_discount = false;
-            $opportunity->crm_discount_amount = null;
-            $opportunity->crm_discount_status = null;
-        } else {
-            $opportunity->crm_has_discount = true;
-            $opportunity->crm_discount_amount = $amount;
-            $opportunity->crm_discount_status = Opportunity::DISCOUNT_APPROVED;
-        }
-
         $opportunity->crm_discount_reviewed_by = auth()->id();
         $opportunity->crm_discount_reviewed_at = now();
         $opportunity->crm_discount_note = $note;
@@ -241,12 +246,105 @@ class OpportunityController extends Controller
 
         app(\App\Services\NotificationService::class)->notifyDiscountApproved(
             $opportunity,
-            $amount,
-            revised: true,
+            $requestedAmount,
+            revised: false,
             note: $note,
         );
 
-        return back()->with('success', 'Diskon disesuaikan dan disetujui. Sales mendapat notifikasi.');
+        return back()->with('success', 'Diskon disetujui. Sales mendapat notifikasi.');
+    }
+
+    /**
+     * Superadmin menolak request — wajib isi nominal diskon yang disetujui (counter-offer).
+     */
+    public function rejectDiscount(Request $request, Opportunity $opportunity)
+    {
+        if (! auth()->user()?->canApproveDiscount()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        if ($opportunity->crm_discount_status !== Opportunity::DISCOUNT_PENDING) {
+            return back()->with('error', 'Diskon tidak dalam status menunggu approval.');
+        }
+
+        $data = $request->validate([
+            'discount_amount' => ['required', 'numeric', 'min:0'],
+            'note' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'discount_amount.required' => 'Isi nominal diskon yang disetujui.',
+        ]);
+
+        $requestedAmount = (float) $opportunity->crm_discount_amount;
+        $approvedAmount = (float) $data['discount_amount'];
+        $note = $data['note'] ?? null;
+
+        if ($approvedAmount <= 0) {
+            $opportunity->crm_has_discount = false;
+            $opportunity->crm_discount_amount = null;
+            $opportunity->crm_discount_status = Opportunity::DISCOUNT_REJECTED;
+        } else {
+            $opportunity->crm_has_discount = true;
+            $opportunity->crm_discount_amount = $approvedAmount;
+            $opportunity->crm_discount_status = Opportunity::DISCOUNT_REJECTED;
+        }
+
+        $opportunity->crm_discount_reviewed_by = auth()->id();
+        $opportunity->crm_discount_reviewed_at = now();
+        $opportunity->crm_discount_note = $note;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        app(\App\Services\NotificationService::class)->notifyDiscountRejected(
+            $opportunity,
+            $approvedAmount,
+            $note,
+            $requestedAmount,
+        );
+
+        return back()->with('success', 'Diskon ditolak. Sales mendapat notifikasi nominal yang disetujui.');
+    }
+
+    /**
+     * Superadmin mengembalikan keputusan approve/reject ke pending.
+     */
+    public function revertDiscount(Request $request, Opportunity $opportunity)
+    {
+        if (! auth()->user()?->canApproveDiscount()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        if (! in_array($opportunity->crm_discount_status, [
+            Opportunity::DISCOUNT_APPROVED,
+            Opportunity::DISCOUNT_REJECTED,
+        ], true)) {
+            return back()->with('error', 'Hanya diskon yang sudah disetujui/ditolak yang bisa dikembalikan.');
+        }
+
+        if (! $opportunity->hasActiveDiscount()) {
+            return back()->with('error', 'Tidak ada diskon aktif untuk dikembalikan.');
+        }
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $opportunity->crm_discount_status = Opportunity::DISCOUNT_PENDING;
+        $opportunity->crm_discount_reviewed_by = null;
+        $opportunity->crm_discount_reviewed_at = null;
+        $opportunity->crm_discount_note = $data['note'] ?? null;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        app(\App\Services\NotificationService::class)->notifyDiscountReverted(
+            $opportunity,
+            $data['note'] ?? null,
+        );
+
+        return back()->with('success', 'Diskon dikembalikan ke menunggu approval.');
     }
 
     protected function updatePurchasingFields(Request $request, Opportunity $opportunity)
@@ -261,6 +359,7 @@ class OpportunityController extends Controller
             'products.*.quantity' => ['nullable', 'numeric', 'min:0'],
             'products.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
@@ -276,9 +375,10 @@ class OpportunityController extends Controller
                 'vendor' => $p['vendor'] ?? ($prev['vendor'] ?? ''),
                 'tax_category' => $prev['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $prev['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
-                // Harga jual dikunci; purchasing hanya ubah modal & vendor.
+                // Harga jual & diskon item dikunci; purchasing hanya ubah modal & vendor.
                 'sell_exclude' => $prev['sell_exclude'] ?? ($p['sell_exclude'] ?? 0),
                 'cost_exclude' => $p['cost_exclude'] ?? ($prev['cost_exclude'] ?? 0),
+                'discount_exclude' => $prev['discount_exclude'] ?? ($p['discount_exclude'] ?? 0),
             ]);
         })->filter(fn ($p) => filled($p['name'] ?? null))->values();
 
@@ -291,6 +391,7 @@ class OpportunityController extends Controller
         $opportunity->crm_item_kind = $rows->pluck('item_kind')->all();
         $opportunity->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
         $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
+        $opportunity->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
         $opportunity->syncWonMargin();
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
@@ -369,6 +470,7 @@ class OpportunityController extends Controller
             'products.*.quantity' => ['nullable', 'numeric', 'min:0'],
             'products.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
@@ -439,6 +541,7 @@ class OpportunityController extends Controller
                     'item_kind' => $p['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
                     'sell_exclude' => $p['sell_exclude'] ?? 0,
                     'cost_exclude' => $p['cost_exclude'] ?? 0,
+                    'discount_exclude' => $p['discount_exclude'] ?? 0,
                 ]))
                 ->values();
 
@@ -451,6 +554,7 @@ class OpportunityController extends Controller
             $opportunity->crm_item_kind = $rows->pluck('item_kind')->all();
             $opportunity->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
             $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
+            $opportunity->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
 
             if ($rows->isNotEmpty()) {
                 $opportunity->amount = $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0));

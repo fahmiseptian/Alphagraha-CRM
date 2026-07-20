@@ -29,6 +29,7 @@ class Opportunity extends Model implements HasMedia
         'close_date', 'probability', 'lead_source', 'description', 'assigned_user_id',
         'contact_id', 'vendor',
         'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
+        'crm_item_discount',
         'crm_won_margin',
         'crm_has_discount', 'crm_discount_amount', 'crm_discount_status',
         'crm_discount_requested_by', 'crm_discount_requested_at',
@@ -45,6 +46,7 @@ class Opportunity extends Model implements HasMedia
         'crm_item_kind' => 'array',
         'crm_sell_exclude' => 'array',
         'crm_cost_exclude' => 'array',
+        'crm_item_discount' => 'array',
         'crm_won_margin' => 'float',
         'crm_has_discount' => 'boolean',
         'crm_discount_amount' => 'float',
@@ -120,7 +122,6 @@ class Opportunity extends Model implements HasMedia
 
     /** Perusahaan internal (kolom company). */
     public const COMPANIES = [
-        'Alpha Graha',
         'Alpha Graha Computindo',
         'Elite Proxy',
         'Power Sistem',
@@ -203,10 +204,12 @@ class Opportunity extends Model implements HasMedia
         $itemKinds = array_values((array) ($this->crm_item_kind ?? []));
         $sellExcludes = array_values((array) ($this->crm_sell_exclude ?? []));
         $costExcludes = array_values((array) ($this->crm_cost_exclude ?? []));
+        $itemDiscounts = array_values((array) ($this->crm_item_discount ?? []));
 
         $count = max(
             count($names), count($qtys), count($prices), count($costs), count($vendors),
-            count($taxCategories), count($itemKinds), count($sellExcludes), count($costExcludes)
+            count($taxCategories), count($itemKinds), count($sellExcludes), count($costExcludes),
+            count($itemDiscounts)
         );
 
         if ($count === 0) {
@@ -214,7 +217,7 @@ class Opportunity extends Model implements HasMedia
         }
 
         return collect(range(0, $count - 1))
-            ->map(function ($i) use ($names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds, $sellExcludes, $costExcludes) {
+            ->map(function ($i) use ($names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds, $sellExcludes, $costExcludes, $itemDiscounts) {
                 $priceInclude = (float) ($prices[$i] ?? 0);
                 $costInclude = (float) ($costs[$i] ?? 0);
                 $sellExclude = isset($sellExcludes[$i]) && $sellExcludes[$i] !== ''
@@ -223,6 +226,9 @@ class Opportunity extends Model implements HasMedia
                 $costExclude = isset($costExcludes[$i]) && $costExcludes[$i] !== ''
                     ? (float) $costExcludes[$i]
                     : OpportunityProductPricing::excludeFromInclude($costInclude);
+                $itemDiscount = isset($itemDiscounts[$i]) && $itemDiscounts[$i] !== ''
+                    ? (float) $itemDiscounts[$i]
+                    : 0;
                 $taxCategory = (string) ($taxCategories[$i] ?? OpportunityProductPricing::TAX_NON_WAPU);
                 $itemKind = (string) ($itemKinds[$i] ?? OpportunityProductPricing::KIND_BARANG);
 
@@ -234,6 +240,7 @@ class Opportunity extends Model implements HasMedia
                     'item_kind' => $itemKind,
                     'sell_exclude' => $sellExclude,
                     'cost_exclude' => $costExclude,
+                    'discount_exclude' => $itemDiscount,
                 ]);
             })
             ->filter(fn ($row) => $row['name'] !== '' || $row['sell_exclude'] > 0 || $row['price'] > 0)
@@ -268,13 +275,13 @@ class Opportunity extends Model implements HasMedia
 
     public function discountPercent(): ?float
     {
-        $amount = (float) $this->amount;
+        $margin = $this->totalProductsMargin();
         $discount = (float) $this->crm_discount_amount;
-        if ($amount <= 0 || $discount <= 0) {
+        if ($margin <= 0 || $discount <= 0) {
             return null;
         }
 
-        return round(($discount / $amount) * 100, 2);
+        return round(($discount / $margin) * 100, 2);
     }
 
     public function discountStatusLabel(): string

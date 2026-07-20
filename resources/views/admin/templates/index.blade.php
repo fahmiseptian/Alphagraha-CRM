@@ -17,6 +17,7 @@
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <p class="font-medium text-slate-800">{{ $template->name }}</p>
+                            @if ($template->category)<x-badge color="blue">{{ $template->category }}</x-badge>@endif
                             @if ($template->is_default)<x-badge color="green">Default</x-badge>@endif
                             @if (!$template->is_active)<x-badge color="slate">Inactive</x-badge>@endif
                         </div>

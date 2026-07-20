@@ -13,6 +13,7 @@ class QuotationTemplateSeeder extends Seeder
             [
                 'code' => 'agc-indo',
                 'name' => 'AGC-indo',
+                'category' => 'Alpha Graha Computindo',
                 'description' => 'Template penawaran PT. Alpha Graha Computindo (Bahasa Indonesia).',
                 'is_default' => true,
                 'accent' => '#2563eb',
@@ -20,15 +21,17 @@ class QuotationTemplateSeeder extends Seeder
             [
                 'code' => 'eps-indo',
                 'name' => 'EPS-indo',
+                'category' => 'Elite Proxy',
                 'description' => 'Template penawaran PT. Elite Proxy Sistem (Bahasa Indonesia).',
-                'is_default' => false,
+                'is_default' => true,
                 'accent' => '#0ea5e9',
             ],
             [
                 'code' => 'psi-indo',
                 'name' => 'PSI-indo',
+                'category' => 'Power Sistem',
                 'description' => 'Template penawaran PT. POWER SISTEM INTEGRASI (Bahasa Indonesia).',
-                'is_default' => false,
+                'is_default' => true,
                 'accent' => '#16a34a',
             ],
         ];
@@ -38,6 +41,7 @@ class QuotationTemplateSeeder extends Seeder
                 ['code' => $meta['code']],
                 [
                     'name' => $meta['name'],
+                    'category' => $meta['category'],
                     'description' => $meta['description'],
                     'body_html' => $this->indoTemplateHtml($meta['accent']),
                     'is_active' => true,

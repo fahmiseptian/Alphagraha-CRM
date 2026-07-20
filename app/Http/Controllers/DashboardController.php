@@ -149,9 +149,16 @@ class DashboardController extends Controller
 
         $entries = $wonRows->map(function ($row) use ($users, $profiles) {
             $user = $users->get($row->assigned_user_id);
-            $salesTarget = $profiles->get($row->assigned_user_id)?->resolvedSalesTarget()
+            $profile = $profiles->get($row->assigned_user_id);
+            $salesTarget = $profile?->resolvedSalesTarget()
                 ?? UserProfile::DEFAULT_SALES_TARGET;
             $wonTotal = (float) $row->won_total;
+            $targetWonTotal = $profile
+                ? $this->wonTotalForTargetPeriod($row->assigned_user_id, $profile)
+                : $wonTotal;
+            $deadline = $profile?->resolvedSalesTargetDeadline();
+            $targetRemaining = max(0, $salesTarget - $targetWonTotal);
+            $targetMet = $targetWonTotal >= $salesTarget && $salesTarget > 0;
 
             return [
                 'user_id' => $row->assigned_user_id,
@@ -160,8 +167,16 @@ class DashboardController extends Controller
                 'won_total' => $wonTotal,
                 'won_margin' => (float) $row->won_margin,
                 'sales_target' => $salesTarget,
+                'target_period' => $profile?->resolvedSalesTargetPeriod() ?? UserProfile::TARGET_PERIOD_1_YEAR,
+                'target_period_label' => $profile?->salesTargetPeriodLabel()
+                    ?? UserProfile::TARGET_PERIODS[UserProfile::TARGET_PERIOD_1_YEAR],
+                'target_deadline' => $deadline,
+                'target_deadline_label' => $deadline?->format('d M Y'),
+                'target_won_total' => $targetWonTotal,
+                'target_remaining' => $targetRemaining,
+                'target_met' => $targetMet,
                 'target_progress' => $salesTarget > 0
-                    ? round(($wonTotal / $salesTarget) * 100, 1)
+                    ? round(($targetWonTotal / $salesTarget) * 100, 1)
                     : 0,
             ];
         });
@@ -180,6 +195,17 @@ class DashboardController extends Controller
         return $sorted->map(fn (array $entry, int $index) => array_merge($entry, [
             'rank' => $index + 1,
         ]));
+    }
+
+    protected function wonTotalForTargetPeriod(string $userId, UserProfile $profile): float
+    {
+        [$start, $end] = $profile->salesTargetDateRange();
+
+        return (float) Opportunity::query()
+            ->where('stage', Opportunity::WON_STAGE)
+            ->where('assigned_user_id', $userId)
+            ->whereBetween('close_date', [$start->toDateString(), $end->toDateString()])
+            ->sum('amount');
     }
 
     protected function applyLeaderboardPeriodToCloseDate($query, string $period): void

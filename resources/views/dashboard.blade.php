@@ -80,6 +80,24 @@
                                         <span class="text-brand-600">· You</span>
                                     @endif
                                 </p>
+                                @if (! empty($entry['target_period_label']))
+                                    <p class="truncate text-[10px] text-slate-400">
+                                        {{ $entry['target_period_label'] }}
+                                        @if (! empty($entry['target_deadline_label']))
+                                            · tenggat {{ $entry['target_deadline_label'] }}
+                                        @endif
+                                    </p>
+                                @endif
+                                @if (! empty($entry['target_met']))
+                                    <p class="truncate text-[10px] font-medium text-green-600" title="{{ money($entry['target_won_total']) }} / {{ money($entry['sales_target']) }}">
+                                        <i class="bi bi-check-circle-fill"></i> Target terpenuhi
+                                    </p>
+                                @else
+                                    <p class="truncate text-[10px] font-medium text-amber-600"
+                                       title="Pencapaian {{ money($entry['target_won_total'] ?? 0) }} dari {{ money($entry['sales_target']) }}">
+                                        Belum terpenuhi · kurang {{ money_compact($entry['target_remaining'] ?? 0) }}
+                                    </p>
+                                @endif
                             </div>
                             @if (auth()->user()->isAdmin())
                                 <span class="crm-leaderboard-table__value" title="{{ money($entry['won_total']) }}">
@@ -93,8 +111,11 @@
                                     {{ money_compact($entry['won_margin']) }}
                                 </span>
                             @else
-                                <span class="crm-leaderboard-table__value text-brand-700"
-                                      title="{{ money($entry['won_total']) }} / {{ money($entry['sales_target']) }}">
+                                <span @class([
+                                    'crm-leaderboard-table__value',
+                                    'text-green-700' => ! empty($entry['target_met']),
+                                    'text-brand-700' => empty($entry['target_met']),
+                                ]) title="{{ money($entry['target_won_total'] ?? $entry['won_total']) }} / {{ money($entry['sales_target']) }} ({{ $entry['target_period_label'] ?? '' }})">
                                     {{ number_format($entry['target_progress'], 1, ',', '.') }}%
                                 </span>
                             @endif
