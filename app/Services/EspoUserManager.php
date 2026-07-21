@@ -20,47 +20,49 @@ class EspoUserManager
      */
     public function create(array $data): User
     {
-        $id = $this->generateId();
-        [$first, $last] = $this->splitName($data['name'] ?? '');
-        $now = Carbon::now()->format('Y-m-d H:i:s');
+        return DB::transaction(function () use ($data) {
+            $id = $this->generateId();
+            [$first, $last] = $this->splitName($data['name'] ?? '');
+            $now = Carbon::now()->format('Y-m-d H:i:s');
 
-        DB::table('user')->insert([
-            'id' => $id,
-            'deleted' => 0,
-            'user_name' => $data['user_name'],
-            'type' => $data['type'],
-            'password' => EspoPassword::hash($data['password']),
-            'first_name' => $first,
-            'last_name' => $last,
-            'name' => trim($data['name'] ?? ''),
-            'is_active' => ! empty($data['is_active']) ? 1 : 0,
-            'created_at' => $now,
-            'modified_at' => $now,
-            'created_by_id' => auth()->id(),
-        ]);
+            DB::table('user')->insert([
+                'id' => $id,
+                'deleted' => 0,
+                'user_name' => $data['user_name'],
+                'type' => $data['type'],
+                'password' => EspoPassword::hash($data['password']),
+                'first_name' => $first,
+                'last_name' => $last,
+                'name' => trim($data['name'] ?? ''),
+                'is_active' => ! empty($data['is_active']) ? 1 : 0,
+                'created_at' => $now,
+                'modified_at' => $now,
+                'created_by_id' => auth()->id(),
+            ]);
 
-        if (! empty($data['email'])) {
-            $this->syncPrimaryEmail($id, $data['email']);
-        }
+            if (! empty($data['email'])) {
+                $this->syncPrimaryEmail($id, $data['email']);
+            }
 
-        UserProfile::ensureForUser(
-            $id,
-            ($data['app_role'] ?? '') === User::ROLE_SALES,
-            $data['app_role'] ?? null
-        );
-
-        if ($this->shouldSyncProfile($data)) {
-            $this->syncProfile(
+            UserProfile::ensureForUser(
                 $id,
-                $data['app_role'] ?? User::ROLE_SALES,
-                $data['sales_code'] ?? null,
-                $data['sales_target'] ?? null,
-                $data['sales_target_period'] ?? null,
-                $data['sales_target_deadline'] ?? null
+                ($data['app_role'] ?? '') === User::ROLE_SALES,
+                $data['app_role'] ?? null
             );
-        }
 
-        return User::query()->whereKey($id)->first();
+            if ($this->shouldSyncProfile($data)) {
+                $this->syncProfile(
+                    $id,
+                    $data['app_role'] ?? User::ROLE_SALES,
+                    $data['sales_code'] ?? null,
+                    $data['sales_target'] ?? null,
+                    $data['sales_target_period'] ?? null,
+                    $data['sales_target_deadline'] ?? null
+                );
+            }
+
+            return User::query()->whereKey($id)->firstOrFail();
+        });
     }
 
     /**
@@ -139,8 +141,11 @@ class EspoUserManager
                 : ($profile->sales_target_period ?: UserProfile::TARGET_PERIOD_1_YEAR);
             $profile->sales_target_deadline = $salesTargetDeadline ?: null;
         } else {
-            $profile->sales_target = null;
-            $profile->sales_target_period = null;
+            // Kolom sales_target bersifat NOT NULL. Nilai ini hanya placeholder
+            // untuk role non-Sales dan tidak dipakai dalam leaderboard.
+            $profile->sales_target = $profile->sales_target ?: UserProfile::DEFAULT_SALES_TARGET;
+            $profile->sales_target_period = $profile->sales_target_period
+                ?: UserProfile::TARGET_PERIOD_1_YEAR;
             $profile->sales_target_deadline = null;
         }
         $profile->save();

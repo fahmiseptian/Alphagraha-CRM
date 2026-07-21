@@ -12,7 +12,7 @@
     <form method="GET" class="crm-filter-form">
         <div class="crm-search min-w-0 flex-1">
             <i class="bi bi-search"></i>
-            <input type="text" name="q" value="{{ $search }}" placeholder="Search number or customer name..." class="crm-field">
+            <input type="text" name="q" value="{{ $search }}" placeholder="Search number, pengadaan, or customer..." class="crm-field">
         </div>
         <select name="status" class="select2 sm:w-44" data-placeholder="All statuses">
             <option value="">All statuses</option>
@@ -49,8 +49,16 @@
                                 <span class="block text-xs text-slate-400">Rev. {{ $quo->revision }}</span>
                             </td>
                             <td>
-                                <span class="block text-slate-800">{{ $quo->customer_name }}</span>
-                                @if ($quo->company_name)<span class="block text-xs text-slate-400">{{ $quo->company_name }}</span>@endif
+                                @php
+                                    $procurementName = $quo->opportunity?->name;
+                                    $customerLabel = $quo->customer_name ?: '—';
+                                @endphp
+                                <span class="block font-medium text-slate-800">{{ $procurementName ?: $customerLabel }}</span>
+                                @if ($procurementName && $customerLabel !== '—')
+                                    <span class="block text-xs text-slate-400">{{ $customerLabel }}</span>
+                                @elseif (! $procurementName && $quo->company_name && $quo->company_name !== $customerLabel)
+                                    <span class="block text-xs text-slate-400">{{ $quo->company_name }}</span>
+                                @endif
                             </td>
                             <td class="text-slate-600">{{ $quo->quotation_date?->translatedFormat('d M Y') }}</td>
                             <td><x-badge :color="$quo->statusColor()">{{ $quo->statusLabel() }}</x-badge></td>

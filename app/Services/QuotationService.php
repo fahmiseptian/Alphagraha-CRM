@@ -544,7 +544,7 @@ class QuotationService
             .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
             .'<th style="'.$this->cellStyle('center', true).'">Spesifikasi</th>'
             .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
-            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga Exclude</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga</th>'
             .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga</th>'
             .'</tr></thead><tbody>'
             .$this->renderItemsRowsIndo($quotation)
@@ -619,7 +619,7 @@ class QuotationService
             .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
             .'<th style="'.$this->cellStyle('center', true).'">Spesifikasi</th>'
             .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
-            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga Exclude</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga</th>'
             .'<th style="'.$this->cellStyle('right', true).'width:130px;">Harga Setelah Diskon</th>'
             .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga</th>'
             .'</tr></thead><tbody>'

@@ -34,7 +34,7 @@ class QuotationController extends Controller
         $search = trim((string) $request->get('q'));
         $status = $request->get('status');
 
-        $query = Quotation::with('creator');
+        $query = Quotation::with(['creator', 'opportunity']);
 
         if (! $this->isAdmin()) {
             $query->where('created_by', auth()->id());
@@ -44,7 +44,8 @@ class QuotationController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('number', 'like', "%{$search}%")
                     ->orWhere('customer_name', 'like', "%{$search}%")
-                    ->orWhere('company_name', 'like', "%{$search}%");
+                    ->orWhere('company_name', 'like', "%{$search}%")
+                    ->orWhereHas('opportunity', fn ($oq) => $oq->where('name', 'like', "%{$search}%"));
             });
         }
 
