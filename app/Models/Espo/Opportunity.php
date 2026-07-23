@@ -4,6 +4,7 @@ namespace App\Models\Espo;
 
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\OpportunityNote;
+use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Support\OpportunityProductPricing;
 use Illuminate\Database\Eloquent\Model;
@@ -31,6 +32,7 @@ class Opportunity extends Model implements HasMedia
         'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_item_discount',
         'crm_won_margin',
+        'crm_shipping_cost',
         'crm_has_discount', 'crm_discount_amount', 'crm_discount_status',
         'crm_discount_requested_by', 'crm_discount_requested_at',
         'crm_discount_reviewed_by', 'crm_discount_reviewed_at', 'crm_discount_note',
@@ -48,6 +50,7 @@ class Opportunity extends Model implements HasMedia
         'crm_cost_exclude' => 'array',
         'crm_item_discount' => 'array',
         'crm_won_margin' => 'float',
+        'crm_shipping_cost' => 'float',
         'crm_has_discount' => 'boolean',
         'crm_discount_amount' => 'float',
         'crm_discount_requested_at' => 'datetime',
@@ -182,6 +185,14 @@ class Opportunity extends Model implements HasMedia
     public function notes(): HasMany
     {
         return $this->hasMany(OpportunityNote::class, 'opportunity_id')->latest();
+    }
+
+    /**
+     * Purchase Order (PO) — 1 opportunity : banyak PO.
+     */
+    public function purchaseOrders(): HasMany
+    {
+        return $this->hasMany(PurchaseOrder::class, 'opportunity_id')->latest();
     }
 
     public function registerMediaCollections(): void

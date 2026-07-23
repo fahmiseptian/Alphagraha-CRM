@@ -31,7 +31,7 @@ class QuotationController extends Controller
             abort(403, 'Anda tidak memiliki akses ke Quotations.');
         }
 
-        $search = trim((string) $request->get('q'));
+        $search = trim((string) ($request->get('q') ?: $request->get('search')));
         $status = $request->get('status');
 
         $query = Quotation::with(['creator', 'opportunity']);
@@ -41,11 +41,18 @@ class QuotationController extends Controller
         }
 
         if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                $q->where('number', 'like', "%{$search}%")
-                    ->orWhere('customer_name', 'like', "%{$search}%")
-                    ->orWhere('company_name', 'like', "%{$search}%")
-                    ->orWhereHas('opportunity', fn ($oq) => $oq->where('name', 'like', "%{$search}%"));
+            $like = '%'.$search.'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('crm_quotations.number', 'like', $like)
+                    ->orWhere('crm_quotations.base_number', 'like', $like)
+                    ->orWhere('crm_quotations.customer_name', 'like', $like)
+                    ->orWhere('crm_quotations.company_name', 'like', $like)
+                    ->orWhere('crm_quotations.customer_email', 'like', $like)
+                    ->orWhereHas('opportunity', function ($oq) use ($like) {
+                        $oq->where('opportunity.name', 'like', $like)
+                            ->orWhere('opportunity.company', 'like', $like)
+                            ->orWhereHas('account', fn ($aq) => $aq->where('account.name', 'like', $like));
+                    });
             });
         }
 

@@ -65,7 +65,7 @@ class OpportunityController extends Controller
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.items']);
         $mediaDocuments = $opportunity->getMedia('documents');
         $nextStage = $opportunity->nextStage();
         $closingStages = $opportunity->closingStageOptions();

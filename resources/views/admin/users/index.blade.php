@@ -8,7 +8,7 @@
             <input type="hidden" name="role" value="{{ $role }}">
             <div class="crm-search w-full sm:w-56">
                 <i class="bi bi-search"></i>
-                <input type="text" name="search" value="{{ $search }}" placeholder="Search name / username" class="crm-field">
+                <input type="text" name="search" value="{{ $search }}" placeholder="Cari nama / username / sales code" class="crm-field">
             </div>
             <x-btn type="submit" variant="secondary">Search</x-btn>
         </form>

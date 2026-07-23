@@ -9,21 +9,31 @@
 </x-page-header>
 
 <x-card class="mb-4" :padding="false">
-    <form method="GET" class="crm-filter-form">
-        <div class="crm-search min-w-0 flex-1">
-            <i class="bi bi-search"></i>
-            <input type="text" name="q" value="{{ $search }}" placeholder="Search number, pengadaan, or customer..." class="crm-field">
+    <form method="GET" action="{{ route('quotations.index') }}" class="crm-filter-form">
+        <div class="min-w-0 flex-1">
+            <label class="crm-label">Pencarian</label>
+            <div class="crm-search">
+                <i class="bi bi-search"></i>
+                <input type="text" name="q" value="{{ $search }}"
+                       placeholder="Nomor QO, nama pengadaan, customer, perusahaan..."
+                       class="crm-field" autocomplete="off">
+            </div>
         </div>
-        <select name="status" class="select2 sm:w-44" data-placeholder="All statuses">
-            <option value="">All statuses</option>
-            @foreach ($statuses as $key => $label)
-                <option value="{{ $key }}" @selected($status === $key)>{{ $label }}</option>
-            @endforeach
-        </select>
-        <x-btn type="submit" variant="primary" icon="bi-funnel">Filter</x-btn>
-        @if ($search || $status)
-            <x-btn href="{{ route('quotations.index') }}" variant="ghost">Reset</x-btn>
-        @endif
+        <div class="sm:w-44">
+            <label class="crm-label">Status</label>
+            <select name="status" class="select2" data-placeholder="Semua status">
+                <option value="">Semua status</option>
+                @foreach ($statuses as $key => $label)
+                    <option value="{{ $key }}" @selected($status === $key)>{{ $label }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="flex items-end gap-2">
+            <x-btn type="submit" variant="primary" icon="bi-search">Cari</x-btn>
+            @if ($search || $status)
+                <x-btn href="{{ route('quotations.index') }}" variant="ghost">Reset</x-btn>
+            @endif
+        </div>
     </form>
 </x-card>
 

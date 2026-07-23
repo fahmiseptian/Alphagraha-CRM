@@ -33,13 +33,23 @@ class UserController extends Controller
                 $query->whereHas('profile', fn ($q) => $q->where('app_role', $role));
             })
             ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('user_name', 'like', "%{$search}%");
+                $like = '%'.$search.'%';
+                $query->where(function ($q) use ($like) {
+                    $q->where('user.name', 'like', $like)
+                        ->orWhere('user.user_name', 'like', $like)
+                        ->orWhere('user.first_name', 'like', $like)
+                        ->orWhere('user.last_name', 'like', $like)
+                        ->orWhereRaw(
+                            "TRIM(CONCAT(COALESCE(user.first_name, ''), ' ', COALESCE(user.last_name, ''))) LIKE ?",
+                            [$like]
+                        );
+
+                    // Cari juga sales_code di profile (berguna di daftar Sales).
+                    $q->orWhereHas('profile', fn ($pq) => $pq->where('sales_code', 'like', $like));
                 });
             })
             ->orderByDesc('is_active')
-            ->orderBy('name')
+            ->orderByRaw("COALESCE(NULLIF(user.name, ''), TRIM(CONCAT(COALESCE(user.first_name, ''), ' ', COALESCE(user.last_name, ''))), user.user_name)")
             ->paginate(20)
             ->withQueryString();
 

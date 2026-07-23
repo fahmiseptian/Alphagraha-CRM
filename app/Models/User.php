@@ -156,6 +156,11 @@ class User extends Authenticatable
         return $this->isPurchasing() || $this->isSuperAdmin();
     }
 
+    public function canManagePurchaseOrders(): bool
+    {
+        return $this->isPurchasing() || $this->isSuperAdmin();
+    }
+
     public function canViewWonFinance(): bool
     {
         return $this->isFinance() || $this->isSuperAdmin() || $this->isAdmin();

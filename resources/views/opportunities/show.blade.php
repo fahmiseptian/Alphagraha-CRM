@@ -342,37 +342,7 @@
             @endif
         </x-card>
 
-        {{-- Quotation file card (1 opportunity : 1 quotation) --}}
-        <x-card>
-            <x-slot:title>Quotation File</x-slot:title>
-            @if ($opportunity->quotation)
-                @php $quo = $opportunity->quotation; @endphp
-                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div class="flex items-start gap-3">
-                        <span class="flex h-11 w-11 items-center justify-center rounded-lg bg-brand-100 text-brand-700"><i class="bi bi-file-earmark-text text-xl"></i></span>
-                        <div>
-                            <p class="font-semibold text-slate-800">{{ $quo->number }}</p>
-                            <p class="text-xs text-slate-400">
-                                {{ optional($quo->quotation_date)->translatedFormat('d M Y') }} &middot;
-                                {{ money($quo->total, $quo->currency) }} &middot;
-                                <span class="align-middle"><x-badge :color="$quo->statusColor()">{{ $quo->statusLabel() }}</x-badge></span>
-                            </p>
-                        </div>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <a href="{{ route('quotations.show', $quo) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> View</a>
-                        <a href="{{ route('quotations.preview', $quo) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-window"></i> Preview</a>
-                        <a href="{{ route('quotations.pdf', $quo) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-download"></i> Download PDF</a>
-                    </div>
-                </div>
-            @else
-                <div class="flex flex-col items-center justify-center gap-3 py-6 text-center">
-                    <span class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400"><i class="bi bi-file-earmark-plus text-2xl"></i></span>
-                    <p class="text-sm text-slate-500">No quotation for this opportunity yet.</p>
-                    <a href="{{ route('quotations.create', ['opportunity_id' => $opportunity->id]) }}" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"><i class="bi bi-plus-lg"></i> Create Quotation</a>
-                </div>
-            @endif
-        </x-card>
+        @include('opportunities._purchase_orders')
     </div>
 
     {{-- Right column --}}
@@ -553,6 +523,38 @@
             @else
                 <div class="px-5 py-8 text-center text-sm text-slate-400">
                     No notes yet. Click <i class="bi bi-plus-lg"></i> to add a note.
+                </div>
+            @endif
+        </x-card>
+
+        {{-- Quotation file card (1 opportunity : 1 quotation) --}}
+        <x-card>
+            <x-slot:title>Quotation File</x-slot:title>
+            @if ($opportunity->quotation)
+                @php $quo = $opportunity->quotation; @endphp
+                <div class="flex flex-col gap-3">
+                    <div class="flex items-start gap-3">
+                        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700"><i class="bi bi-file-earmark-text text-xl"></i></span>
+                        <div class="min-w-0">
+                            <p class="truncate font-semibold text-slate-800">{{ $quo->number }}</p>
+                            <p class="text-xs text-slate-400">
+                                {{ optional($quo->quotation_date)->translatedFormat('d M Y') }} &middot;
+                                {{ money($quo->total, $quo->currency) }}
+                            </p>
+                            <div class="mt-1"><x-badge :color="$quo->statusColor()">{{ $quo->statusLabel() }}</x-badge></div>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <a href="{{ route('quotations.show', $quo) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> View</a>
+                        <a href="{{ route('quotations.preview', $quo) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-window"></i> Preview</a>
+                        <a href="{{ route('quotations.pdf', $quo) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-download"></i> PDF</a>
+                    </div>
+                </div>
+            @else
+                <div class="flex flex-col items-center justify-center gap-3 py-4 text-center">
+                    <span class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400"><i class="bi bi-file-earmark-plus text-2xl"></i></span>
+                    <p class="text-sm text-slate-500">No quotation for this opportunity yet.</p>
+                    <a href="{{ route('quotations.create', ['opportunity_id' => $opportunity->id]) }}" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"><i class="bi bi-plus-lg"></i> Create Quotation</a>
                 </div>
             @endif
         </x-card>

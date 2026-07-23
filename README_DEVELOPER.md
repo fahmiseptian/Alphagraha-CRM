@@ -3,7 +3,7 @@
 > Dokumen ini ditulis **developer untuk developer** sebagai handoff teknis proyek.  
 > Untuk panduan instalasi dan penggunaan umum, lihat [README.md](README.md).
 
-**Terakhir diperbarui:** 22 Juli 2026  
+**Terakhir diperbarui:** 23 Juli 2026  
 **Stack:** Laravel 10 · PHP 8.1+ · MySQL (database EspoCRM `db_crm`) · Blade · Tailwind CDN · Alpine.js · DomPDF · Spatie Media Library
 
 ---
@@ -38,6 +38,7 @@ AGC CRM adalah aplikasi Laravel yang **membaca dan menulis ke database EspoCRM y
 | Aplikasi | `crm_settings` | `CrmSetting` | PPN/PPH persisten (override config). |
 | Aplikasi | `crm_notifications` | `CrmNotification` | Notifikasi in-app + popup. |
 | Aplikasi | `crm_opportunity_notes` | `OpportunityNote` | Catatan internal per opportunity. |
+| Aplikasi | `crm_purchase_orders`, `crm_purchase_order_items` | `PurchaseOrder`, `PurchaseOrderItem` | PO per Closed Won; item bebas (qty, deskripsi, note, harga modal). |
 | Aplikasi | `media` | Spatie Media Library | Lampiran aktivitas & dokumen opportunity. |
 
 ### 2.2 Kolom Custom di `opportunity`
@@ -51,6 +52,7 @@ crm_sell_exclude[]      — harga jual (exclude PPN)
 crm_cost_exclude[]      — harga modal (exclude PPN)
 crm_item_discount[]     — diskon per item
 crm_won_margin          — margin aktual saat Closed Won
+crm_shipping_cost       — ongkir (1 opp = 1 nilai; dikelola di area PO)
 crm_has_discount        — flag ada permintaan diskon
 crm_discount_amount     — nominal diskon yang diminta
 crm_discount_status     — pending | approved | rejected
@@ -89,7 +91,7 @@ Role disimpan di `crm_user_profiles.app_role`, bukan hanya `user.type` Espo:
 | Superadmin | `superadmin` | Semua modul + admin panel + approve diskon |
 | Admin | `admin` | Lihat semua opportunity, buat quotation |
 | Sales | `sales` | Data assigned ke dirinya saja |
-| Purchasing | `purchasing` | Opportunity Closed Won (edit cost vendor) |
+| Purchasing | `purchasing` | Opportunity Closed Won (edit cost vendor + kelola PO) |
 | Finance | `finance` | Opportunity Closed Won (lihat margin/finance) |
 
 Fallback legacy: `user.type === 'admin'` → superadmin, selain itu → sales.
@@ -100,6 +102,8 @@ Fallback legacy: `user.type === 'admin'` → superadmin, selain itu → sales.
 $user->canCreateQuotation()
 $user->canApproveDiscount()
 $user->canViewAllOpportunities()
+$user->canEditWonCostVendor()
+$user->canManagePurchaseOrders()  // purchasing + superadmin, Closed Won
 $user->canEditCustomerContact()  // hanya superadmin
 ```
 
@@ -128,6 +132,14 @@ Fitur utama:
 - Prefill quotation dari opportunity (termasuk item, harga, kontak).
 - Upload dokumen via Spatie Media Library.
 - Catatan internal (`OpportunityNote`).
+- **Purchase Order (PO)** — nested di detail Closed Won (`OpportunityPurchaseOrderController`):
+  - 1 opportunity : banyak PO; 1 PO : banyak item bebas (tidak mengikat produk opportunity)
+  - Kondisi bayar: `payment_term` = `top` | `cash` (cash: modal +1% exclude & include)
+  - Ongkir: `opportunity.crm_shipping_cost` (1 opportunity = 1 ongkir), UI di area PO
+  - Laporan: preview + PDF per opportunity (`PurchaseOrderReportService`) — nilai jual dari produk opp, modal dari total PO, PPh/invoice dikosongkan
+  - Field item: nama produk, qty, deskripsi, note, harga modal; kolom tampilan: 1% Exclude (cash), Jumlah Exclude, Harga Include (modal×PPN), 1% Include (cash), Jumlah Include, Subtotal
+  - `total` = Σ(qty × jumlah_exclude); jumlah_exclude = modal (+1% bila cash)
+  - CRUD hanya `canManagePurchaseOrders()` + stage Closed Won
 - **Alur diskon:**
   1. Sales mengajukan diskon → `crm_discount_status = pending`
   2. Superadmin approve/reject/revert via route terpisah
@@ -249,11 +261,13 @@ app/
 │   ├── User.php            # Auth model = tabel user Espo
 │   ├── UserProfile.php
 │   ├── Quotation*.php
+│   ├── PurchaseOrder.php / PurchaseOrderItem.php
 │   ├── Activity.php
 │   ├── CrmNotification.php
 │   └── CrmSetting.php
 ├── Services/
 │   ├── QuotationService.php    # Penomoran, template merge, PDF prep
+│   ├── PurchaseOrderService.php
 │   ├── NotificationService.php
 │   ├── EspoAuth.php / EspoPassword.php
 │   ├── EspoUserManager.php
@@ -279,6 +293,7 @@ resources/views/                # Blade templates per modul
 | Customers | `/customers` | auth |
 | Leads | `/leads` | auth |
 | Opportunities | `/opportunities` | auth |
+| Purchase Orders | `/opportunities/{id}/purchase-orders` | auth (purchasing/superadmin + Closed Won) |
 | Quotations | `/quotations` | auth |
 | Activities | `/activities` | auth |
 | Notifications | `/notifications` | auth |
@@ -306,6 +321,7 @@ Commit history dari awal proyek hingga Juli 2026:
 | Jul 2026 | Role system diperluas (superadmin, purchasing, finance), discount approval workflow |
 | Jul 2026 | Notification system, tax settings (PPN/PPH), sales target period/deadline |
 | Jul 2026 | Pricing refactor: `sell_exclude` di quotation, diskon per item, akses kontak pelanggan |
+| Jul 2026 | Purchase Order (PO) pada Closed Won: multi-PO per opportunity, item bebas, akses purchasing/superadmin |
 
 **Commit terbaru (8e67418):**
 - Search quotation include data opportunity

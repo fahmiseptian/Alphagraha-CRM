@@ -15,6 +15,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OpportunityController;
 use App\Http\Controllers\OpportunityDocumentController;
 use App\Http\Controllers\OpportunityNoteController;
+use App\Http\Controllers\OpportunityPurchaseOrderController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuotationController;
 use Illuminate\Support\Facades\Artisan;
@@ -82,6 +83,12 @@ Route::middleware('auth')->group(function () {
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
     Route::post('/opportunities/{opportunity}/notes', [OpportunityNoteController::class, 'store'])->name('opportunities.notes.store');
     Route::delete('/opportunities/{opportunity}/notes/{note}', [OpportunityNoteController::class, 'destroy'])->name('opportunities.notes.destroy');
+    Route::get('/opportunities/{opportunity}/purchase-orders/preview', [OpportunityPurchaseOrderController::class, 'preview'])->name('opportunities.purchase-orders.preview');
+    Route::get('/opportunities/{opportunity}/purchase-orders/pdf', [OpportunityPurchaseOrderController::class, 'pdf'])->name('opportunities.purchase-orders.pdf');
+    Route::post('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'store'])->name('opportunities.purchase-orders.store');
+    Route::put('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'update'])->name('opportunities.purchase-orders.update');
+    Route::delete('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'destroy'])->name('opportunities.purchase-orders.destroy');
+    Route::put('/opportunities/{opportunity}/shipping-cost', [OpportunityPurchaseOrderController::class, 'updateShipping'])->name('opportunities.shipping-cost.update');
 
     // Aktivitas & Task
     Route::resource('activities', ActivityController::class)->except(['show']);
