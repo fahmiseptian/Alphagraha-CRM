@@ -2,6 +2,8 @@
 
 CRM modern berbasis **Laravel 10** yang tetap menggunakan **database EspoCRM** yang sudah ada sebagai sumber data utama (tanpa migrasi data). Dibangun sederhana, stabil, dan mudah dikembangkan untuk tim sales.
 
+> **Developer?** Lihat [README_DEVELOPER.md](README_DEVELOPER.md) untuk laporan teknis, arsitektur, dan handoff developer-to-developer.
+
 ## Fitur Utama
 
 - **Dashboard** — ringkasan pelanggan, prospek (lead), penawaran, pipeline penjualan, dan aktivitas mendatang.
