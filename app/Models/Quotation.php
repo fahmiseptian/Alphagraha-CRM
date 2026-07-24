@@ -18,6 +18,9 @@ class Quotation extends Model
     protected $fillable = [
         'number', 'base_number', 'account_id', 'opportunity_id', 'customer_name', 'company_name', 'customer_email',
         'customer_phone', 'customer_address', 'quotation_date', 'valid_until', 'status',
+        'crm_margin_status', 'crm_margin_percent', 'crm_margin_threshold',
+        'crm_margin_nominal', 'crm_margin_nominal_threshold',
+        'crm_margin_requested_at', 'crm_margin_reviewed_by', 'crm_margin_reviewed_at', 'crm_margin_note',
         'currency', 'subtotal', 'discount', 'tax_percent', 'tax_amount', 'total',
         'notes', 'terms', 'template_id', 'created_by', 'revision', 'document_revision', 'sent_at',
     ];
@@ -26,21 +29,54 @@ class Quotation extends Model
         'quotation_date' => 'date',
         'valid_until' => 'date',
         'sent_at' => 'datetime',
+        'crm_margin_requested_at' => 'datetime',
+        'crm_margin_reviewed_at' => 'datetime',
         'subtotal' => 'decimal:2',
         'discount' => 'decimal:2',
         'tax_percent' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'total' => 'decimal:2',
+        'crm_margin_percent' => 'decimal:2',
+        'crm_margin_threshold' => 'decimal:2',
+        'crm_margin_nominal' => 'decimal:2',
+        'crm_margin_nominal_threshold' => 'decimal:2',
     ];
 
     public const STATUSES = [
         'draft' => 'Draft',
         'sent' => 'Sent',
-        'accepted' => 'Accepted',
-        'rejected' => 'Rejected',
-        'expired' => 'Expired',
     ];
 
+    public const MARGIN_PENDING = 'pending';
+
+    public const MARGIN_APPROVED = 'approved';
+
+    public const MARGIN_REJECTED = 'rejected';
+
+    public function marginNeedsApproval(): bool
+    {
+        return $this->crm_margin_status === self::MARGIN_PENDING;
+    }
+
+    public function isMarginLocked(): bool
+    {
+        return in_array($this->crm_margin_status, [self::MARGIN_PENDING, self::MARGIN_REJECTED], true);
+    }
+
+    public function canBeSent(): bool
+    {
+        return ! $this->isMarginLocked();
+    }
+
+    public function marginStatusLabel(): string
+    {
+        return match ($this->crm_margin_status) {
+            self::MARGIN_PENDING => 'Menunggu approval margin',
+            self::MARGIN_APPROVED => 'Margin disetujui',
+            self::MARGIN_REJECTED => 'Margin ditolak',
+            default => '—',
+        };
+    }
     public function items(): HasMany
     {
         return $this->hasMany(QuotationItem::class)->orderBy('sort_order');
@@ -105,9 +141,6 @@ class Quotation extends Model
         return [
             'draft' => 'gray',
             'sent' => 'blue',
-            'accepted' => 'green',
-            'rejected' => 'red',
-            'expired' => 'amber',
         ][$this->status] ?? 'gray';
     }
 

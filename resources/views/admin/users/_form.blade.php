@@ -70,7 +70,7 @@
         <div>
             <label class="mb-1.5 block text-sm font-medium text-slate-700">Periode Target <span class="text-red-500">*</span></label>
             <select name="sales_target_period" required
-                    class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_target_period') border-red-400 @enderror">
+                    class="select2 w-full" data-placeholder="— Pilih periode —">
                 @foreach (\App\Models\UserProfile::TARGET_PERIODS as $periodKey => $periodLabel)
                     <option value="{{ $periodKey }}" @selected(old('sales_target_period', $user->profile?->resolvedSalesTargetPeriod()) === $periodKey)>
                         {{ $periodLabel }}

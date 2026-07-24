@@ -4,13 +4,14 @@ namespace App\Services;
 
 use App\Models\Espo\Opportunity;
 use App\Models\PurchaseOrder;
+use App\Support\PurchaseOrderPricing;
 use Illuminate\Support\Facades\DB;
 
 class PurchaseOrderService
 {
     /**
      * Buat PO baru beserta item; total dihitung server-side.
-     * Cash: line total = qty × (modal + 1%).
+     * Tambahan % sesuai payment_term dari settings.
      *
      * @param  list<array{product_name:string,quantity:float|int|string,description?:?string,note?:?string,unit_price:float|int|string}>  $items
      */
@@ -61,7 +62,7 @@ class PurchaseOrderService
 
     /**
      * Hapus semua item lama, insert ulang, update total header.
-     * line_total = qty × jumlah_exclude (modal, +1% bila cash).
+     * line_total = qty × jumlah_exclude (modal + surcharge dari settings).
      *
      * @param  list<array{product_name:string,quantity:float|int|string,description?:?string,note?:?string,unit_price:float|int|string}>  $items
      */
@@ -69,16 +70,15 @@ class PurchaseOrderService
     {
         $purchaseOrder->items()->delete();
 
-        $isCash = $purchaseOrder->isCash();
+        $rate = PurchaseOrderPricing::surchargeRate($purchaseOrder->payment_term);
         $total = 0.0;
         $rows = [];
 
         foreach (array_values($items) as $index => $item) {
             $qty = round((float) ($item['quantity'] ?? 0), 2);
             $unitPrice = round((float) ($item['unit_price'] ?? 0), 2);
-            $jumlahExclude = $isCash
-                ? round($unitPrice + round($unitPrice * 0.01, 2), 2)
-                : $unitPrice;
+            $extra = $rate > 0 ? round($unitPrice * $rate, 2) : 0.0;
+            $jumlahExclude = round($unitPrice + $extra, 2);
             $lineTotal = round($qty * $jumlahExclude, 2);
             $total += $lineTotal;
 

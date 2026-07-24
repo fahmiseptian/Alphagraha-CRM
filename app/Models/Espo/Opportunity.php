@@ -33,9 +33,13 @@ class Opportunity extends Model implements HasMedia
         'crm_item_discount',
         'crm_won_margin',
         'crm_shipping_cost',
+        'crm_has_shipping_charge', 'crm_shipping_sell',
         'crm_has_discount', 'crm_discount_amount', 'crm_discount_status',
         'crm_discount_requested_by', 'crm_discount_requested_at',
         'crm_discount_reviewed_by', 'crm_discount_reviewed_at', 'crm_discount_note',
+        'crm_margin_status', 'crm_margin_percent', 'crm_margin_threshold',
+        'crm_margin_nominal', 'crm_margin_nominal_threshold',
+        'crm_margin_requested_at', 'crm_margin_reviewed_by', 'crm_margin_reviewed_at', 'crm_margin_note',
     ];
 
     protected $casts = [
@@ -51,10 +55,18 @@ class Opportunity extends Model implements HasMedia
         'crm_item_discount' => 'array',
         'crm_won_margin' => 'float',
         'crm_shipping_cost' => 'float',
+        'crm_has_shipping_charge' => 'boolean',
+        'crm_shipping_sell' => 'float',
         'crm_has_discount' => 'boolean',
         'crm_discount_amount' => 'float',
         'crm_discount_requested_at' => 'datetime',
         'crm_discount_reviewed_at' => 'datetime',
+        'crm_margin_percent' => 'float',
+        'crm_margin_threshold' => 'float',
+        'crm_margin_nominal' => 'float',
+        'crm_margin_nominal_threshold' => 'float',
+        'crm_margin_requested_at' => 'datetime',
+        'crm_margin_reviewed_at' => 'datetime',
     ];
 
     public const DISCOUNT_PENDING = 'pending';
@@ -62,6 +74,12 @@ class Opportunity extends Model implements HasMedia
     public const DISCOUNT_APPROVED = 'approved';
 
     public const DISCOUNT_REJECTED = 'rejected';
+
+    public const MARGIN_PENDING = 'pending';
+
+    public const MARGIN_APPROVED = 'approved';
+
+    public const MARGIN_REJECTED = 'rejected';
 
     public const OPEN_STAGES = ['Prospecting', 'Qualification', 'Proposal', 'Negotiation'];
     public const WON_STAGE = 'Closed Won';
@@ -270,6 +288,35 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
+     * Total jual exclude (qty × effective_sell_exclude).
+     */
+    public function totalSellExclude(): float
+    {
+        return round(
+            $this->products->sum(function (array $row) {
+                $qty = (float) ($row['quantity'] ?? 1);
+                $sell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
+
+                return $qty * $sell;
+            }),
+            2
+        );
+    }
+
+    /**
+     * Margin keseluruhan opportunity (%): total margin / total jual exclude.
+     */
+    public function overallMarginPercent(): ?float
+    {
+        $sell = $this->totalSellExclude();
+        if ($sell <= 0) {
+            return null;
+        }
+
+        return round(($this->totalProductsMargin() / $sell) * 100, 2);
+    }
+
+    /**
      * Simpan margin ke deal bila Closed Won; kosongkan jika stage berubah.
      */
     public function syncWonMargin(): void
@@ -309,6 +356,90 @@ class Opportunity extends Model implements HasMedia
     {
         return $this->hasActiveDiscount()
             && $this->crm_discount_status === self::DISCOUNT_PENDING;
+    }
+
+    public function isCustomerFreeShipping(): bool
+    {
+        $this->loadMissing('account');
+
+        return \App\Support\FreeShippingZone::isFreeForAccount($this->account);
+    }
+
+    public function requiredMarginNominalThreshold(): float
+    {
+        return \App\Support\PaymentLevel::requiredMarginNominal(
+            $this->isCustomerFreeShipping(),
+            (bool) $this->crm_has_shipping_charge
+        );
+    }
+
+    public function marginNeedsApproval(): bool
+    {
+        return $this->crm_margin_status === self::MARGIN_PENDING;
+    }
+
+    public function isMarginLocked(): bool
+    {
+        return in_array($this->crm_margin_status, [self::MARGIN_PENDING, self::MARGIN_REJECTED], true);
+    }
+
+    public function marginStatusLabel(): string
+    {
+        return match ($this->crm_margin_status) {
+            self::MARGIN_PENDING => 'Menunggu approval margin',
+            self::MARGIN_APPROVED => 'Margin disetujui',
+            self::MARGIN_REJECTED => 'Margin ditolak',
+            default => '—',
+        };
+    }
+
+    /**
+     * Evaluasi % + nominal vs threshold. Return true jika baru masuk pending.
+     */
+    public function refreshMarginApprovalState(bool $isNew = false): bool
+    {
+        $this->loadMissing('account');
+        $account = $this->account;
+
+        $marginPct = $this->overallMarginPercent();
+        $marginNominal = $this->totalProductsMargin();
+        $pctThreshold = $account?->minMarginPercent();
+        $nominalThreshold = $this->requiredMarginNominalThreshold();
+
+        $this->crm_margin_percent = $marginPct;
+        $this->crm_margin_threshold = $pctThreshold;
+        $this->crm_margin_nominal = $marginNominal;
+        $this->crm_margin_nominal_threshold = $nominalThreshold;
+
+        $belowPct = $pctThreshold !== null && ($marginPct === null || $marginPct < $pctThreshold);
+        $belowNominal = $nominalThreshold > 0 && $marginNominal < $nominalThreshold;
+        $below = $belowPct || $belowNominal;
+
+        $wasPending = $this->crm_margin_status === self::MARGIN_PENDING;
+        $wasApproved = $this->crm_margin_status === self::MARGIN_APPROVED;
+
+        if (! $below) {
+            $this->crm_margin_status = null;
+            $this->crm_margin_requested_at = null;
+            $this->crm_margin_reviewed_by = null;
+            $this->crm_margin_reviewed_at = null;
+            $this->crm_margin_note = null;
+
+            return false;
+        }
+
+        if (! $isNew && $wasApproved) {
+            return false;
+        }
+
+        $this->crm_margin_status = self::MARGIN_PENDING;
+        if (! $this->crm_margin_requested_at || ! $wasPending) {
+            $this->crm_margin_requested_at = now();
+        }
+        $this->crm_margin_reviewed_by = null;
+        $this->crm_margin_reviewed_at = null;
+
+        return ! $wasPending;
     }
 
     public function stageColor(): string

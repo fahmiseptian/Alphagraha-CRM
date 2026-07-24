@@ -17,7 +17,11 @@
         'account_id' => $c->account_id,
     ])->values();
     $ppnPercent = \App\Support\OpportunityProductPricing::ppnPercent();
-    $pphPercent = \App\Support\OpportunityProductPricing::pphPercent();
+    $pphNonWapuJasa = \App\Support\OpportunityProductPricing::pphNonWapuJasaPercent();
+    $pphWapuBarang = \App\Support\OpportunityProductPricing::pphWapuBarangPercent();
+    $pphWapuJasa = \App\Support\OpportunityProductPricing::pphWapuJasaPercent();
+    $pnbpPercent = \App\Support\OpportunityProductPricing::pnbpPercent();
+    $pph29Percent = \App\Support\OpportunityProductPricing::pph29Percent();
     $purchasingMode = $purchasingMode ?? false;
 @endphp
 <form method="POST" action="{{ $action }}"
@@ -29,9 +33,18 @@
           'contactId' => old('contact_id', $opportunity->contact_id),
           'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
           'ppnPercent' => $ppnPercent,
-          'pphPercent' => $pphPercent,
+          'pphNonWapuJasa' => $pphNonWapuJasa,
+          'pphWapuBarang' => $pphWapuBarang,
+          'pphWapuJasa' => $pphWapuJasa,
+          'pnbpPercent' => $pnbpPercent,
+          'pph29Percent' => $pph29Percent,
           'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
           'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
+          'hasShippingCharge' => (bool) old('has_shipping_charge', $opportunity->crm_has_shipping_charge),
+          'shippingSell' => (float) old('shipping_sell', $opportunity->crm_shipping_sell ?? 0),
+          'accountMarginMeta' => $accountMarginMeta ?? [],
+          'marginNominalUmum' => (float) ($marginNominalUmum ?? 0),
+          'marginNominalOngkirPribadi' => (float) ($marginNominalOngkirPribadi ?? 0),
           'purchasingMode' => $purchasingMode,
       ]) }})">
     @csrf
@@ -154,15 +167,22 @@
             <x-card>
                 {{-- Langkah 1: pilih kategori saja --}}
                 <div x-show="!selectedTaxCategory && !purchasingMode" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
-                    <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori terlebih dahulu</p>
-                    <div class="flex flex-wrap justify-center gap-3">
+                    <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori pajak terlebih dahulu</p>
+                    <div class="mx-auto grid max-w-3xl gap-3 sm:grid-cols-3">
                         <button type="button" @click="selectTaxCategory('non_wapu')"
-                                class="rounded-lg border-2 border-slate-200 bg-white px-8 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700">
-                            Non Wapu
+                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                            <span class="block text-sm font-semibold text-slate-800">Non Wapu</span>
+                            <span class="mt-1 block text-xs text-slate-500">Barang: PPN saja<br>Jasa: PPN + PPH</span>
                         </button>
                         <button type="button" @click="selectTaxCategory('wapu')"
-                                class="rounded-lg border-2 border-slate-200 bg-white px-8 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700">
-                            Wapu
+                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                            <span class="block text-sm font-semibold text-slate-800">Wapu</span>
+                            <span class="mt-1 block text-xs text-slate-500">Barang: PPN + 1.5%<br>Jasa: PPN + 2%</span>
+                        </button>
+                        <button type="button" @click="selectTaxCategory('inaproc')"
+                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                            <span class="block text-sm font-semibold text-slate-800">Inaproc</span>
+                            <span class="mt-1 block text-xs text-slate-500">Seperti Wapu + PNBP + PPH 29</span>
                         </button>
                     </div>
                 </div>
@@ -170,15 +190,24 @@
                 {{-- Langkah 2: form item setelah kategori dipilih --}}
                 <div x-show="selectedTaxCategory || purchasingMode" x-cloak>
                     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                        <div class="flex items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-2">
                             <span class="text-sm text-slate-500">Kategori:</span>
-                            <span class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="selectedTaxCategory === 'wapu' ? 'Wapu' : 'Non Wapu'"></span>
+                            <template x-if="!purchasingMode">
+                                <div class="inline-flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                                    <button type="button" @click="changeTaxCategory('non_wapu')"
+                                            :class="selectedTaxCategory === 'non_wapu' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Non Wapu</button>
+                                    <button type="button" @click="changeTaxCategory('wapu')"
+                                            :class="selectedTaxCategory === 'wapu' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Wapu</button>
+                                    <button type="button" @click="changeTaxCategory('inaproc')"
+                                            :class="selectedTaxCategory === 'inaproc' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Inaproc</button>
+                                </div>
+                            </template>
+                            <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
                         </div>
-                        <button type="button" x-show="products.length === 0 && !purchasingMode" @click="selectedTaxCategory = null"
-                                class="text-xs font-medium text-slate-500 hover:text-slate-700">
-                            <i class="bi bi-arrow-left"></i> Ganti kategori
-                        </button>
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Exclude &amp; % margin bisa diubah (putih). Diskon item = harga net; bila &gt; 0 margin = diskon − modal. Include / PPH / nilai margin (kuning) otomatis.</p>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude &amp; % margin (putih) bisa diubah; Include / potongan / nilai margin (kuning) otomatis.</p>
                     </div>
 
                     <div class="space-y-4">
@@ -263,10 +292,26 @@
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH ' + pphPercent + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pphPercent + '%'"></td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH ' + pphPercentFor(p) + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pphPercentFor(p) + '%'"></td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly :value="formatNumber(pphAmount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesPnbp(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PNBP ' + pnbpPercent + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pnbpPercent + '%'"></td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatNumber(pnbpAmount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesPph29(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH 29 ' + pph29Percent + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">Dari margin kotor</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatNumber(pph29Amount(p))"
                                                        class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
                                             </td>
                                         </tr>
@@ -310,6 +355,29 @@
             </x-card>
 
             @unless ($purchasingMode)
+            <x-card title="Ongkir jual">
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="hidden" name="has_shipping_charge" value="0">
+                    <input type="checkbox" name="has_shipping_charge" value="1" x-model="hasShippingCharge"
+                           class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                           @checked(old('has_shipping_charge', $opportunity->crm_has_shipping_charge))>
+                    Ada ongkir (dijual ke customer)
+                </label>
+                <div x-show="hasShippingCharge" x-cloak class="mt-3 max-w-sm">
+                    <label class="mb-1 block text-xs font-medium text-slate-500">Ongkir jual</label>
+                    <input type="number" step="0.01" min="0" name="shipping_sell" x-model.number="shippingSell"
+                           class="crm-field w-full" placeholder="0">
+                    <p class="mt-1 text-xs text-slate-400">
+                        Jika dicentang, threshold margin nominal hanya memakai <em>Nominal Umum</em>
+                        (tanpa Nominal Ongkir Pribadi).
+                    </p>
+                </div>
+                <p class="mt-2 text-xs" :class="isFreeShippingCity ? 'text-green-700' : 'text-slate-500'" x-show="accountId">
+                    <span x-show="isFreeShippingCity"><i class="bi bi-check-circle mr-1"></i>Kota customer termasuk kawasan free ongkir.</span>
+                    <span x-show="!isFreeShippingCity"><i class="bi bi-info-circle mr-1"></i>Kota customer bukan free ongkir — threshold nominal memakai Umum + Ongkir Pribadi (kecuali checkbox di atas dicentang).</span>
+                </p>
+            </x-card>
+
             <x-card title="Diskon tambahan">
                 <label class="flex items-center gap-2 text-sm text-slate-700">
                     <input type="hidden" name="has_discount" value="0">
@@ -349,6 +417,20 @@
                     </p>
                 @endif
             </x-card>
+
+            <div x-show="marginNeedsApprovalHint" x-cloak
+                 class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p class="font-semibold"><i class="bi bi-exclamation-triangle mr-1"></i> Margin di bawah minimal</p>
+                <p class="mt-1 text-xs">
+                    Margin saat ini
+                    <strong x-text="(overallMarginPercent ?? '—') + '%'"></strong>
+                    / <strong x-text="formatMoney(productsMarginTotal)"></strong>
+                    · Minimal
+                    <strong x-text="(accountMinMarginPct ?? '—') + '%'"></strong>
+                    / <strong x-text="formatMoney(requiredNominalThreshold)"></strong>.
+                    Opportunity tetap bisa disimpan, tetapi memerlukan approval Superadmin.
+                </p>
+            </div>
             @endunless
         </div>
 
@@ -390,10 +472,33 @@
 <script>
     function opportunityForm(config) {
         const PPN_PERCENT = Number(config.ppnPercent) || 11;
-        const PPH_PERCENT = Number(config.pphPercent) || 2;
         const TAX_MULTIPLIER = 1 + (PPN_PERCENT / 100);
-        const PPH_RATE = PPH_PERCENT / 100;
-        const AFTER_PPH_FACTOR = 1 - PPH_RATE;
+        const PPH_NON_WAPU_JASA = Number(config.pphNonWapuJasa) || 2;
+        const PPH_WAPU_BARANG = Number(config.pphWapuBarang) || 1.5;
+        const PPH_WAPU_JASA = Number(config.pphWapuJasa) || 2;
+        const PNBP_PERCENT = Number(config.pnbpPercent) || 0.4;
+        const PPH29_PERCENT = Number(config.pph29Percent) || 22;
+
+        function pphPercentLookup(taxCategory, itemKind) {
+            if (taxCategory === 'non_wapu' && itemKind === 'barang') return 0;
+            if (taxCategory === 'non_wapu' && itemKind === 'jasa') return PPH_NON_WAPU_JASA;
+            if ((taxCategory === 'wapu' || taxCategory === 'inaproc') && itemKind === 'barang') return PPH_WAPU_BARANG;
+            if ((taxCategory === 'wapu' || taxCategory === 'inaproc') && itemKind === 'jasa') return PPH_WAPU_JASA;
+            return PPH_NON_WAPU_JASA;
+        }
+
+        function calcNetMargin(base, cost, taxCategory, itemKind) {
+            const pphPct = pphPercentLookup(taxCategory, itemKind);
+            const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
+            const pnbp = taxCategory === 'inaproc'
+                ? Math.round(base * (PNBP_PERCENT / 100) * 100) / 100
+                : 0;
+            const gross = Math.round((base - pph - pnbp - cost) * 100) / 100;
+            const pph29 = (taxCategory === 'inaproc' && gross > 0)
+                ? Math.round(gross * (PPH29_PERCENT / 100) * 100) / 100
+                : 0;
+            return Math.round((gross - pph29) * 100) / 100;
+        }
 
         const initialProducts = (config.products || []).map(p => {
             const taxCategory = p.tax_category ?? 'non_wapu';
@@ -402,9 +507,7 @@
             const cost = Number(p.cost_exclude) || 0;
             const discount = Number(p.discount_exclude) || 0;
             const base = discount > 0 ? discount : sell;
-            const appliesPph = !(taxCategory === 'non_wapu' && itemKind === 'barang');
-            const pph = appliesPph ? Math.round(base * PPH_RATE * 100) / 100 : 0;
-            const margin = Math.round((appliesPph ? (base - pph - cost) : (base - cost)) * 100) / 100;
+            const margin = calcNetMargin(base, cost, taxCategory, itemKind);
             const marginPercent = base > 0 ? Math.round((margin / base) * 10000) / 100 : 0;
 
             return {
@@ -429,16 +532,66 @@
             contactId: config.contactId || '',
             currency: config.currency || 'IDR',
             ppnPercent: PPN_PERCENT,
-            pphPercent: PPH_PERCENT,
+            pphNonWapuJasa: PPH_NON_WAPU_JASA,
+            pphWapuBarang: PPH_WAPU_BARANG,
+            pphWapuJasa: PPH_WAPU_JASA,
+            pnbpPercent: PNBP_PERCENT,
+            pph29Percent: PPH29_PERCENT,
             amount: {{ (float) old('amount', $opportunity->amount ?? 0) }},
             hasDiscount: !!config.hasDiscount,
             discountAmount: Number(config.discountAmount) || 0,
             discountPercent: 0,
             _lockDiscountPercent: false,
+            hasShippingCharge: !!config.hasShippingCharge,
+            shippingSell: Number(config.shippingSell) || 0,
+            accountMarginMeta: config.accountMarginMeta || {},
+            marginNominalUmum: Number(config.marginNominalUmum) || 0,
+            marginNominalOngkirPribadi: Number(config.marginNominalOngkirPribadi) || 0,
             purchasingMode: !!config.purchasingMode,
             get filteredContacts() {
                 if (!this.accountId) return [];
                 return this.contacts.filter(c => c.account_id === this.accountId);
+            },
+            get accountMeta() {
+                return this.accountMarginMeta[this.accountId] || null;
+            },
+            get isFreeShippingCity() {
+                return !!(this.accountMeta && this.accountMeta.free_shipping);
+            },
+            get accountMinMarginPct() {
+                const v = this.accountMeta ? this.accountMeta.min_margin_pct : null;
+                return v === null || v === undefined ? null : Number(v);
+            },
+            get requiredNominalThreshold() {
+                const umum = Number(this.marginNominalUmum) || 0;
+                if (this.isFreeShippingCity || this.hasShippingCharge) {
+                    return this.round(umum);
+                }
+                return this.round(umum + (Number(this.marginNominalOngkirPribadi) || 0));
+            },
+            get overallMarginPercent() {
+                const sell = this.products.reduce((s, p) => {
+                    const qty = Number(p.quantity) || 0;
+                    const disc = Number(p.discount_exclude) || 0;
+                    const sellEx = Number(p.sell_exclude) || 0;
+                    const base = disc > 0 ? disc : sellEx;
+                    return s + qty * base;
+                }, 0);
+                if (sell <= 0) return null;
+                return this.round((this.productsMarginTotal / sell) * 100);
+            },
+            get marginBelowPercent() {
+                const min = this.accountMinMarginPct;
+                if (min === null) return false;
+                const pct = this.overallMarginPercent;
+                return pct === null || pct < min;
+            },
+            get marginBelowNominal() {
+                const thr = this.requiredNominalThreshold;
+                return thr > 0 && this.productsMarginTotal < thr;
+            },
+            get marginNeedsApprovalHint() {
+                return !!(this.accountId && (this.marginBelowPercent || this.marginBelowNominal));
             },
             get productsTotal() {
                 return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * this.effectiveSellInclude(p), 0);
@@ -448,6 +601,11 @@
                     (s, p) => s + (Number(p.quantity) || 0) * this.marginAmount(p),
                     0
                 ));
+            },
+            taxCategoryLabel(category) {
+                if (category === 'wapu') return 'Wapu';
+                if (category === 'inaproc') return 'Inaproc';
+                return 'Non Wapu';
             },
             syncDiscountPercentFromAmount() {
                 const margin = this.productsMarginTotal;
@@ -504,19 +662,39 @@
                 return this.round(this.effectiveSellExclude(p) * TAX_MULTIPLIER);
             },
             appliesPph(p) {
-                return !(p.tax_category === 'non_wapu' && p.item_kind === 'barang');
+                return this.pphPercentFor(p) > 0;
+            },
+            appliesPnbp(p) {
+                return (p.tax_category || 'non_wapu') === 'inaproc';
+            },
+            appliesPph29(p) {
+                return (p.tax_category || 'non_wapu') === 'inaproc';
+            },
+            pphPercentFor(p) {
+                return pphPercentLookup(p.tax_category || 'non_wapu', p.item_kind || 'barang');
             },
             pphAmount(p) {
-                if (!this.appliesPph(p)) return 0;
-                return this.round(this.effectiveSellExclude(p) * PPH_RATE);
+                const rate = this.pphPercentFor(p) / 100;
+                if (rate <= 0) return 0;
+                return this.round(this.effectiveSellExclude(p) * rate);
             },
-            marginAmount(p) {
+            pnbpAmount(p) {
+                if (!this.appliesPnbp(p)) return 0;
+                return this.round(this.effectiveSellExclude(p) * (Number(this.pnbpPercent) || 0) / 100);
+            },
+            grossMarginAmount(p) {
                 const base = this.effectiveSellExclude(p);
                 const cost = Number(p.cost_exclude) || 0;
-                if (!this.appliesPph(p)) {
-                    return this.round(base - cost);
-                }
-                return this.round(base - this.pphAmount(p) - cost);
+                return this.round(base - this.pphAmount(p) - this.pnbpAmount(p) - cost);
+            },
+            pph29Amount(p) {
+                if (!this.appliesPph29(p)) return 0;
+                const gross = this.grossMarginAmount(p);
+                if (gross <= 0) return 0;
+                return this.round(gross * (Number(this.pph29Percent) || 0) / 100);
+            },
+            marginAmount(p) {
+                return this.round(this.grossMarginAmount(p) - this.pph29Amount(p));
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
@@ -528,19 +706,18 @@
             },
             marginLabel(p) {
                 const hasItemDiscount = (Number(p.discount_exclude) || 0) > 0;
-                if (hasItemDiscount) {
-                    return this.appliesPph(p)
-                        ? 'Diskon − PPH − Modal'
-                        : 'Diskon − Modal';
+                const head = hasItemDiscount ? 'Diskon' : 'Jual Exclude';
+                if (this.appliesPph29(p)) {
+                    return head + ' − PPH − PNBP − PPH29 − Modal';
                 }
-                return this.appliesPph(p)
-                    ? 'Jual Exclude − PPH − Modal'
-                    : 'Jual Exclude − Beli Exclude';
+                if (this.appliesPph(p)) {
+                    return head + ' − PPH − Modal';
+                }
+                return hasItemDiscount ? 'Diskon − Modal' : 'Jual Exclude − Beli Exclude';
             },
             /**
-             * Dari % margin target + modal → hitung harga basis (jual atau diskon).
-             * Tanpa PPH: base = cost / (1 - pct/100)
-             * Dengan PPH: base = cost / (afterPphFactor - pct/100)
+             * Dari % margin target (net) + modal → hitung harga basis.
+             * Inaproc: base = cost*(1-r29) / ((1-rPph-rPnbp)*(1-r29) - pct/100)
              */
             sellFromMarginPercent(p) {
                 const pct = Number(p.margin_percent) || 0;
@@ -549,13 +726,16 @@
                     return this.effectiveSellExclude(p);
                 }
 
-                const factor = this.appliesPph(p) ? AFTER_PPH_FACTOR : 1;
-                const denom = factor - (pct / 100);
+                const rPph = this.pphPercentFor(p) / 100;
+                const rPnbp = this.appliesPnbp(p) ? (Number(this.pnbpPercent) || 0) / 100 : 0;
+                const r29 = this.appliesPph29(p) ? (Number(this.pph29Percent) || 0) / 100 : 0;
+                const keep = (1 - rPph - rPnbp) * (1 - r29);
+                const denom = keep - (pct / 100);
                 if (denom <= 0) {
                     return this.effectiveSellExclude(p);
                 }
 
-                return this.round(cost / denom);
+                return this.round(cost * (1 - r29) / denom);
             },
             applyMarginPercentToPrice(p) {
                 const next = this.sellFromMarginPercent(p);
@@ -585,9 +765,10 @@
             },
             onMarginPercentChange(p) {
                 let pct = Number(p.margin_percent) || 0;
-                const maxPct = this.appliesPph(p)
-                    ? Math.max(AFTER_PPH_FACTOR * 100 - 0.01, 0)
-                    : 99.99;
+                const rPph = this.pphPercentFor(p) / 100;
+                const rPnbp = this.appliesPnbp(p) ? (Number(this.pnbpPercent) || 0) / 100 : 0;
+                const r29 = this.appliesPph29(p) ? (Number(this.pph29Percent) || 0) / 100 : 0;
+                const maxPct = Math.max((1 - rPph - rPnbp) * (1 - r29) * 100 - 0.01, 0);
                 if (pct < 0) pct = 0;
                 if (pct > maxPct) pct = maxPct;
                 p.margin_percent = pct;
@@ -643,7 +824,20 @@
                 CrmSelect2.bindAlpine(el, this, 'contactId');
             },
             selectTaxCategory(category) {
+                this.changeTaxCategory(category);
+            },
+            changeTaxCategory(category) {
+                if (!category || this.purchasingMode) return;
                 this.selectedTaxCategory = category;
+                this.products.forEach((p) => {
+                    p.tax_category = category;
+                    if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0 && (Number(p.cost_exclude) || 0) > 0) {
+                        this.applyMarginPercentToPrice(p);
+                    } else {
+                        p.margin_percent = this.calcMarginPercent(p);
+                    }
+                });
+                this.refreshDiscountFromMargin();
             },
             addProduct() {
                 if (!this.selectedTaxCategory) return;

@@ -57,6 +57,7 @@
                         <th>Customer</th>
                         <th>Contact</th>
                         <th>Type</th>
+                        <th>Level</th>
                         <th>Sales</th>
                         <th class="text-center">Deal</th>
                         <th></th>
@@ -82,6 +83,18 @@
                                 @if ($account->type)
                                     <x-badge color="slate">{{ $account->type }}</x-badge>
                                 @else <span class="text-slate-300">—</span> @endif
+                            </td>
+                            <td>
+                                @php
+                                    $levelColor = match ($account->paymentLevel()) {
+                                        'lancar' => 'green',
+                                        'mandek' => 'amber',
+                                        'jelek' => 'rose',
+                                        'suspend' => 'red',
+                                        default => 'slate',
+                                    };
+                                @endphp
+                                <x-badge :color="$levelColor">{{ $account->paymentLevelLabel() }}</x-badge>
                             </td>
                             <td class="text-slate-600">{{ optional($account->assignedUser)->display_name ?: '—' }}</td>
                             <td class="text-center">

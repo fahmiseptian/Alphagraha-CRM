@@ -5,6 +5,8 @@
     $poCurrency = $opportunity->amount_currency ?: 'IDR';
     $poList = $opportunity->purchaseOrders ?? collect();
     $ppnMultiplier = \App\Support\OpportunityProductPricing::ppnMultiplier();
+    $poSurchargeCash = \App\Support\PurchaseOrderPricing::cashSurchargePercent();
+    $poSurchargeTop = \App\Support\PurchaseOrderPricing::topSurchargePercent();
 
     $poFormInitial = [
         'mode' => null,
@@ -46,8 +48,21 @@
             storeUrl: @js($poStoreUrl),
             updateBase: @js($poUpdateBase),
             ppnMultiplier: @js($ppnMultiplier),
+            surchargeCash: @js($poSurchargeCash),
+            surchargeTop: @js($poSurchargeTop),
             isCash() {
                 return this.paymentTerm === 'cash';
+            },
+            surchargePercent() {
+                return this.isCash() ? Number(this.surchargeCash) || 0 : Number(this.surchargeTop) || 0;
+            },
+            hasSurcharge() {
+                return this.surchargePercent() > 0;
+            },
+            surchargeLabel() {
+                const p = this.surchargePercent();
+                const n = Number.isInteger(p) ? String(p) : String(p);
+                return n.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1') + '%';
             },
             emptyItem() {
                 return { product_name: '', quantity: 1, description: '', note: '', unit_price: 0 };
@@ -92,8 +107,9 @@
                 return Number(item.unit_price) || 0;
             },
             extraExclude(item) {
-                if (!this.isCash()) return 0;
-                return Math.round(this.modal(item) * 0.01 * 100) / 100;
+                const rate = this.surchargePercent() / 100;
+                if (rate <= 0) return 0;
+                return Math.round(this.modal(item) * rate * 100) / 100;
             },
             jumlahExclude(item) {
                 return Math.round((this.modal(item) + this.extraExclude(item)) * 100) / 100;
@@ -102,8 +118,9 @@
                 return Math.round(this.modal(item) * this.ppnMultiplier * 100) / 100;
             },
             extraInclude(item) {
-                if (!this.isCash()) return 0;
-                return Math.round(this.hargaInclude(item) * 0.01 * 100) / 100;
+                const rate = this.surchargePercent() / 100;
+                if (rate <= 0) return 0;
+                return Math.round(this.hargaInclude(item) * rate * 100) / 100;
             },
             jumlahInclude(item) {
                 return Math.round((this.hargaInclude(item) + this.extraInclude(item)) * 100) / 100;
@@ -226,12 +243,12 @@
                             <label class="inline-flex items-center gap-2 text-sm text-slate-700">
                                 <input type="radio" name="payment_term" value="top" x-model="paymentTerm"
                                        class="border-slate-300 text-brand-600 focus:ring-brand-500">
-                                TOP
+                                TOP <span class="text-xs text-slate-400" x-text="'(' + (Number(surchargeTop) || 0) + '%)'"></span>
                             </label>
                             <label class="inline-flex items-center gap-2 text-sm text-slate-700">
                                 <input type="radio" name="payment_term" value="cash" x-model="paymentTerm"
                                        class="border-slate-300 text-brand-600 focus:ring-brand-500">
-                                Cash <span class="text-xs text-slate-400">(+1%)</span>
+                                Cash <span class="text-xs text-slate-400" x-text="'(' + (Number(surchargeCash) || 0) + '%)'"></span>
                             </label>
                         </div>
                     </div>
@@ -280,19 +297,19 @@
                                 <table class="w-full min-w-[640px] text-left text-xs">
                                     <thead class="text-[10px] uppercase tracking-wider text-slate-400">
                                         <tr>
-                                            <th class="px-2 py-1.5 font-medium text-right" x-show="isCash()">1% Exclude</th>
+                                            <th class="px-2 py-1.5 font-medium text-right" x-show="hasSurcharge()" x-text="surchargeLabel() + ' Exclude'"></th>
                                             <th class="px-2 py-1.5 font-medium text-right">Jumlah Exclude</th>
                                             <th class="px-2 py-1.5 font-medium text-right">Harga Include</th>
-                                            <th class="px-2 py-1.5 font-medium text-right" x-show="isCash()">1% Include</th>
+                                            <th class="px-2 py-1.5 font-medium text-right" x-show="hasSurcharge()" x-text="surchargeLabel() + ' Include'"></th>
                                             <th class="px-2 py-1.5 font-medium text-right">Jumlah Include</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <tr class="tabular-nums text-slate-600">
-                                            <td class="px-2 py-1.5 text-right" x-show="isCash()" x-text="formatMoney(extraExclude(item))"></td>
+                                            <td class="px-2 py-1.5 text-right" x-show="hasSurcharge()" x-text="formatMoney(extraExclude(item))"></td>
                                             <td class="px-2 py-1.5 text-right font-medium text-slate-700" x-text="formatMoney(jumlahExclude(item))"></td>
                                             <td class="px-2 py-1.5 text-right" x-text="formatMoney(hargaInclude(item))"></td>
-                                            <td class="px-2 py-1.5 text-right" x-show="isCash()" x-text="formatMoney(extraInclude(item))"></td>
+                                            <td class="px-2 py-1.5 text-right" x-show="hasSurcharge()" x-text="formatMoney(extraInclude(item))"></td>
                                             <td class="px-2 py-1.5 text-right font-medium text-slate-700" x-text="formatMoney(jumlahInclude(item))"></td>
                                         </tr>
                                     </tbody>
@@ -319,7 +336,7 @@
                     <p class="text-sm text-slate-600">
                         Total PO:
                         <span class="font-semibold text-slate-900" x-text="formatMoney(grandTotal())"></span>
-                        <span class="ml-1 text-xs text-slate-400" x-show="isCash()">(Cash +1%)</span>
+                        <span class="ml-1 text-xs text-slate-400" x-show="hasSurcharge()" x-text="'(' + (isCash() ? 'Cash' : 'TOP') + ' +' + surchargeLabel() + ')'"></span>
                     </p>
                     <div class="flex items-center gap-2">
                         <button type="button" @click="cancelForm()" class="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
@@ -337,6 +354,9 @@
                 @foreach ($poList as $po)
                     @php
                         $poIsCash = $po->isCash();
+                        $poSurchargePct = \App\Support\PurchaseOrderPricing::surchargePercent($po->payment_term);
+                        $poHasSurcharge = $poSurchargePct > 0;
+                        $poSurchargeLabel = rtrim(rtrim(number_format($poSurchargePct, 2, ',', '.'), '0'), ',').'%';
                         $poEditPayload = [
                             'id' => $po->id,
                             'number' => $po->number,
@@ -349,7 +369,7 @@
                                 'unit_price' => (float) $i->unit_price,
                             ])->values()->all(),
                         ];
-                        $poColspan = $poIsCash ? 8 : 6;
+                        $poColspan = $poHasSurcharge ? 8 : 6;
                     @endphp
                     <li class="px-5 py-3" x-show="!(mode === 'edit' && Number(editId) === {{ (int) $po->id }})">
                         <div class="flex items-start gap-2">
@@ -380,13 +400,13 @@
                                                 <th class="px-3 py-2 font-medium">Produk</th>
                                                 <th class="px-3 py-2 font-medium text-right">Qty</th>
                                                 <th class="px-3 py-2 font-medium text-right">Harga modal</th>
-                                                @if ($poIsCash)
-                                                    <th class="px-3 py-2 font-medium text-right">1% Exclude</th>
+                                                @if ($poHasSurcharge)
+                                                    <th class="px-3 py-2 font-medium text-right">{{ $poSurchargeLabel }} Exclude</th>
                                                 @endif
                                                 <th class="px-3 py-2 font-medium text-right">Jumlah Exclude</th>
                                                 <th class="px-3 py-2 font-medium text-right">Harga Include</th>
-                                                @if ($poIsCash)
-                                                    <th class="px-3 py-2 font-medium text-right">1% Include</th>
+                                                @if ($poHasSurcharge)
+                                                    <th class="px-3 py-2 font-medium text-right">{{ $poSurchargeLabel }} Include</th>
                                                 @endif
                                                 <th class="px-3 py-2 font-medium text-right">Jumlah Include</th>
                                                 <th class="px-3 py-2 font-medium text-right">Subtotal</th>
@@ -394,7 +414,7 @@
                                         </thead>
                                         <tbody class="divide-y divide-slate-50">
                                             @foreach ($po->items as $item)
-                                                @php $b = $item->pricingBreakdown($poIsCash); @endphp
+                                                @php $b = $item->pricingBreakdown(null, $po->payment_term); @endphp
                                                 <tr>
                                                     <td class="px-3 py-2 align-top">
                                                         <p class="font-medium text-slate-700">{{ $item->product_name }}</p>
@@ -407,12 +427,12 @@
                                                     </td>
                                                     <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ rtrim(rtrim(number_format((float) $item->quantity, 2, ',', '.'), '0'), ',') }}</td>
                                                     <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ money($b['modal'], $po->currency ?: $poCurrency) }}</td>
-                                                    @if ($poIsCash)
+                                                    @if ($poHasSurcharge)
                                                         <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ money($b['extra_exclude'], $po->currency ?: $poCurrency) }}</td>
                                                     @endif
                                                     <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ money($b['jumlah_exclude'], $po->currency ?: $poCurrency) }}</td>
                                                     <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ money($b['harga_include'], $po->currency ?: $poCurrency) }}</td>
-                                                    @if ($poIsCash)
+                                                    @if ($poHasSurcharge)
                                                         <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ money($b['extra_include'], $po->currency ?: $poCurrency) }}</td>
                                                     @endif
                                                     <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ money($b['jumlah_include'], $po->currency ?: $poCurrency) }}</td>

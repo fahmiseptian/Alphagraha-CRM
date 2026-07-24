@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Activity;
 use App\Models\CrmNotification;
 use App\Models\Espo\Opportunity;
+use App\Models\Quotation;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -242,6 +243,203 @@ class NotificationService
                 data: ['opportunity_id' => $opportunity->id],
             );
         }
+    }
+
+    public function notifyOpportunityMarginRequested(Opportunity $opportunity): void
+    {
+        $marginPct = $opportunity->crm_margin_percent;
+        $pctThreshold = $opportunity->crm_margin_threshold;
+        $marginNominal = $opportunity->crm_margin_nominal;
+        $nominalThreshold = $opportunity->crm_margin_nominal_threshold;
+
+        $pctLabel = $marginPct !== null ? number_format((float) $marginPct, 2, ',', '.').'%' : '—';
+        $pctMinLabel = $pctThreshold !== null ? number_format((float) $pctThreshold, 2, ',', '.').'%' : '—';
+        $nomLabel = $marginNominal !== null ? 'Rp '.number_format((float) $marginNominal, 0, ',', '.') : '—';
+        $nomMinLabel = $nominalThreshold !== null ? 'Rp '.number_format((float) $nominalThreshold, 0, ',', '.') : '—';
+
+        $requesterId = $opportunity->assigned_user_id ?: $opportunity->created_by_id;
+        $requester = $requesterId
+            ? User::query()->whereKey($requesterId)->first()
+            : null;
+        $requesterName = $requester?->display_name ?? 'Sales';
+
+        $link = route('opportunities.show', $opportunity);
+        $title = 'Approval margin opportunity';
+        $body = $requesterName.' mengajukan Opportunity "'.$opportunity->name.'" dengan margin '
+            .$pctLabel.' / '.$nomLabel.' (minimal '.$pctMinLabel.' / '.$nomMinLabel.').';
+
+        $superAdminIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SUPERADMIN))
+            ->pluck('id')
+            ->filter(fn ($id) => $id !== $requesterId)
+            ->values();
+
+        foreach ($superAdminIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_MARGIN_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'opp_margin_request:'.$opportunity->id.':'.uniqid('', true),
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'margin_percent' => $marginPct,
+                    'threshold' => $pctThreshold,
+                    'margin_nominal' => $marginNominal,
+                    'nominal_threshold' => $nominalThreshold,
+                ],
+            );
+        }
+    }
+
+    public function notifyOpportunityMarginApproved(Opportunity $opportunity, ?string $note = null): void
+    {
+        $userId = $opportunity->assigned_user_id ?: $opportunity->created_by_id;
+        if (! $userId) {
+            return;
+        }
+
+        $body = 'Margin Opportunity "'.$opportunity->name.'" telah disetujui.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notify(
+            $userId,
+            CrmNotification::TYPE_MARGIN_APPROVED,
+            'Margin opportunity disetujui',
+            $body,
+            route('opportunities.show', $opportunity),
+            showPopup: true,
+            uniqueKey: 'opp_margin_approved:'.$opportunity->id.':'.uniqid('', true),
+            data: ['opportunity_id' => $opportunity->id],
+        );
+    }
+
+    public function notifyOpportunityMarginRejected(Opportunity $opportunity, ?string $note = null): void
+    {
+        $userId = $opportunity->assigned_user_id ?: $opportunity->created_by_id;
+        if (! $userId) {
+            return;
+        }
+
+        $body = 'Margin Opportunity "'.$opportunity->name.'" ditolak. Perbaiki harga/margin atau hubungi Superadmin.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notify(
+            $userId,
+            CrmNotification::TYPE_MARGIN_REJECTED,
+            'Margin opportunity ditolak',
+            $body,
+            route('opportunities.show', $opportunity),
+            showPopup: true,
+            uniqueKey: 'opp_margin_rejected:'.$opportunity->id.':'.uniqid('', true),
+            data: ['opportunity_id' => $opportunity->id],
+        );
+    }
+
+    public function notifyMarginRequested(Quotation $quotation): void
+    {
+        $margin = $quotation->crm_margin_percent;
+        $threshold = $quotation->crm_margin_threshold;
+        $marginNominal = $quotation->crm_margin_nominal;
+        $nominalThreshold = $quotation->crm_margin_nominal_threshold;
+        $marginLabel = $margin !== null ? number_format((float) $margin, 2, ',', '.').'%' : '—';
+        $thresholdLabel = $threshold !== null ? number_format((float) $threshold, 2, ',', '.').'%' : '—';
+        $nomLabel = $marginNominal !== null ? 'Rp '.number_format((float) $marginNominal, 0, ',', '.') : '—';
+        $nomMinLabel = $nominalThreshold !== null ? 'Rp '.number_format((float) $nominalThreshold, 0, ',', '.') : '—';
+
+        $requesterId = $quotation->created_by;
+        $requester = $requesterId
+            ? User::query()->whereKey($requesterId)->first()
+            : null;
+        $requesterName = $requester?->display_name ?? 'Sales';
+
+        $link = route('quotations.show', $quotation);
+        $title = 'Approval margin quotation';
+        $body = $requesterName.' mengajukan Quotation "'.$quotation->number.'" dengan margin '
+            .$marginLabel.' / '.$nomLabel.' (minimal '.$thresholdLabel.' / '.$nomMinLabel.').';
+
+        $superAdminIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SUPERADMIN))
+            ->pluck('id')
+            ->filter(fn ($id) => $id !== $requesterId)
+            ->values();
+
+        foreach ($superAdminIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_MARGIN_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'margin_request:'.$quotation->id.':'.uniqid('', true),
+                data: [
+                    'quotation_id' => $quotation->id,
+                    'margin_percent' => $margin,
+                    'threshold' => $threshold,
+                    'margin_nominal' => $marginNominal,
+                    'nominal_threshold' => $nominalThreshold,
+                ],
+            );
+        }
+    }
+
+    public function notifyMarginApproved(Quotation $quotation, ?string $note = null): void
+    {
+        $userId = $quotation->created_by;
+        if (! $userId) {
+            return;
+        }
+
+        $body = 'Margin Quotation "'.$quotation->number.'" telah disetujui. Preview/PDF dapat dilanjutkan.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notify(
+            $userId,
+            CrmNotification::TYPE_MARGIN_APPROVED,
+            'Margin quotation disetujui',
+            $body,
+            route('quotations.show', $quotation),
+            showPopup: true,
+            uniqueKey: 'margin_approved:'.$quotation->id.':'.uniqid('', true),
+            data: ['quotation_id' => $quotation->id],
+        );
+    }
+
+    public function notifyMarginRejected(Quotation $quotation, ?string $note = null): void
+    {
+        $userId = $quotation->created_by;
+        if (! $userId) {
+            return;
+        }
+
+        $body = 'Margin Quotation "'.$quotation->number.'" ditolak. Dokumen terkunci hingga margin diperbaiki / di-approve.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notify(
+            $userId,
+            CrmNotification::TYPE_MARGIN_REJECTED,
+            'Margin quotation ditolak',
+            $body,
+            route('quotations.show', $quotation),
+            showPopup: true,
+            uniqueKey: 'margin_rejected:'.$quotation->id.':'.uniqid('', true),
+            data: ['quotation_id' => $quotation->id],
+        );
     }
 
     /**

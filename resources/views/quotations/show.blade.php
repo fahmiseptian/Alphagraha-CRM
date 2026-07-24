@@ -2,12 +2,28 @@
 @section('title', 'Quotation ' . $quotation->number)
 
 @section('content')
+@php
+    $marginLocked = $quotation->isMarginLocked();
+    $canApproveMargin = auth()->user()->canApproveMargin();
+@endphp
+
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
     <div>
         <a href="{{ route('quotations.index') }}" class="text-sm text-slate-500 hover:text-slate-700"><i class="bi bi-arrow-left"></i> Back to list</a>
-        <div class="mt-1 flex items-center gap-3">
+        <div class="mt-1 flex flex-wrap items-center gap-3">
             <h2 class="text-xl font-bold text-slate-800">{{ $quotation->number }}</h2>
             <x-badge :color="$quotation->statusColor()">{{ $quotation->statusLabel() }}</x-badge>
+            @if ($quotation->crm_margin_status)
+                @php
+                    $marginBadge = match ($quotation->crm_margin_status) {
+                        'pending' => 'amber',
+                        'approved' => 'green',
+                        'rejected' => 'red',
+                        default => 'slate',
+                    };
+                @endphp
+                <x-badge :color="$marginBadge">{{ $quotation->marginStatusLabel() }}</x-badge>
+            @endif
             <span class="text-xs text-slate-400">
                 @if ($quotation->document_revision > 0)
                     Dokumen R{{ $quotation->document_revision }}
@@ -18,8 +34,14 @@
         </div>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-        <a href="{{ route('quotations.preview', $quotation) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> Preview</a>
-        <a href="{{ route('quotations.pdf', $quotation) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><i class="bi bi-file-earmark-pdf"></i> Download PDF</a>
+        @if ($marginLocked && ! $canApproveMargin)
+            <span class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" title="Menunggu approval margin">
+                <i class="bi bi-lock"></i> Preview/PDF terkunci
+            </span>
+        @else
+            <a href="{{ route('quotations.preview', $quotation) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> Preview</a>
+            <a href="{{ route('quotations.pdf', $quotation) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><i class="bi bi-file-earmark-pdf"></i> Download PDF</a>
+        @endif
         <a href="{{ route('quotations.edit', $quotation) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-pencil"></i> Edit</a>
         <div x-data="{ open: false }" class="relative">
             <button @click="open=!open" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><i class="bi bi-three-dots-vertical"></i></button>
@@ -34,6 +56,54 @@
         </div>
     </div>
 </div>
+
+@if ($quotation->crm_margin_status)
+    <div @class([
+        'mb-4 rounded-xl border px-4 py-3',
+        'border-amber-200 bg-amber-50' => $quotation->crm_margin_status === 'pending',
+        'border-green-200 bg-green-50' => $quotation->crm_margin_status === 'approved',
+        'border-red-200 bg-red-50' => $quotation->crm_margin_status === 'rejected',
+    ])>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="text-sm">
+                <p class="font-semibold text-slate-800">{{ $quotation->marginStatusLabel() }}</p>
+                <p class="mt-1 text-slate-600">
+                    Margin opportunity:
+                    <strong>{{ $quotation->crm_margin_percent !== null ? number_format((float) $quotation->crm_margin_percent, 2, ',', '.').'%' : '—' }}</strong>
+                    / <strong>{{ money($quotation->crm_margin_nominal) }}</strong>
+                    &middot; Minimal:
+                    <strong>{{ $quotation->crm_margin_threshold !== null ? number_format((float) $quotation->crm_margin_threshold, 2, ',', '.').'%' : '—' }}</strong>
+                    / <strong>{{ money($quotation->crm_margin_nominal_threshold) }}</strong>
+                </p>
+                @if ($quotation->crm_margin_note)
+                    <p class="mt-1 text-xs text-slate-500">Catatan: {{ $quotation->crm_margin_note }}</p>
+                @endif
+            </div>
+            @if ($quotation->marginNeedsApproval() && $canApproveMargin)
+                <div class="flex w-full max-w-md flex-col gap-2 sm:w-auto">
+                    <form method="POST" action="{{ route('quotations.margin.approve', $quotation) }}" class="space-y-2">
+                        @csrf
+                        <input type="text" name="note" placeholder="Catatan approve (opsional)"
+                               class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <div class="flex flex-wrap gap-2">
+                            <button type="submit" class="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">
+                                <i class="bi bi-check-lg"></i> Approve
+                            </button>
+                        </div>
+                    </form>
+                    <form method="POST" action="{{ route('quotations.margin.reject', $quotation) }}" class="space-y-2">
+                        @csrf
+                        <input type="text" name="note" placeholder="Catatan reject (opsional)"
+                               class="w-full rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                            <i class="bi bi-x-lg"></i> Reject
+                        </button>
+                    </form>
+                </div>
+            @endif
+        </div>
+    </div>
+@endif
 
 <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
     <div class="space-y-4 lg:col-span-2">

@@ -115,16 +115,23 @@ class OpportunityController extends Controller
 
         $this->applyValidatedData($opportunity, $data, $request, isNew: true);
         $notifyDiscount = $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING;
+        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: true);
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
         if ($notifyDiscount) {
             app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
         }
+        if ($notifyMargin) {
+            app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+        }
 
         $message = 'Opportunity created successfully.';
         if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
             $message .= ' Diskon menunggu approval Superadmin.';
+        }
+        if ($opportunity->crm_margin_status === Opportunity::MARGIN_PENDING) {
+            $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
 
         return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
@@ -167,6 +174,7 @@ class OpportunityController extends Controller
         $this->applyValidatedData($opportunity, $data, $request);
         $notifyDiscount = $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING
             && ($opportunity->isDirty('crm_discount_status') || $opportunity->isDirty('crm_discount_amount'));
+        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
@@ -175,10 +183,16 @@ class OpportunityController extends Controller
         if ($notifyDiscount) {
             app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
         }
+        if ($notifyMargin) {
+            app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+        }
 
         $message = 'Opportunity updated successfully.';
         if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
             $message .= ' Diskon menunggu approval Superadmin.';
+        }
+        if ($opportunity->crm_margin_status === Opportunity::MARGIN_PENDING) {
+            $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
 
         return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
@@ -347,6 +361,68 @@ class OpportunityController extends Controller
         return back()->with('success', 'Diskon dikembalikan ke menunggu approval.');
     }
 
+    public function approveMargin(Request $request, Opportunity $opportunity)
+    {
+        if (! auth()->user()?->canApproveMargin()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        if ($opportunity->crm_margin_status !== Opportunity::MARGIN_PENDING) {
+            return back()->with('error', 'Margin tidak dalam status menunggu approval.');
+        }
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $opportunity->crm_margin_status = Opportunity::MARGIN_APPROVED;
+        $opportunity->crm_margin_reviewed_by = auth()->id();
+        $opportunity->crm_margin_reviewed_at = now();
+        $opportunity->crm_margin_note = $data['note'] ?? null;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        app(\App\Services\NotificationService::class)->notifyOpportunityMarginApproved(
+            $opportunity,
+            $data['note'] ?? null,
+        );
+
+        return back()->with('success', 'Margin opportunity disetujui. Sales mendapat notifikasi.');
+    }
+
+    public function rejectMargin(Request $request, Opportunity $opportunity)
+    {
+        if (! auth()->user()?->canApproveMargin()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        if ($opportunity->crm_margin_status !== Opportunity::MARGIN_PENDING) {
+            return back()->with('error', 'Margin tidak dalam status menunggu approval.');
+        }
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $opportunity->crm_margin_status = Opportunity::MARGIN_REJECTED;
+        $opportunity->crm_margin_reviewed_by = auth()->id();
+        $opportunity->crm_margin_reviewed_at = now();
+        $opportunity->crm_margin_note = $data['note'] ?? null;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        app(\App\Services\NotificationService::class)->notifyOpportunityMarginRejected(
+            $opportunity,
+            $data['note'] ?? null,
+        );
+
+        return back()->with('success', 'Margin opportunity ditolak. Sales mendapat notifikasi.');
+    }
+
     protected function updatePurchasingFields(Request $request, Opportunity $opportunity)
     {
         if ($opportunity->stage !== Opportunity::WON_STAGE) {
@@ -361,7 +437,7 @@ class OpportunityController extends Controller
             'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
-            'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
+            'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
         ]);
 
@@ -393,9 +469,14 @@ class OpportunityController extends Controller
         $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
         $opportunity->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
         $opportunity->syncWonMargin();
+        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+
+        if ($notifyMargin) {
+            app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+        }
 
         return redirect()->route('opportunities.show', $opportunity)
             ->with('success', 'Harga modal & vendor berhasil diperbarui.');
@@ -472,10 +553,12 @@ class OpportunityController extends Controller
             'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
-            'products.*.tax_category' => ['nullable', Rule::in([OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_NON_WAPU])],
+            'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
             'has_discount' => ['nullable', 'boolean'],
             'discount_amount' => ['nullable', 'numeric', 'min:0'],
+            'has_shipping_charge' => ['nullable', 'boolean'],
+            'shipping_sell' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         $data['has_discount'] = $request->boolean('has_discount');
@@ -483,6 +566,13 @@ class OpportunityController extends Controller
             $data['discount_amount'] = 0;
         } else {
             $data['discount_amount'] = (float) ($data['discount_amount'] ?? 0);
+        }
+
+        $data['has_shipping_charge'] = $request->boolean('has_shipping_charge');
+        if (! $data['has_shipping_charge']) {
+            $data['shipping_sell'] = null;
+        } else {
+            $data['shipping_sell'] = (float) ($data['shipping_sell'] ?? 0);
         }
 
         if (! empty($data['contact_id']) && ! empty($data['account_id'])) {
@@ -562,8 +652,15 @@ class OpportunityController extends Controller
         }
 
         $this->applyDiscountData($opportunity, $data, $isNew);
-
+        $this->applyShippingChargeData($opportunity, $data);
         $opportunity->syncWonMargin();
+    }
+
+    protected function applyShippingChargeData(Opportunity $opportunity, array $data): void
+    {
+        $has = (bool) ($data['has_shipping_charge'] ?? false);
+        $opportunity->crm_has_shipping_charge = $has;
+        $opportunity->crm_shipping_sell = $has ? (float) ($data['shipping_sell'] ?? 0) : null;
     }
 
     protected function applyDiscountData(Opportunity $opportunity, array $data, bool $isNew): void
@@ -644,8 +741,22 @@ class OpportunityController extends Controller
             $selectedTeamIds = $opportunity->teams()->pluck('team.id')->all();
         }
 
+        $accounts = $this->scopeAssigned(Account::query())
+            ->orderBy('name')
+            ->get(['id', 'name', 'crm_regency_code', 'billing_address_city', 'crm_payment_level']);
+
+        $accountMarginMeta = $accounts->mapWithKeys(function (Account $account) {
+            return [$account->id => [
+                'free_shipping' => \App\Support\FreeShippingZone::isFreeForAccount($account),
+                'min_margin_pct' => $account->minMarginPercent(),
+            ]];
+        })->all();
+
         return [
-            'accounts' => $this->scopeAssigned(Account::query())->orderBy('name')->get(['id', 'name']),
+            'accounts' => $accounts,
+            'accountMarginMeta' => $accountMarginMeta,
+            'marginNominalUmum' => \App\Support\PaymentLevel::marginNominalUmum(),
+            'marginNominalOngkirPribadi' => \App\Support\PaymentLevel::marginNominalOngkirPribadi(),
             'contacts' => Contact::query()
                 ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
                 ->orderBy('first_name')

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\OpportunityProductPricing;
+use App\Support\PurchaseOrderPricing;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -34,10 +35,11 @@ class PurchaseOrderItem extends Model
 
     /**
      * Breakdown harga per unit (modal = unit_price exclude).
-     * Cash: +1% exclude & +1% include.
+     * Tambahan % sesuai payment_term dari crm_settings (Cash/TOP).
      *
      * @return array{
      *     modal: float,
+     *     surcharge_percent: float,
      *     extra_exclude: float,
      *     jumlah_exclude: float,
      *     harga_include: float,
@@ -45,18 +47,28 @@ class PurchaseOrderItem extends Model
      *     jumlah_include: float,
      * }
      */
-    public function pricingBreakdown(?bool $isCash = null): array
+    public function pricingBreakdown(?bool $isCash = null, ?string $paymentTerm = null): array
     {
-        $isCash ??= $this->purchaseOrder?->isCash() ?? false;
+        $term = $paymentTerm
+            ?? $this->purchaseOrder?->payment_term
+            ?? PurchaseOrder::PAYMENT_TOP;
+
+        if ($isCash !== null) {
+            $term = $isCash ? PurchaseOrder::PAYMENT_CASH : PurchaseOrder::PAYMENT_TOP;
+        }
+
         $modal = round((float) $this->unit_price, 2);
-        $extraExclude = $isCash ? round($modal * 0.01, 2) : 0.0;
+        $percent = PurchaseOrderPricing::surchargePercent($term);
+        $rate = $percent / 100;
+        $extraExclude = $rate > 0 ? round($modal * $rate, 2) : 0.0;
         $jumlahExclude = round($modal + $extraExclude, 2);
         $hargaInclude = OpportunityProductPricing::includeFromExclude($modal);
-        $extraInclude = $isCash ? round($hargaInclude * 0.01, 2) : 0.0;
+        $extraInclude = $rate > 0 ? round($hargaInclude * $rate, 2) : 0.0;
         $jumlahInclude = round($hargaInclude + $extraInclude, 2);
 
         return [
             'modal' => $modal,
+            'surcharge_percent' => $percent,
             'extra_exclude' => $extraExclude,
             'jumlah_exclude' => $jumlahExclude,
             'harga_include' => $hargaInclude,

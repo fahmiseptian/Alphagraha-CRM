@@ -47,12 +47,12 @@ class DashboardController extends Controller
         }
         $quotationsCount = (clone $quotationQuery)->count();
         $activeQuotations = (clone $quotationQuery)
-            ->whereIn('status', ['sent', 'accepted'])
+            ->where('status', 'sent')
             ->with('items')
             ->get();
         $quotationsValue = $activeQuotations->sum('total');
         $quotationsMargin = $activeQuotations->sum(fn (Quotation $quotation) => $quotation->totalItemsMargin());
-        $acceptedCount = (clone $quotationQuery)->where('status', 'accepted')->count();
+        $sentCount = (clone $quotationQuery)->where('status', 'sent')->count();
 
         // Pipeline opportunity (deal) yang masih terbuka.
         $openPipeline = $this->scopeAssigned(Opportunity::query())
@@ -113,7 +113,7 @@ class DashboardController extends Controller
 
         return view('dashboard', compact(
             'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue', 'quotationsMargin',
-            'acceptedCount', 'openPipeline', 'wonThisMonth', 'stageDistribution',
+            'sentCount', 'openPipeline', 'wonThisMonth', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
             'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
             'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort'

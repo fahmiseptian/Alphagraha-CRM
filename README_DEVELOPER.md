@@ -59,6 +59,48 @@ crm_discount_status     — pending | approved | rejected
 crm_discount_*          — metadata request/review (by, at, note)
 ```
 
+### 2.2b Kolom Custom di `account`
+
+```
+crm_payment_level       — lancar | mandek | jelek | suspend (default: lancar)
+```
+
+Threshold margin per level di `crm_settings` (group `payment_level`):
+- `payment_level.margin_lancar` (default 5)
+- `payment_level.margin_mandek` (default 8)
+- `payment_level.margin_jelek` (default 15)
+- `payment_level.margin_nominal_umum` (Rp, default 0)
+- `payment_level.margin_nominal_ongkir_pribadi` (Rp, default 0)
+
+Threshold nominal opportunity (`PaymentLevel::requiredMarginNominal`):
+- Kota customer **free ongkir** → hanya Nominal Umum
+- Bukan free + checkbox ongkir jual **OFF** → Umum + Ongkir Pribadi
+- Bukan free + checkbox ongkir jual **ON** → hanya Umum
+
+### 2.2c Margin / ongkir di `opportunity`
+
+```
+crm_has_shipping_charge — checkbox ongkir jual ke customer
+crm_shipping_sell       — nominal ongkir jual (Rp)
+crm_margin_status       — null | pending | approved | rejected
+crm_margin_percent / crm_margin_threshold
+crm_margin_nominal / crm_margin_nominal_threshold
+crm_margin_*            — requested_at, reviewed_by/at, note
+```
+
+Approval margin opp: Superadmin di halaman show (`opportunities.margin.approve` / `reject`).
+Opp tetap bisa disimpan meski di bawah threshold (perlu approval).
+
+### 2.2d Margin approval di `crm_quotations`
+
+```
+crm_margin_status       — null | pending | approved | rejected
+crm_margin_percent      — snapshot % margin opportunity
+crm_margin_threshold    — snapshot minimal margin % level customer
+crm_margin_nominal / crm_margin_nominal_threshold
+crm_margin_*            — requested_at, reviewed_by/at, note
+```
+
 Array item (`item`, `quantity`, `price`, `cost`, `vendor`) tetap memakai format JSON array EspoCRM.
 
 ### 2.3 Konvensi ID & Ownership
@@ -88,11 +130,11 @@ Role disimpan di `crm_user_profiles.app_role`, bukan hanya `user.type` Espo:
 
 | Role | Konstanta | Akses utama |
 |------|-----------|-------------|
-| Superadmin | `superadmin` | Semua modul + admin panel + approve diskon |
+| Superadmin | `superadmin` | Semua modul + admin panel + approve diskon/margin |
 | Admin | `admin` | Lihat semua opportunity, buat quotation |
 | Sales | `sales` | Data assigned ke dirinya saja |
 | Purchasing | `purchasing` | Opportunity Closed Won (edit cost vendor + kelola PO) |
-| Finance | `finance` | Opportunity Closed Won (lihat margin/finance) |
+| Finance | `finance` | Opportunity Closed Won (lihat margin/finance) + edit leveling customer |
 
 Fallback legacy: `user.type === 'admin'` → superadmin, selain itu → sales.
 
@@ -101,11 +143,18 @@ Fallback legacy: `user.type === 'admin'` → superadmin, selain itu → sales.
 ```php
 $user->canCreateQuotation()
 $user->canApproveDiscount()
+$user->canApproveMargin()        // superadmin — approval margin di bawah threshold
+$user->canEditPaymentLevel()     // finance + superadmin
 $user->canViewAllOpportunities()
 $user->canEditWonCostVendor()
 $user->canManagePurchaseOrders()  // purchasing + superadmin, Closed Won
 $user->canEditCustomerContact()  // hanya superadmin
 ```
+
+**Payment level → Quotation gate:**
+- Customer `suspend` → tidak bisa create/store Quotation
+- Margin opportunity (`overallMarginPercent`) &lt; threshold level → QO tersimpan dengan `crm_margin_status=pending`; Preview/PDF/Sent terkunci sampai Superadmin approve
+- Threshold dikelola di **Settings → Margin**
 
 Middleware route admin: `->middleware('role:superadmin')` (`EnsureRole`).
 
@@ -134,11 +183,11 @@ Fitur utama:
 - Catatan internal (`OpportunityNote`).
 - **Purchase Order (PO)** — nested di detail Closed Won (`OpportunityPurchaseOrderController`):
   - 1 opportunity : banyak PO; 1 PO : banyak item bebas (tidak mengikat produk opportunity)
-  - Kondisi bayar: `payment_term` = `top` | `cash` (cash: modal +1% exclude & include)
+  - Kondisi bayar: `payment_term` = `top` | `cash`; % tambahan dari settings `po.surcharge_cash_percent` / `po.surcharge_top_percent` (default 1 / 0)
   - Ongkir: `opportunity.crm_shipping_cost` (1 opportunity = 1 ongkir), UI di area PO
   - Laporan: preview + PDF per opportunity (`PurchaseOrderReportService`) — nilai jual dari produk opp, modal dari total PO, PPh/invoice dikosongkan
-  - Field item: nama produk, qty, deskripsi, note, harga modal; kolom tampilan: 1% Exclude (cash), Jumlah Exclude, Harga Include (modal×PPN), 1% Include (cash), Jumlah Include, Subtotal
-  - `total` = Σ(qty × jumlah_exclude); jumlah_exclude = modal (+1% bila cash)
+  - Field item: nama produk, qty, deskripsi, note, harga modal; kolom tampilan: tambahan Exclude/Include (bila %), Jumlah Exclude, Harga Include, Jumlah Include, Subtotal
+  - `total` = Σ(qty × jumlah_exclude); jumlah_exclude = modal + surcharge settings
   - CRUD hanya `canManagePurchaseOrders()` + stage Closed Won
 - **Alur diskon:**
   1. Sales mengajukan diskon → `crm_discount_status = pending`
@@ -169,7 +218,6 @@ Format: `0002/KA/QO/VII/26`
 |--------|----------|
 | `draft` | Bisa diedit bebas. Snapshot revisi tidak dibuat berulang untuk draft yang belum pernah sent. |
 | `sent` | Edit memicu increment `document_revision` + simpan snapshot ke `crm_quotation_revisions`. |
-| `accepted` / `rejected` / `expired` | Terminal states |
 
 #### Template rendering
 
@@ -219,10 +267,17 @@ Placeholder utama:
 ### 4.6 Settings (Admin)
 
 **Controller:** `Admin\SettingController`  
-**Model:** `CrmSetting`
+**Model:** `CrmSetting`  
+**Menu:** satu Settings dengan sub-menu Tax / Margin / PO / Terms QO / Free Ongkir
 
-- PPN & PPH persisten di DB, fallback ke `config/crm.php`.
-- Dipakai oleh `OpportunityProductPricing::ppnPercent()` dan `pphPercent()`.
+| Sub | Route | Isi |
+|-----|-------|-----|
+| Tax | `/settings` | PPN; PPH Non Wapu Jasa; PPH Wapu Barang/Jasa; PNBP; PPH 29 |
+| Margin | `/settings/margin` | Threshold % per payment level + margin nominal (umum / ongkir pribadi) |
+| PO | `/settings/po` | Surcharge Cash % / TOP % |
+| Terms QO | `/settings/terms` | Default Terms & Conditions Quotation (`quotation.default_terms`, placeholder `{{ppn}}`) |
+| Free Ongkir | `/settings/shipping` | Kota/kab free ongkir dari master wilayah (`shipping.free_regency_codes`) |
+| Wilayah | `/settings/wilayah` | Master Provinsi/Kota/Kecamatan (sync [wilayah.id](https://wilayah.id) + tambah manual) |
 
 ---
 
@@ -232,12 +287,17 @@ Semua kalkulasi terpusat di `App\Support\OpportunityProductPricing`:
 
 | Konsep | Implementasi |
 |--------|--------------|
-| PPN | `ppnPercent()` → DB setting → config → default 11% |
-| PPH | `pphPercent()` → default 2% |
-| Exclude → Include | `includeFromExclude()` = exclude × 1.11 |
-| Include → Exclude | `excludeFromInclude()` = include ÷ 1.11 |
-| Margin | Berdasarkan sell exclude, cost exclude, PPH factor |
-| Tax category | `wapu` vs `non_wapu` per baris item |
+| PPN | `ppnPercent()` → DB → config → default 11% |
+| PPH per baris | `pphPercentFor(tax_category, item_kind)` |
+| Kategori | `non_wapu` · `wapu` · `inaproc` |
+| Non Wapu + Barang | PPN saja (PPH 0%) |
+| Non Wapu + Jasa | PPN + `tax.pph_non_wapu_jasa` (default 2%) |
+| Wapu + Barang / Jasa | PPN + 1.5% / 2% |
+| Inaproc | seperti Wapu + PNBP (dari basis) + PPH 29 (dari margin kotor) |
+| PNBP / PPH 29 | `pnbpPercent()` / `pph29Percent()` — aktif hanya Inaproc |
+| Exclude → Include | `includeFromExclude()` |
+| Margin | net setelah potongan pajak kategori − cost |
+| Terms QO | `defaultQuotationTerms()` |
 
 **Perubahan penting (Juli 2026):** Quotation dan tampilan template beralih ke terminologi **exclude PPN** (`sell_exclude`) agar konsisten dengan perhitungan margin di opportunity.
 
@@ -321,6 +381,8 @@ Commit history dari awal proyek hingga Juli 2026:
 | Jul 2026 | Role system diperluas (superadmin, purchasing, finance), discount approval workflow |
 | Jul 2026 | Notification system, tax settings (PPN/PPH), sales target period/deadline |
 | Jul 2026 | Pricing refactor: `sell_exclude` di quotation, diskon per item, akses kontak pelanggan |
+| Jul 2026 | Purchase Order (PO) pada Closed Won: multi-PO, TOP/Cash +1%, ongkir, laporan PDF |
+| Jul 2026 | Payment level customer (lancar/mandek/jelek/suspend) + margin approval Quotation |
 | Jul 2026 | Purchase Order (PO) pada Closed Won: multi-PO per opportunity, item bebas, akses purchasing/superadmin |
 
 **Commit terbaru (8e67418):**

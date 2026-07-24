@@ -16,7 +16,7 @@
     <x-stat-card title="Total Leads" :value="number_format($leadsCount)" icon="bi-funnel" color="purple"
                  :href="route('leads.index')" />
     <x-stat-card title="Total Quotations" :value="number_format($quotationsCount)" icon="bi-file-earmark-text" color="amber"
-                 :sub="$acceptedCount.' accepted'" :href="route('quotations.index')" />
+                 :sub="$sentCount.' sent'" :href="route('quotations.index')" />
     <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green"
                  :sub="money($quotationsMargin).' margin'" :href="route('quotations.index')" />
 </div>
@@ -32,15 +32,17 @@
                 </p>
                 <form method="GET" action="{{ route('dashboard') }}" class="flex flex-wrap items-center justify-end gap-1.5">
                     @if (auth()->user()->isAdmin())
-                        <select name="leaderboard_sort" onchange="this.form.submit()"
-                                class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">
+                        <select name="leaderboard_sort" data-auto-submit
+                                class="select2 select2-compact crm-leaderboard-widget__select crm-leaderboard-widget__select--sort"
+                                data-placeholder="Sort">
                             <option value="total" @selected($leaderboardSort === 'total')>Sort: Total</option>
                             <option value="margin" @selected($leaderboardSort === 'margin')>Sort: Margin</option>
                             <option value="percent" @selected($leaderboardSort === 'percent')>Sort: % Target</option>
                         </select>
                     @endif
-                    <select name="leaderboard_period" onchange="this.form.submit()"
-                            class="crm-leaderboard-widget__select">
+                    <select name="leaderboard_period" data-auto-submit
+                            class="select2 select2-compact crm-leaderboard-widget__select"
+                            data-placeholder="Period">
                         <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
                         <option value="month" @selected($leaderboardPeriod === 'month')>This Month</option>
                         <option value="alltime" @selected($leaderboardPeriod === 'alltime')>All Time</option>
@@ -134,9 +136,6 @@
                 $statusMeta = [
                     'draft' => ['Draft', 'bg-slate-400'],
                     'sent' => ['Sent', 'bg-blue-500'],
-                    'accepted' => ['Accepted', 'bg-green-500'],
-                    'rejected' => ['Rejected', 'bg-red-500'],
-                    'expired' => ['Expired', 'bg-amber-500'],
                 ];
                 $totalQuo = array_sum($quotationStatus) ?: 1;
             @endphp

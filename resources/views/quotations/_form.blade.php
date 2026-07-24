@@ -164,7 +164,7 @@
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Terms & Conditions @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
-                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? "1. Harga di atas belum termasuk PPN {$ppnPercent}%\n2. Harga dan ketersediaan barang dapat berubah sewaktu-waktu tanpa pemberitahuan terlebih dahulu.") }}</textarea>
+                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? \App\Support\OpportunityProductPricing::defaultQuotationTerms($ppnPercent)) }}</textarea>
                     </div>
                 </div>
             </x-card>
@@ -192,7 +192,11 @@
                             <input type="text" name="number" value="{{ old('number', $quotation->number) }}" readonly
                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-700">
                             @if ($quotation->hasBeenSent())
-                                <p class="mt-1 text-xs text-amber-600">Sudah pernah Sent. Perubahan isi akan menaikkan revisi dokumen (mis. -R1, -R2).</p>
+                                <p class="mt-1 text-xs text-amber-600">
+                                    Status sudah pernah <strong>Sent</strong>. Setiap perubahan isi akan otomatis menjadi revisi dokumen
+                                    ({{ $quotation->base_number ?: $quotation->number }} → …-R{{ max(1, (int) $quotation->document_revision + 1) }}…).
+                                    Draft sebelum Sent tetap bisa diedit tanpa R.
+                                </p>
                             @else
                                 <p class="mt-1 text-xs text-slate-400">Belum Sent — nomor tetap tanpa suffix revisi meski diedit.</p>
                             @endif

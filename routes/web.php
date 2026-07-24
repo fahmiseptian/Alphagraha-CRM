@@ -5,6 +5,7 @@ use App\Http\Controllers\ActivityMediaController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\TemplateController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Admin\WilayahController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\CustomerContactController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\OpportunityNoteController;
 use App\Http\Controllers\OpportunityPurchaseOrderController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuotationController;
+use App\Http\Controllers\WilayahLookupController;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 
@@ -49,6 +51,11 @@ Route::middleware('auth')->group(function () {
     Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
     Route::post('/customers/{account}/contacts', [CustomerContactController::class, 'store'])->name('customers.contacts.store');
 
+    // Lookup wilayah (DB; kecamatan lazy-sync dari API bila kosong)
+    Route::get('/wilayah/provinces', [WilayahLookupController::class, 'provinces'])->name('wilayah.provinces');
+    Route::get('/wilayah/regencies', [WilayahLookupController::class, 'regencies'])->name('wilayah.regencies');
+    Route::get('/wilayah/districts', [WilayahLookupController::class, 'districts'])->name('wilayah.districts');
+
     // Contact persons (superadmin)
     Route::middleware('role:superadmin')->group(function () {
         Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
@@ -78,6 +85,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/opportunities/{opportunity}/discount/approve', [OpportunityController::class, 'approveDiscount'])->name('opportunities.discount.approve');
     Route::post('/opportunities/{opportunity}/discount/reject', [OpportunityController::class, 'rejectDiscount'])->name('opportunities.discount.reject');
     Route::post('/opportunities/{opportunity}/discount/revert', [OpportunityController::class, 'revertDiscount'])->name('opportunities.discount.revert');
+    Route::post('/opportunities/{opportunity}/margin/approve', [OpportunityController::class, 'approveMargin'])->name('opportunities.margin.approve');
+    Route::post('/opportunities/{opportunity}/margin/reject', [OpportunityController::class, 'rejectMargin'])->name('opportunities.margin.reject');
     Route::delete('/opportunities/{opportunity}', [OpportunityController::class, 'destroy'])->name('opportunities.destroy');
     Route::post('/opportunities/{opportunity}/documents', [OpportunityDocumentController::class, 'store'])->name('opportunities.documents.store');
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
@@ -101,6 +110,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/quotations/{quotation}/revisions/{revision}/preview', [QuotationController::class, 'previewRevision'])->name('quotations.revisions.preview');
     Route::get('/quotations/{quotation}/pdf', [QuotationController::class, 'pdf'])->name('quotations.pdf');
     Route::patch('/quotations/{quotation}/status', [QuotationController::class, 'updateStatus'])->name('quotations.status');
+    Route::post('/quotations/{quotation}/margin/approve', [QuotationController::class, 'approveMargin'])->name('quotations.margin.approve');
+    Route::post('/quotations/{quotation}/margin/reject', [QuotationController::class, 'rejectMargin'])->name('quotations.margin.reject');
     Route::post('/quotations/{quotation}/duplicate', [QuotationController::class, 'duplicate'])->name('quotations.duplicate');
     Route::resource('quotations', QuotationController::class);
 
@@ -116,6 +127,20 @@ Route::middleware('auth')->group(function () {
         Route::resource('users', UserController::class)->except(['show']);
         Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');
         Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
+        Route::get('/settings/margin', [SettingController::class, 'editMargin'])->name('settings.margin.edit');
+        Route::put('/settings/margin', [SettingController::class, 'updateMargin'])->name('settings.margin.update');
+        Route::get('/settings/po', [SettingController::class, 'editPo'])->name('settings.po.edit');
+        Route::put('/settings/po', [SettingController::class, 'updatePo'])->name('settings.po.update');
+        Route::get('/settings/terms', [SettingController::class, 'editTerms'])->name('settings.terms.edit');
+        Route::put('/settings/terms', [SettingController::class, 'updateTerms'])->name('settings.terms.update');
+        Route::get('/settings/shipping', [SettingController::class, 'editShipping'])->name('settings.shipping.edit');
+        Route::put('/settings/shipping', [SettingController::class, 'updateShipping'])->name('settings.shipping.update');
+        Route::get('/settings/wilayah', [WilayahController::class, 'index'])->name('settings.wilayah.index');
+        Route::post('/settings/wilayah/sync', [WilayahController::class, 'sync'])->name('settings.wilayah.sync');
+        Route::post('/settings/wilayah/districts/sync', [WilayahController::class, 'syncDistricts'])->name('settings.wilayah.districts.sync');
+        Route::post('/settings/wilayah/provinces', [WilayahController::class, 'storeProvince'])->name('settings.wilayah.provinces.store');
+        Route::post('/settings/wilayah/regencies', [WilayahController::class, 'storeRegency'])->name('settings.wilayah.regencies.store');
+        Route::post('/settings/wilayah/districts', [WilayahController::class, 'storeDistrict'])->name('settings.wilayah.districts.store');
     });
 });
 

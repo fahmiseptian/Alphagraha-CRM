@@ -30,6 +30,7 @@ class PurchaseOrderReportService
         ), 2);
 
         $poRows = $this->buildPoRows($opportunity->purchaseOrders);
+        $hasSurcharge = $poRows->contains(fn (array $row) => ($row['surcharge_percent'] ?? 0) > 0);
         $hasCash = $poRows->contains(fn (array $row) => $row['is_cash']);
 
         // Modal = total semua Purchase Order (bukan cost dari produk opportunity).
@@ -79,6 +80,9 @@ class PurchaseOrderReportService
             'customer_name' => optional($opportunity->account)->name
                 ?: ($opportunity->company ?: '—'),
             'has_cash' => $hasCash,
+            'has_surcharge' => $hasSurcharge,
+            'surcharge_cash_percent' => \App\Support\PurchaseOrderPricing::cashSurchargePercent(),
+            'surcharge_top_percent' => \App\Support\PurchaseOrderPricing::topSurchargePercent(),
             'summary' => [
                 'nilai_jual_incl' => $nilaiJualIncl,
                 'nilai_jual_excl' => $nilaiJualExcl,
@@ -110,6 +114,7 @@ class PurchaseOrderReportService
     {
         return $purchaseOrders->values()->map(function (PurchaseOrder $po, int $index) {
             $isCash = $po->isCash();
+            $surchargePercent = \App\Support\PurchaseOrderPricing::surchargePercent($po->payment_term);
             $hargaExcl = 0.0;
             $extraExcl = 0.0;
             $jumlahExcl = 0.0;
@@ -118,7 +123,7 @@ class PurchaseOrderReportService
             $jumlahIncl = 0.0;
 
             foreach ($po->items as $item) {
-                $b = $item->pricingBreakdown($isCash);
+                $b = $item->pricingBreakdown(null, $po->payment_term);
                 $qty = (float) $item->quantity;
                 $hargaExcl += $qty * $b['modal'];
                 $extraExcl += $qty * $b['extra_exclude'];
@@ -133,6 +138,7 @@ class PurchaseOrderReportService
                 'number' => $po->number,
                 'payment_term' => $po->payment_term,
                 'is_cash' => $isCash,
+                'surcharge_percent' => $surchargePercent,
                 'harga_exclude' => round($hargaExcl, 2),
                 'extra_exclude' => round($extraExcl, 2),
                 'jumlah_exclude' => round($jumlahExcl, 2),

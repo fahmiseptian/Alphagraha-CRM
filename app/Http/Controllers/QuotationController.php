@@ -8,6 +8,7 @@ use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
 use App\Models\QuotationRevision;
 use App\Models\QuotationTemplate;
+use App\Services\NotificationService;
 use App\Support\OpportunityProductPricing;
 use App\Services\QuotationService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -21,8 +22,10 @@ class QuotationController extends Controller
 {
     use ScopesToUser;
 
-    public function __construct(protected QuotationService $service)
-    {
+    public function __construct(
+        protected QuotationService $service,
+        protected NotificationService $notifications
+    ) {
     }
 
     public function index(Request $request)
@@ -109,6 +112,11 @@ class QuotationController extends Controller
             $opportunity = $opportunity->find($opportunityId);
 
             if ($opportunity) {
+                if ($error = $this->paymentLevelBlockMessage($opportunity->account)) {
+                    return redirect()->route('opportunities.show', $opportunity)
+                        ->with('error', $error);
+                }
+
                 if ($opportunity->quotation) {
                     return redirect()->route('quotations.show', $opportunity->quotation)
                         ->with('success', 'This opportunity already has a quotation.');
@@ -165,6 +173,11 @@ class QuotationController extends Controller
         elseif ($accountId = $request->get('account_id')) {
             $account = $this->scopeAssigned(Account::query())->find($accountId);
             if ($account) {
+                if ($error = $this->paymentLevelBlockMessage($account)) {
+                    return redirect()->route('customers.show', $account->id)
+                        ->with('error', $error);
+                }
+
                 $quotation->account_id = $account->id;
                 $quotation->customer_name = $account->name;
                 $quotation->company_name = $account->name;
@@ -190,6 +203,10 @@ class QuotationController extends Controller
 
         $data = $this->validateData($request);
 
+        if ($error = $this->paymentLevelBlockForPayload($data)) {
+            return back()->withInput()->with('error', $error);
+        }
+
         try {
             $quotation = DB::transaction(function () use ($data) {
                 $salesContext = $this->service->resolveSalesCodeContext(
@@ -210,9 +227,15 @@ class QuotationController extends Controller
                 // Pemilik dokumen = sales assign opportunity (bukan admin yang membantu membuat).
                 $quotation->created_by = $salesContext['user']?->id ?: auth()->id();
                 $quotation->revision = 1;
-                if (($data['status'] ?? '') === 'sent') {
+
+                $becamePending = $this->applyMarginApprovalState($quotation, isNew: true);
+                if ($quotation->isMarginLocked() && ($data['status'] ?? '') === 'sent') {
+                    $quotation->status = 'draft';
+                    $quotation->sent_at = null;
+                } elseif (($data['status'] ?? '') === 'sent') {
                     $quotation->sent_at = now();
                 }
+
                 $quotation->save();
 
                 $this->syncItems($quotation, $data['items']);
@@ -222,14 +245,23 @@ class QuotationController extends Controller
 
                 $this->snapshotRevision($quotation, 'Quotation created');
 
+                if ($becamePending) {
+                    $this->notifications->notifyMarginRequested($quotation);
+                }
+
                 return $quotation;
             });
         } catch (\RuntimeException $e) {
             return back()->withInput()->with('error', $e->getMessage());
         }
 
+        $msg = 'Quotation ' . $quotation->number . ' created successfully.';
+        if ($quotation->marginNeedsApproval()) {
+            $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';
+        }
+
         return redirect()->route('quotations.show', $quotation)
-            ->with('success', 'Quotation ' . $quotation->number . ' created successfully.');
+            ->with('success', $msg);
     }
 
     public function show(Quotation $quotation)
@@ -259,7 +291,14 @@ class QuotationController extends Controller
         $this->authorizeAccess($quotation);
         $data = $this->validateData($request, $quotation);
 
-        $result = DB::transaction(function () use ($quotation, $data) {
+        if ($error = $this->paymentLevelBlockForPayload($data, $quotation)) {
+            return back()->withInput()->with('error', $error);
+        }
+
+        $becamePending = false;
+        $becameRevision = false;
+
+        $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision) {
             $before = $this->contentFingerprint($quotation);
             $wasSent = $quotation->hasBeenSent();
 
@@ -267,7 +306,14 @@ class QuotationController extends Controller
             unset($data['number']);
 
             $quotation->fill($data);
-            if (($data['status'] ?? '') === 'sent' && ! $quotation->sent_at) {
+            $becamePending = $this->applyMarginApprovalState($quotation, isNew: false);
+
+            if ($quotation->isMarginLocked() && ($data['status'] ?? '') === 'sent') {
+                $quotation->status = $wasSent ? $quotation->getOriginal('status') : 'draft';
+                if (! $wasSent) {
+                    $quotation->sent_at = null;
+                }
+            } elseif (($data['status'] ?? '') === 'sent' && ! $quotation->sent_at) {
                 $quotation->sent_at = now();
             }
             $quotation->save();
@@ -277,42 +323,38 @@ class QuotationController extends Controller
             $quotation->recalculateTotals();
             $quotation->save();
 
-            $changed = $before !== $this->contentFingerprint($quotation);
+            $after = $this->contentFingerprint($quotation->fresh(['items']));
+            $contentChanged = $before !== $after;
 
-            if (! $changed) {
-                return ['changed' => false, 'document_revision' => (int) $quotation->document_revision];
-            }
-
-            // Masih draft (belum pernah sent): jangan buat histori revisi baru.
-            // Cukup overwrite snapshot tunggal agar tetap satu QO.
-            if (! $wasSent) {
+            if ($wasSent && $contentChanged) {
+                $quotation->document_revision = (int) $quotation->document_revision + 1;
+                $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
+                $quotation->base_number = $base;
+                $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
+                $quotation->revision = (int) $quotation->revision + 1;
+                $quotation->save();
+                $this->snapshotRevision($quotation, 'Revisi dokumen R'.$quotation->document_revision);
+                $becameRevision = true;
+            } elseif (! $wasSent) {
                 $this->refreshDraftSnapshot($quotation);
-
-                return ['changed' => true, 'document_revision' => 0, 'is_revision' => false];
             }
 
-            $quotation->document_revision = (int) $quotation->document_revision + 1;
-            $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
-            $quotation->base_number = $base;
-            $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
-            $quotation->revision = (int) $quotation->revision + 1;
-            $quotation->save();
-
-            $this->snapshotRevision($quotation, 'Revisi dokumen R'.$quotation->document_revision);
-
-            return ['changed' => true, 'document_revision' => (int) $quotation->document_revision, 'is_revision' => true];
+            return $quotation;
         });
 
-        if (! $result['changed']) {
-            return redirect()->route('quotations.show', $quotation)
-                ->with('success', 'Tidak ada perubahan pada quotation.');
+        if ($becamePending) {
+            $this->notifications->notifyMarginRequested($result);
         }
 
-        $msg = ! empty($result['is_revision'])
-            ? 'Quotation diperbarui menjadi '.$quotation->fresh()->number.'.'
-            : 'Quotation updated successfully.';
+        $msg = 'Quotation updated successfully.';
+        if ($becameRevision) {
+            $msg = 'Quotation diperbarui sebagai revisi dokumen R'.$result->document_revision.' ('.$result->number.').';
+        }
+        if ($result->marginNeedsApproval()) {
+            $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';
+        }
 
-        return redirect()->route('quotations.show', $quotation)->with('success', $msg);
+        return redirect()->route('quotations.show', $result)->with('success', $msg);
     }
 
     public function destroy(Quotation $quotation)
@@ -326,6 +368,7 @@ class QuotationController extends Controller
     public function preview(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureMarginUnlocked($quotation);
         $this->ensureCreatorSignature($quotation);
 
         $template = $this->resolveTemplate($quotation);
@@ -337,6 +380,7 @@ class QuotationController extends Controller
     public function pdf(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureMarginUnlocked($quotation);
         $this->ensureCreatorSignature($quotation);
 
         $template = $this->resolveTemplate($quotation);
@@ -359,6 +403,10 @@ class QuotationController extends Controller
             'status' => ['required', Rule::in(array_keys(Quotation::STATUSES))],
         ]);
 
+        if ($data['status'] === 'sent' && $quotation->isMarginLocked() && ! auth()->user()?->canApproveMargin()) {
+            return back()->with('error', 'Quotation terkunci: margin menunggu / ditolak approval Superadmin.');
+        }
+
         $quotation->status = $data['status'];
         if ($data['status'] === 'sent' && ! $quotation->sent_at) {
             $quotation->sent_at = now();
@@ -366,6 +414,60 @@ class QuotationController extends Controller
         $quotation->save();
 
         return back()->with('success', 'Quotation status updated to "' . $quotation->statusLabel() . '".');
+    }
+
+    public function approveMargin(Request $request, Quotation $quotation)
+    {
+        $this->authorizeAccess($quotation);
+
+        if (! auth()->user()?->canApproveMargin()) {
+            abort(403, 'Hanya Superadmin yang dapat approve margin.');
+        }
+
+        if ($quotation->crm_margin_status !== Quotation::MARGIN_PENDING) {
+            return back()->with('error', 'Quotation ini tidak menunggu approval margin.');
+        }
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $quotation->crm_margin_status = Quotation::MARGIN_APPROVED;
+        $quotation->crm_margin_reviewed_by = auth()->id();
+        $quotation->crm_margin_reviewed_at = now();
+        $quotation->crm_margin_note = $data['note'] ?? null;
+        $quotation->save();
+
+        $this->notifications->notifyMarginApproved($quotation, $data['note'] ?? null);
+
+        return back()->with('success', 'Margin quotation disetujui.');
+    }
+
+    public function rejectMargin(Request $request, Quotation $quotation)
+    {
+        $this->authorizeAccess($quotation);
+
+        if (! auth()->user()?->canApproveMargin()) {
+            abort(403, 'Hanya Superadmin yang dapat menolak margin.');
+        }
+
+        if ($quotation->crm_margin_status !== Quotation::MARGIN_PENDING) {
+            return back()->with('error', 'Quotation ini tidak menunggu approval margin.');
+        }
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $quotation->crm_margin_status = Quotation::MARGIN_REJECTED;
+        $quotation->crm_margin_reviewed_by = auth()->id();
+        $quotation->crm_margin_reviewed_at = now();
+        $quotation->crm_margin_note = $data['note'] ?? null;
+        $quotation->save();
+
+        $this->notifications->notifyMarginRejected($quotation, $data['note'] ?? null);
+
+        return back()->with('success', 'Margin quotation ditolak.');
     }
 
     public function previewRevision(Quotation $quotation, QuotationRevision $revision)
@@ -401,6 +503,13 @@ class QuotationController extends Controller
                 $copy->created_by = auth()->id();
                 $copy->quotation_date = now()->toDateString();
                 $copy->opportunity_id = null;
+                $copy->crm_margin_status = null;
+                $copy->crm_margin_percent = null;
+                $copy->crm_margin_threshold = null;
+                $copy->crm_margin_requested_at = null;
+                $copy->crm_margin_reviewed_by = null;
+                $copy->crm_margin_reviewed_at = null;
+                $copy->crm_margin_note = null;
                 $copy->save();
 
                 foreach ($quotation->items as $item) {
@@ -759,5 +868,117 @@ class QuotationController extends Controller
         if (! $this->isAdmin() && $quotation->created_by !== auth()->id()) {
             abort(403, 'You do not have access to this quotation.');
         }
+    }
+
+    protected function paymentLevelBlockMessage(?Account $account): ?string
+    {
+        if (! $account) {
+            return null;
+        }
+
+        if ($account->isPaymentSuspended()) {
+            return 'Customer "'.$account->name.'" berstatus Suspend — tidak dapat membuat Quotation.';
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    protected function paymentLevelBlockForPayload(array $data, ?Quotation $existing = null): ?string
+    {
+        $account = null;
+
+        if (! empty($data['account_id'])) {
+            $account = Account::query()->find($data['account_id']);
+        } elseif (! empty($data['opportunity_id'])) {
+            $account = Opportunity::query()->with('account')->find($data['opportunity_id'])?->account;
+        } elseif ($existing) {
+            $existing->loadMissing(['account', 'opportunity.account']);
+            $account = $existing->account ?: $existing->opportunity?->account;
+        }
+
+        return $this->paymentLevelBlockMessage($account);
+    }
+
+    /**
+     * Evaluasi margin opportunity vs threshold level customer.
+     * Return true jika baru masuk status pending (untuk trigger notifikasi).
+     */
+    protected function applyMarginApprovalState(Quotation $quotation, bool $isNew): bool
+    {
+        $quotation->loadMissing(['account', 'opportunity.account']);
+        $account = $quotation->account ?: $quotation->opportunity?->account;
+        $opportunity = $quotation->opportunity;
+
+        if (! $account || ! $opportunity) {
+            $quotation->crm_margin_status = null;
+            $quotation->crm_margin_percent = null;
+            $quotation->crm_margin_threshold = null;
+            $quotation->crm_margin_nominal = null;
+            $quotation->crm_margin_nominal_threshold = null;
+
+            return false;
+        }
+
+        $pctThreshold = $account->minMarginPercent();
+        $marginPct = $opportunity->overallMarginPercent();
+        $marginNominal = $opportunity->totalProductsMargin();
+        $nominalThreshold = $opportunity->requiredMarginNominalThreshold();
+
+        $quotation->crm_margin_percent = $marginPct;
+        $quotation->crm_margin_threshold = $pctThreshold;
+        $quotation->crm_margin_nominal = $marginNominal;
+        $quotation->crm_margin_nominal_threshold = $nominalThreshold;
+
+        // Suspend: gate pembayaran sudah di-block sebelumnya.
+        $belowPct = $pctThreshold !== null && ($marginPct === null || $marginPct < $pctThreshold);
+        $belowNominal = $nominalThreshold > 0 && $marginNominal < $nominalThreshold;
+        $below = $belowPct || $belowNominal;
+
+        $wasPending = $quotation->crm_margin_status === Quotation::MARGIN_PENDING;
+        $wasApproved = $quotation->crm_margin_status === Quotation::MARGIN_APPROVED;
+
+        if (! $below) {
+            $quotation->crm_margin_status = null;
+            $quotation->crm_margin_requested_at = null;
+            $quotation->crm_margin_reviewed_by = null;
+            $quotation->crm_margin_reviewed_at = null;
+            $quotation->crm_margin_note = null;
+
+            return false;
+        }
+
+        // Sudah approved: biarkan tetap approved (kecuali create baru).
+        if (! $isNew && $wasApproved) {
+            return false;
+        }
+
+        $quotation->crm_margin_status = Quotation::MARGIN_PENDING;
+        if (! $quotation->crm_margin_requested_at || ! $wasPending) {
+            $quotation->crm_margin_requested_at = now();
+        }
+        $quotation->crm_margin_reviewed_by = null;
+        $quotation->crm_margin_reviewed_at = null;
+
+        return ! $wasPending;
+    }
+
+    protected function ensureMarginUnlocked(Quotation $quotation): void
+    {
+        if (! $quotation->isMarginLocked()) {
+            return;
+        }
+
+        if (auth()->user()?->canApproveMargin()) {
+            return;
+        }
+
+        $message = 'Quotation terkunci: '.$quotation->marginStatusLabel().'. Hubungi Superadmin untuk approval.';
+
+        throw new HttpResponseException(
+            redirect()->route('quotations.show', $quotation)->with('error', $message)
+        );
     }
 }

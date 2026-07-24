@@ -143,10 +143,10 @@
                 <th rowspan="2" class="col-no">NO</th>
                 <th rowspan="2" class="col-po">PO</th>
                 <th>HARGA EXCL</th>
-                <th>TAMBAHAN 1%</th>
+                <th>TAMBAHAN</th>
                 <th>JUMLAH</th>
                 <th>HARGA INCL</th>
-                <th>TAMBAHAN 1%</th>
+                <th>TAMBAHAN</th>
                 <th>JUMLAH</th>
             </tr>
             <tr>
@@ -191,7 +191,15 @@
         </tfoot>
     </table>
 
-    @if ($report['has_cash'])
-        <p class="po-note"><strong>Note :</strong> di perhitungan modal ditambah 1% karena pembayaran menggunakan cash</p>
+    @if ($report['has_surcharge'] ?? $report['has_cash'] ?? false)
+        @php
+            $cashPct = rtrim(rtrim(number_format((float) ($report['surcharge_cash_percent'] ?? 1), 2, ',', '.'), '0'), ',');
+            $topPct = rtrim(rtrim(number_format((float) ($report['surcharge_top_percent'] ?? 0), 2, ',', '.'), '0'), ',');
+        @endphp
+        <p class="po-note">
+            <strong>Note :</strong>
+            biaya tambahan modal sesuai setting —
+            Cash +{{ $cashPct }}%, TOP +{{ $topPct }}%.
+        </p>
     @endif
 </div>

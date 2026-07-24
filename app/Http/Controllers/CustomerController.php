@@ -5,7 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Account;
 use App\Models\Espo\EspoUser;
+use App\Models\WilayahDistrict;
+use App\Models\WilayahProvince;
+use App\Models\WilayahRegency;
 use App\Services\EspoEntityWriter;
+use App\Support\PaymentLevel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
@@ -144,7 +148,13 @@ class CustomerController extends Controller
 
     protected function validateData(Request $request): array
     {
-        return $request->validate([
+        $request->merge([
+            'crm_province_code' => $request->filled('crm_province_code') ? $request->input('crm_province_code') : null,
+            'crm_regency_code' => $request->filled('crm_regency_code') ? $request->input('crm_regency_code') : null,
+            'crm_district_code' => $request->filled('crm_district_code') ? $request->input('crm_district_code') : null,
+        ]);
+
+        $rules = [
             'name' => ['required', 'string', 'max:255'],
             'type' => ['nullable', 'string', 'max:255'],
             'industry' => ['nullable', 'string', 'max:255'],
@@ -152,13 +162,49 @@ class CustomerController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
             'billing_address_street' => ['nullable', 'string', 'max:255'],
-            'billing_address_city' => ['nullable', 'string', 'max:100'],
-            'billing_address_state' => ['nullable', 'string', 'max:100'],
-            'billing_address_country' => ['nullable', 'string', 'max:100'],
+            'crm_province_code' => ['nullable', 'string', 'max:10', Rule::exists('crm_wilayah_provinces', 'code')],
+            'crm_regency_code' => ['nullable', 'string', 'max:10', Rule::exists('crm_wilayah_regencies', 'code')],
+            'crm_district_code' => ['nullable', 'string', 'max:15', Rule::exists('crm_wilayah_districts', 'code')],
             'billing_address_postal_code' => ['nullable', 'string', 'max:20'],
+            'billing_address_country' => ['nullable', 'string', 'max:100'],
             'description' => ['nullable', 'string'],
             'assigned_user_id' => ['nullable', 'string', Rule::exists('user', 'id')->where('deleted', 0)],
-        ]);
+        ];
+
+        if (auth()->user()?->canEditPaymentLevel()) {
+            $rules['crm_payment_level'] = ['required', Rule::in(PaymentLevel::LEVELS)];
+        }
+
+        $data = $request->validate($rules);
+
+        // Isi nama alamat dari master wilayah (state=provinsi, city=kota, district=kecamatan).
+        $province = ! empty($data['crm_province_code'])
+            ? WilayahProvince::query()->find($data['crm_province_code'])
+            : null;
+        $regency = ! empty($data['crm_regency_code'])
+            ? WilayahRegency::query()->find($data['crm_regency_code'])
+            : null;
+        $district = ! empty($data['crm_district_code'])
+            ? WilayahDistrict::query()->find($data['crm_district_code'])
+            : null;
+
+        if ($regency && $province && $regency->province_code !== $province->code) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'crm_regency_code' => 'Kota/kabupaten tidak sesuai dengan provinsi.',
+            ]);
+        }
+        if ($district && $regency && $district->regency_code !== $regency->code) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'crm_district_code' => 'Kecamatan tidak sesuai dengan kota/kabupaten.',
+            ]);
+        }
+
+        $data['billing_address_state'] = $province?->name;
+        $data['billing_address_city'] = $regency?->name;
+        $data['crm_billing_district'] = $district?->name;
+        $data['billing_address_country'] = $data['billing_address_country'] ?: 'Indonesia';
+
+        return $data;
     }
 
     protected function applyValidatedData(Account $account, array $data, bool $isNew = false): void
@@ -173,8 +219,18 @@ class CustomerController extends Controller
             'billing_address_state' => $data['billing_address_state'] ?? null,
             'billing_address_country' => $data['billing_address_country'] ?? null,
             'billing_address_postal_code' => $data['billing_address_postal_code'] ?? null,
+            'crm_province_code' => $data['crm_province_code'] ?? null,
+            'crm_regency_code' => $data['crm_regency_code'] ?? null,
+            'crm_district_code' => $data['crm_district_code'] ?? null,
+            'crm_billing_district' => $data['crm_billing_district'] ?? null,
             'description' => $data['description'] ?? null,
         ]);
+
+        if (auth()->user()?->canEditPaymentLevel() && isset($data['crm_payment_level'])) {
+            $account->crm_payment_level = $data['crm_payment_level'];
+        } elseif ($isNew && ! $account->crm_payment_level) {
+            $account->crm_payment_level = PaymentLevel::LANCAR;
+        }
 
         if ($this->isAdmin()) {
             $account->assigned_user_id = ($data['assigned_user_id'] ?? null) ?: null;
@@ -187,7 +243,9 @@ class CustomerController extends Controller
     {
         return [
             'types' => Account::TYPES,
+            'paymentLevels' => PaymentLevel::LABELS,
             'salesUsers' => EspoUser::query()->activeRegular()->orderBy('name')->get(),
+            'provinces' => WilayahProvince::query()->orderBy('name')->get(['code', 'name']),
         ];
     }
 }

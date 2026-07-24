@@ -151,6 +151,16 @@ class User extends Authenticatable
         return $this->isSuperAdmin();
     }
 
+    public function canApproveMargin(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canEditPaymentLevel(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin();
+    }
+
     public function canEditWonCostVendor(): bool
     {
         return $this->isPurchasing() || $this->isSuperAdmin();

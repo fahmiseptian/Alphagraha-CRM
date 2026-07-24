@@ -16,7 +16,19 @@
                 </span>
                 <div>
                     <h2 class="text-lg font-semibold text-slate-800">{{ $account->name }}</h2>
-                    @if ($account->type)<x-badge color="slate">{{ $account->type }}</x-badge>@endif
+                    <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                        @if ($account->type)<x-badge color="slate">{{ $account->type }}</x-badge>@endif
+                        @php
+                            $levelColor = match ($account->paymentLevel()) {
+                                'lancar' => 'green',
+                                'mandek' => 'amber',
+                                'jelek' => 'rose',
+                                'suspend' => 'red',
+                                default => 'slate',
+                            };
+                        @endphp
+                        <x-badge :color="$levelColor">{{ $account->paymentLevelLabel() }}</x-badge>
+                    </div>
                 </div>
             </div>
 
@@ -27,6 +39,7 @@
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-building mr-1"></i>Industry</dt><dd class="text-slate-700">{{ $account->industry ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-person mr-1"></i>Sales</dt><dd class="text-slate-700">{{ optional($account->assignedUser)->display_name ?: '—' }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-cash-coin mr-1"></i>Level</dt><dd class="text-slate-700">{{ $account->paymentLevelLabel() }}@if ($account->minMarginPercent() !== null) <span class="text-xs text-slate-400">(min margin {{ number_format($account->minMarginPercent(), 0) }}%)</span>@endif</dd></div>
             </dl>
 
             <div class="mt-5 flex flex-wrap gap-2">
@@ -36,9 +49,15 @@
                 <a href="{{ route('opportunities.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-brand-700">
                     <i class="bi bi-briefcase"></i> Opportunity
                 </a>
-                <a href="{{ route('quotations.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-center text-sm font-medium text-brand-700 hover:bg-brand-100">
-                    <i class="bi bi-file-earmark-plus"></i> Quotation
-                </a>
+                @if (! $account->isPaymentSuspended())
+                    <a href="{{ route('quotations.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-center text-sm font-medium text-brand-700 hover:bg-brand-100">
+                        <i class="bi bi-file-earmark-plus"></i> Quotation
+                    </a>
+                @else
+                    <span class="flex-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-sm font-medium text-red-700" title="Customer Suspend">
+                        <i class="bi bi-lock"></i> Suspend
+                    </span>
+                @endif
                 <a href="{{ route('activities.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-center text-sm font-medium text-slate-600 hover:bg-slate-50">
                     <i class="bi bi-calendar-plus"></i> Activity
                 </a>

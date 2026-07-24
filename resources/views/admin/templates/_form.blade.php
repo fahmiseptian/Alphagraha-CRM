@@ -38,7 +38,7 @@
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Kategori Perusahaan <span class="text-red-500">*</span></label>
                         <select name="category" required
-                                class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                                class="select2 w-full" data-placeholder="— Pilih kategori —">
                             <option value="">— Pilih kategori —</option>
                             @foreach (\App\Models\QuotationTemplate::CATEGORIES as $category)
                                 <option value="{{ $category }}" @selected(old('category', $template->category) === $category)>{{ $category }}</option>

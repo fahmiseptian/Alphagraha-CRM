@@ -131,12 +131,53 @@
                     </div>
                 </div>
 
-                <a href="{{ route('settings.edit') }}"
-                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
-                          {{ request()->routeIs('settings.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-percent text-base"></i>
-                    <span>Tax Settings</span>
-                </a>
+                <div x-data="{ open: {{ request()->routeIs('settings.*') ? 'true' : 'false' }} }" class="space-y-0.5">
+                    <button type="button" @click="open = !open"
+                            class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
+                                   {{ request()->routeIs('settings.*') ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                        <i class="bi bi-gear text-base"></i>
+                        <span class="flex-1 text-left">Settings</span>
+                        <i class="bi text-xs transition-transform" :class="open ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
+                    </button>
+                    <div x-show="open" x-cloak class="ml-3 space-y-0.5 border-l border-white/10 pl-3">
+                        <a href="{{ route('settings.edit') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.edit') || request()->routeIs('settings.update') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-percent text-xs"></i>
+                            <span>Tax</span>
+                        </a>
+                        <a href="{{ route('settings.margin.edit') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.margin.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-graph-up-arrow text-xs"></i>
+                            <span>Margin</span>
+                        </a>
+                        <a href="{{ route('settings.po.edit') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.po.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-cart-check text-xs"></i>
+                            <span>PO</span>
+                        </a>
+                        <a href="{{ route('settings.terms.edit') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.terms.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-file-text text-xs"></i>
+                            <span>Terms QO</span>
+                        </a>
+                        <a href="{{ route('settings.shipping.edit') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.shipping.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-truck text-xs"></i>
+                            <span>Free Ongkir</span>
+                        </a>
+                        <a href="{{ route('settings.wilayah.index') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.wilayah.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-geo-alt text-xs"></i>
+                            <span>Wilayah</span>
+                        </a>
+                    </div>
+                </div>
             @endif
         </nav>
     </aside>

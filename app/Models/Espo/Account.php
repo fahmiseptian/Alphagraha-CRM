@@ -5,6 +5,7 @@ namespace App\Models\Espo;
 use App\Models\Activity;
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\Quotation;
+use App\Support\PaymentLevel;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -22,6 +23,8 @@ class Account extends Model
         'name', 'type', 'industry', 'website', 'description',
         'billing_address_street', 'billing_address_city', 'billing_address_state',
         'billing_address_country', 'billing_address_postal_code', 'assigned_user_id',
+        'crm_payment_level',
+        'crm_province_code', 'crm_regency_code', 'crm_district_code', 'crm_billing_district',
     ];
 
     public const TYPES = ['Customer', 'Reseller', 'Partner'];
@@ -29,6 +32,31 @@ class Account extends Model
     public function espoEntityType(): string
     {
         return 'Account';
+    }
+
+    public function paymentLevel(): string
+    {
+        $level = (string) ($this->crm_payment_level ?: PaymentLevel::LANCAR);
+
+        return PaymentLevel::isValid($level) ? $level : PaymentLevel::LANCAR;
+    }
+
+    public function paymentLevelLabel(): string
+    {
+        return PaymentLevel::label($this->paymentLevel());
+    }
+
+    public function isPaymentSuspended(): bool
+    {
+        return PaymentLevel::isSuspended($this->paymentLevel());
+    }
+
+    /**
+     * Minimal margin (%) untuk level ini. Null bila Suspend.
+     */
+    public function minMarginPercent(): ?float
+    {
+        return PaymentLevel::minMarginPercent($this->paymentLevel());
     }
 
     public function contacts(): HasMany
@@ -60,6 +88,7 @@ class Account extends Model
     {
         $parts = array_filter([
             $this->billing_address_street,
+            $this->crm_billing_district,
             $this->billing_address_city,
             $this->billing_address_state,
             $this->billing_address_postal_code,
