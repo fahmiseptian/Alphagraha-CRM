@@ -64,21 +64,74 @@
             </div>
         </x-card>
 
-        <x-card title="Contact Persons">
+        <x-card title="Contact Persons (PIC)">
         @if ($contacts->count())
-            <ul class="space-y-3">
+            <ul class="space-y-3" x-data="{ editingId: @js(old('editing_contact_id')) }">
                 @foreach ($contacts as $contact)
-                    <li class="flex items-start gap-3">
-                        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ initials($contact->full_name) }}</span>
-                        <div class="min-w-0 flex-1">
-                            <p class="text-sm font-medium text-slate-800">{{ $contact->full_name }}</p>
-                            <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
-                            @if ($contact->phone)
-                                <p class="text-xs text-slate-400"><i class="bi bi-telephone mr-0.5"></i>{{ $contact->phone }}</p>
+                    <li class="rounded-lg border border-slate-100 p-3">
+                        <div class="flex items-start gap-3" x-show="editingId !== '{{ $contact->id }}'">
+                            <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ initials($contact->full_name) }}</span>
+                            <div class="min-w-0 flex-1">
+                                <p class="text-sm font-medium text-slate-800">{{ $contact->full_name }}</p>
+                                @if ($contact->job_role)
+                                    <p class="text-xs font-medium text-brand-600">{{ $contact->job_role }}</p>
+                                @endif
+                                <p class="text-xs text-slate-400">{{ $contact->email ?: '—' }}</p>
+                                @if ($contact->phone)
+                                    <p class="text-xs text-slate-400"><i class="bi bi-telephone mr-0.5"></i>{{ $contact->phone }}</p>
+                                @endif
+                            </div>
+                            @if (auth()->user()->canEditCustomerContact())
+                                <button type="button" @click="editingId = '{{ $contact->id }}'" class="crm-icon-btn shrink-0" title="Edit PIC">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
                             @endif
                         </div>
+
                         @if (auth()->user()->canEditCustomerContact())
-                            <a href="{{ route('contacts.edit', $contact->id) }}" class="crm-icon-btn shrink-0" title="Edit contact"><i class="bi bi-pencil"></i></a>
+                            <form x-show="editingId === '{{ $contact->id }}'" x-cloak
+                                  method="POST" action="{{ route('customers.contacts.update', [$account->id, $contact->id]) }}"
+                                  class="space-y-3">
+                                @csrf
+                                @method('PUT')
+                                <input type="hidden" name="editing_contact_id" value="{{ $contact->id }}">
+                                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <label class="crm-label">First Name <span class="text-red-500">*</span></label>
+                                        <input type="text" name="first_name"
+                                               value="{{ old('editing_contact_id') === $contact->id ? old('first_name', $contact->first_name) : $contact->first_name }}"
+                                               required class="crm-field">
+                                    </div>
+                                    <div>
+                                        <label class="crm-label">Last Name</label>
+                                        <input type="text" name="last_name"
+                                               value="{{ old('editing_contact_id') === $contact->id ? old('last_name', $contact->last_name) : $contact->last_name }}"
+                                               class="crm-field">
+                                    </div>
+                                    <div class="sm:col-span-2">
+                                        <label class="crm-label">Job Role</label>
+                                        <input type="text" name="job_role"
+                                               value="{{ old('editing_contact_id') === $contact->id ? old('job_role', $contact->job_role) : $contact->job_role }}"
+                                               placeholder="Contoh: Purchasing, IT Manager" class="crm-field">
+                                    </div>
+                                    <div>
+                                        <label class="crm-label">Email</label>
+                                        <input type="email" name="email"
+                                               value="{{ old('editing_contact_id') === $contact->id ? old('email', $contact->email) : $contact->email }}"
+                                               class="crm-field">
+                                    </div>
+                                    <div>
+                                        <label class="crm-label">Phone</label>
+                                        <input type="text" name="phone"
+                                               value="{{ old('editing_contact_id') === $contact->id ? old('phone', $contact->phone) : $contact->phone }}"
+                                               class="crm-field">
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <x-btn type="submit" variant="primary" icon="bi-save">Simpan PIC</x-btn>
+                                    <button type="button" @click="editingId = null" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Batal</button>
+                                </div>
+                            </form>
                         @endif
                     </li>
                 @endforeach
@@ -97,19 +150,23 @@
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
                             <label class="crm-label">First Name <span class="text-red-500">*</span></label>
-                            <input type="text" name="first_name" value="{{ old('first_name') }}" required class="crm-field">
+                            <input type="text" name="first_name" value="{{ old('editing_contact_id') ? '' : old('first_name') }}" required class="crm-field">
                         </div>
                         <div>
                             <label class="crm-label">Last Name</label>
-                            <input type="text" name="last_name" value="{{ old('last_name') }}" class="crm-field">
+                            <input type="text" name="last_name" value="{{ old('editing_contact_id') ? '' : old('last_name') }}" class="crm-field">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="crm-label">Job Role</label>
+                            <input type="text" name="job_role" value="{{ old('editing_contact_id') ? '' : old('job_role') }}" placeholder="Contoh: Purchasing, IT Manager" class="crm-field">
                         </div>
                         <div>
                             <label class="crm-label">Email</label>
-                            <input type="email" name="email" value="{{ old('email') }}" class="crm-field">
+                            <input type="email" name="email" value="{{ old('editing_contact_id') ? '' : old('email') }}" class="crm-field">
                         </div>
                         <div>
                             <label class="crm-label">Phone</label>
-                            <input type="text" name="phone" value="{{ old('phone') }}" class="crm-field">
+                            <input type="text" name="phone" value="{{ old('editing_contact_id') ? '' : old('phone') }}" class="crm-field">
                         </div>
                     </div>
                     <x-btn type="submit" variant="secondary" icon="bi-person-plus">Add Contact</x-btn>

@@ -137,7 +137,7 @@ class Opportunity extends Model implements HasMedia
 
     /** Jenis pengadaan EspoCRM (kolom type). */
     public const TYPES = [
-        'Quatation', 'PL', 'E-Purchasing', 'Tender', 'E-Auction',
+        'Quotation', 'PL', 'E-Purchasing', 'Tender', 'E-Auction',
         'Tender Cepat', 'Siplah', 'Bela Pengadaan', 'Simpel',
     ];
 

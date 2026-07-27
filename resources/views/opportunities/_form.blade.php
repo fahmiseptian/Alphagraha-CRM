@@ -94,8 +94,8 @@
                                class="crm-field" @readonly($purchasingMode)>
                     </div>
                     <div class="sm:col-span-2">
-                        <label class="crm-label">Account</label>
-                        <select name="account_id" class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
+                        <label class="crm-label">Customer Name</label>
+                        <select name="account_id" class="select2 select2-search w-full" data-placeholder="Cari customer..." @disabled($purchasingMode)>
                             <option value="">— Select —</option>
                             @foreach ($accounts as $acc)
                                 <option value="{{ $acc->id }}" @selected(old('account_id', $opportunity->account_id) === $acc->id)>{{ $acc->name }}</option>
@@ -105,11 +105,11 @@
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Contact</label>
-                        <select name="contact_id" class="select2 w-full" data-placeholder="Select account first" :disabled="!accountId || purchasingMode">
+                        <select name="contact_id" class="select2 select2-search w-full" data-placeholder="Select customer first" :disabled="!accountId || purchasingMode">
                             <option value="">— No contact —</option>
                         </select>
                         @if ($purchasingMode)<input type="hidden" name="contact_id" value="{{ $opportunity->contact_id }}">@endif
-                        <p class="mt-1 text-xs text-slate-400" x-show="accountId && !purchasingMode">Auto-filled from account. You can clear or pick another contact.</p>
+                        <p class="mt-1 text-xs text-slate-400" x-show="accountId && !purchasingMode">Auto-filled from customer. You can clear or pick another contact.</p>
                     </div>
                     <div class="sm:col-span-2">
                         <label class="crm-label">Lead Source</label>
@@ -222,17 +222,17 @@
                                             <option value="jasa">Jasa</option>
                                         </select>
                                     </div>
-                                    <div class="sm:col-span-5">
+                                    <div class="sm:col-span-4">
                                         <label class="crm-label text-xs">Item</label>
                                         <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
-                                    <div class="sm:col-span-1">
+                                    <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Qty</label>
                                         <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity"
                                                @input="refreshDiscountFromMargin()"
-                                               class="crm-field w-full text-right" :readonly="purchasingMode">
+                                               class="crm-field w-full min-w-[5.5rem] text-right tabular-nums" :readonly="purchasingMode">
                                     </div>
-                                    <div class="sm:col-span-3">
+                                    <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Vendor</label>
                                         <input type="text" :name="`products[${i}][vendor]`" x-model="p.vendor" placeholder="Vendor" class="crm-field w-full">
                                     </div>
@@ -812,7 +812,7 @@
                 const el = this.$root.querySelector('[name="contact_id"]');
                 if (!el || !window.CrmSelect2) return;
 
-                const placeholder = this.accountId ? '— No contact —' : 'Select account first';
+                const placeholder = this.accountId ? '— No contact —' : 'Select customer first';
                 el.disabled = !this.accountId;
 
                 CrmSelect2.setOptions(

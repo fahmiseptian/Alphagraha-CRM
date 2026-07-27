@@ -64,6 +64,11 @@ class DashboardController extends Controller
             ->whereBetween('close_date', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
             ->sum('amount');
 
+        $wonQuery = $this->scopeAssigned(Opportunity::query())
+            ->where('stage', Opportunity::WON_STAGE);
+        $wonTotal = (clone $wonQuery)->sum('amount');
+        $wonMargin = (float) (clone $wonQuery)->sum('crm_won_margin');
+
         // Distribusi stage opportunity untuk grafik sederhana.
         $stageDistribution = $this->scopeAssigned(Opportunity::query())
             ->selectRaw('stage, COUNT(*) as total, SUM(amount) as value')
@@ -113,7 +118,7 @@ class DashboardController extends Controller
 
         return view('dashboard', compact(
             'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue', 'quotationsMargin',
-            'sentCount', 'openPipeline', 'wonThisMonth', 'stageDistribution',
+            'sentCount', 'openPipeline', 'wonThisMonth', 'wonTotal', 'wonMargin', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
             'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
             'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort'

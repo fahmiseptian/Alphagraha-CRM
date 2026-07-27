@@ -126,19 +126,33 @@
             if (!response.ok) {
                 if (calendarTab) calendarTab.close();
                 if (submitBtn) submitBtn.disabled = false;
-                alert('Gagal menyimpan activity.');
+                const err = await response.json().catch(() => null);
+                alert(err?.message || 'Gagal menyimpan activity.');
                 return;
             }
 
             const data = await response.json();
+            const calendarUrl = data.google_calendar_url || '';
+            const redirectUrl = data.redirect || @json(route('activities.index'));
 
-            if (calendarTab && data.google_calendar_url) {
-                calendarTab.location.href = data.google_calendar_url;
-            } else if (data.google_calendar_url) {
-                window.open(data.google_calendar_url, '_blank', 'noopener');
+            if (calendarUrl) {
+                if (calendarTab && !calendarTab.closed) {
+                    calendarTab.location.href = calendarUrl;
+                    // Tunggu sebentar agar tab Calendar sempat load sebelum halaman utama pindah.
+                    setTimeout(function () {
+                        window.location.href = redirectUrl;
+                    }, 400);
+                    return;
+                }
+
+                // Popup diblokir — buka di tab ini sebagai fallback, atau tampilkan link.
+                const opened = window.open(calendarUrl, '_blank', 'noopener');
+                if (!opened) {
+                    alert('Activity tersimpan. Izinkan popup browser, atau buka Google Calendar dari tombol di halaman berikutnya.');
+                }
             }
 
-            window.location.href = data.redirect || @json(route('activities.index'));
+            window.location.href = redirectUrl;
         } catch (err) {
             if (calendarTab) calendarTab.close();
             if (submitBtn) submitBtn.disabled = false;

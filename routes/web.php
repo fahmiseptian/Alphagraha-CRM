@@ -50,6 +50,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/customers/{id}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
     Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
     Route::post('/customers/{account}/contacts', [CustomerContactController::class, 'store'])->name('customers.contacts.store');
+    Route::put('/customers/{account}/contacts/{contact}', [CustomerContactController::class, 'update'])->name('customers.contacts.update');
 
     // Lookup wilayah (DB; kecamatan lazy-sync dari API bila kosong)
     Route::get('/wilayah/provinces', [WilayahLookupController::class, 'provinces'])->name('wilayah.provinces');

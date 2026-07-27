@@ -207,7 +207,7 @@ class QuotationService
             'total_price' => money($quotation->total, $currency),
             'total' => money($quotation->total, $currency),
             'notes' => nl2br(e((string) $quotation->notes)),
-            'terms' => nl2br(e((string) $quotation->terms)),
+            'terms' => $this->formatRichText((string) $quotation->terms),
             'sales_name' => (string) optional($creator)->display_name,
             'sales_job_position' => $jobPosition,
             'sales_title' => $jobPosition !== '' ? $jobPosition : (string) (optional($creator)->title ?: 'Account Manager'),
@@ -394,6 +394,23 @@ class QuotationService
         }
 
         return config("crm.quotation_companies.{$key}", config('crm.quotation_companies.agc', []));
+    }
+
+    /**
+     * Teks plain → escape + nl2br; konten HTML (Summernote) → dipakai apa adanya.
+     */
+    protected function formatRichText(string $value): string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if (preg_match('/<[^>]+>/', $trimmed)) {
+            return $trimmed;
+        }
+
+        return nl2br(e($trimmed));
     }
 
     protected function renderSalesSignature(?User $user): string

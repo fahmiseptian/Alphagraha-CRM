@@ -336,6 +336,12 @@
                 @if ($opportunity->crm_margin_note)
                     <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_margin_note }}</p>
                 @endif
+                @if ($isMarginPending || $isMarginRejected)
+                    <p class="mt-2 text-xs font-medium opacity-90">
+                        <i class="bi bi-lock mr-1"></i>
+                        Quotation tidak dapat dibuat selama margin {{ $isMarginPending ? 'menunggu approval' : 'ditolak' }}.
+                    </p>
+                @endif
             </div>
             @if ($isMarginPending && auth()->user()->canApproveMargin())
                 <div class="flex w-full max-w-md shrink-0 flex-col gap-2">
@@ -732,9 +738,26 @@
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <a href="{{ route('quotations.show', $quo) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> View</a>
-                        <a href="{{ route('quotations.preview', $quo) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-window"></i> Preview</a>
-                        <a href="{{ route('quotations.pdf', $quo) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-download"></i> PDF</a>
+                        @if ($quo->isMarginLocked() && ! auth()->user()->canApproveMargin())
+                            <span class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800" title="Menunggu approval margin">
+                                <i class="bi bi-lock"></i> Preview/PDF terkunci
+                            </span>
+                        @else
+                            <a href="{{ route('quotations.preview', $quo) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-window"></i> Preview</a>
+                            <a href="{{ route('quotations.pdf', $quo) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-download"></i> PDF</a>
+                        @endif
                     </div>
+                </div>
+            @elseif ($opportunity->isMarginLocked())
+                <div class="flex flex-col items-center justify-center gap-3 py-4 text-center">
+                    <span class="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600"><i class="bi bi-lock text-2xl"></i></span>
+                    <p class="text-sm text-slate-600">
+                        @if ($opportunity->crm_margin_status === \App\Models\Espo\Opportunity::MARGIN_PENDING)
+                            Margin menunggu approval Superadmin — Quotation belum bisa dibuat.
+                        @else
+                            Margin ditolak — Quotation belum bisa dibuat. Perbarui opportunity atau minta approval ulang.
+                        @endif
+                    </p>
                 </div>
             @else
                 <div class="flex flex-col items-center justify-center gap-3 py-4 text-center">

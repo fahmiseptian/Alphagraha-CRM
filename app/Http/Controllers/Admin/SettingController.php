@@ -203,12 +203,20 @@ class SettingController extends Controller
     public function updateTerms(Request $request)
     {
         $data = $request->validate([
-            'default_terms' => ['required', 'string', 'max:10000'],
+            'default_terms' => ['required', 'string', 'max:50000'],
         ], [
             'default_terms.required' => 'Terms & Conditions wajib diisi.',
         ]);
 
-        CrmSetting::set('quotation.default_terms', trim($data['default_terms']), [
+        $termsHtml = trim($data['default_terms']);
+        if (trim(strip_tags($termsHtml)) === '') {
+            return redirect()
+                ->back()
+                ->withInput()
+                ->withErrors(['default_terms' => 'Terms & Conditions wajib diisi.']);
+        }
+
+        CrmSetting::set('quotation.default_terms', $termsHtml, [
             'type' => 'string',
             'group' => 'quotation',
             'label' => 'Terms & Conditions default (QO)',

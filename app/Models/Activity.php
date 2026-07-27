@@ -101,7 +101,9 @@ class Activity extends Model implements HasMedia
         $this->loadMissing(['account', 'lead']);
 
         $timezone = $timezone ?: config('crm.google_calendar_timezone', 'Asia/Jakarta');
-        $start = ($this->due_at ?? now())->copy()->timezone($timezone);
+
+        // Gunakan UTC + suffix Z (format paling stabil di Google Calendar).
+        $start = ($this->due_at ?? now())->copy()->timezone($timezone)->utc();
         $end = $start->copy()->addHour();
 
         $details = collect([
@@ -109,18 +111,21 @@ class Activity extends Model implements HasMedia
             'Priority: '.ucfirst((string) $this->priority),
             $this->account?->name ? 'Customer: '.$this->account->name : null,
             $this->lead?->full_name ? 'Lead: '.$this->lead->full_name : null,
-            $this->description ? trim((string) $this->description) : null,
+            $this->description ? trim(strip_tags((string) $this->description)) : null,
         ])->filter()->implode("\n");
+
+        // Slash pada dates JANGAN di-encode (%2F) — Google Calendar sering gagal membacanya.
+        $dates = $start->format('Ymd\THis\Z').'/'.$end->format('Ymd\THis\Z');
 
         $query = http_build_query([
             'action' => 'TEMPLATE',
-            'text' => $this->subject,
-            'dates' => $start->format('Ymd\THis').'/'.$end->format('Ymd\THis'),
+            'text' => (string) $this->subject,
             'details' => $details,
-            'ctz' => $timezone,
+            'sf' => 'true',
+            'output' => 'xml',
         ], '', '&', PHP_QUERY_RFC3986);
 
-        return 'https://calendar.google.com/calendar/render?'.$query;
+        return 'https://calendar.google.com/calendar/render?'.$query.'&dates='.$dates;
     }
 
     public function registerMediaCollections(): void

@@ -35,7 +35,7 @@
     $ppnPercent = $config['taxPercent'];
 @endphp
 
-<form method="POST" action="{{ $action }}"
+<form id="quotation-form" method="POST" action="{{ $action }}"
       x-data="quotationForm({{ \Illuminate\Support\Js::from($config) }})">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
@@ -130,6 +130,7 @@
                                 </div>
                                 <div class="col-span-5 sm:col-span-3">
                                     <input type="number" step="0.01" min="0" :name="`items[${index}][unit_price]`" x-model.number="item.unit_price" placeholder="Harga exclude"
+                                           @input="onUnitPriceChange(item)"
                                            @if ($isCreate) required @endif
                                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
                                            title="Harga jual exclude (setelah diskon item bila ada)">
@@ -164,7 +165,7 @@
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Terms & Conditions @if ($isCreate)<span class="text-red-500">*</span>@endif</label>
-                        <textarea name="terms" rows="3" @if ($isCreate) required @endif class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? \App\Support\OpportunityProductPricing::defaultQuotationTerms($ppnPercent)) }}</textarea>
+                        <textarea id="quotation_terms" name="terms" rows="3" class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">{{ old('terms', $quotation->terms ?? \App\Support\OpportunityProductPricing::defaultQuotationTerms($ppnPercent)) }}</textarea>
                     </div>
                 </div>
             </x-card>
@@ -191,11 +192,20 @@
                             <label class="mb-1.5 block text-sm font-medium text-slate-700">Quotation Number</label>
                             <input type="text" name="number" value="{{ old('number', $quotation->number) }}" readonly
                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-700">
-                            @if ($quotation->hasBeenSent())
+                            @if ($quotation->willBumpDocumentRevisionOnEdit())
                                 <p class="mt-1 text-xs text-amber-600">
-                                    Status sudah pernah <strong>Sent</strong>. Setiap perubahan isi akan otomatis menjadi revisi dokumen
-                                    ({{ $quotation->base_number ?: $quotation->number }} → …-R{{ max(1, (int) $quotation->document_revision + 1) }}…).
-                                    Draft sebelum Sent tetap bisa diedit tanpa R.
+                                    Status saat ini <strong>Sent</strong>. Perubahan isi akan otomatis menjadi revisi dokumen
+                                    ({{ $quotation->base_number ?: $quotation->number }} → …-R{{ max(1, (int) $quotation->document_revision + 1) }}…)
+                                    dan status dikembalikan ke <strong>Draft</strong> (perlu dikirim ulang).
+                                </p>
+                            @elseif ($quotation->hasBeenSent())
+                                <p class="mt-1 text-xs text-slate-500">
+                                    Sudah ada revisi dokumen
+                                    @if ($quotation->document_revision > 0)
+                                        <strong>R{{ $quotation->document_revision }}</strong>
+                                    @endif
+                                    ({{ $quotation->number }}). Selama status masih <strong>Draft</strong>, edit isi
+                                    tidak menaikkan nomor R. Baru naik R lagi setelah di-<strong>Sent</strong> lalu diubah.
                                 </p>
                             @else
                                 <p class="mt-1 text-xs text-slate-400">Belum Sent — nomor tetap tanpa suffix revisi meski diedit.</p>
@@ -332,6 +342,22 @@
                 this.items.splice(index, 1);
                 if (this.items.length === 0) this.addItem();
             },
+            onUnitPriceChange(item) {
+                const price = Number(item.unit_price) || 0;
+                const discount = Number(item.discount_exclude) || 0;
+                // Tanpa diskon item: list ikut harga yang diedit user.
+                if (discount <= 0) {
+                    item.sell_exclude = price;
+                    return;
+                }
+                // Ada diskon: jika user menaikkan/turunkan tagihan, biarkan list tetap;
+                // bila tagihan ≥ list, anggap tidak pakai diskon lagi.
+                const list = Number(item.sell_exclude) || 0;
+                if (list > 0 && price >= list) {
+                    item.discount_exclude = 0;
+                    item.sell_exclude = price;
+                }
+            },
             fillFromAccount() {
                 const acc = this.accounts[this.accountId];
                 if (acc) {
@@ -364,3 +390,52 @@
         };
     }
 </script>
+
+@push('styles')
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-lite.min.css">
+<style>
+    .note-editor.note-frame {
+        border: 1px solid #cbd5e1;
+        border-radius: 0.5rem;
+        overflow: hidden;
+    }
+    .note-toolbar {
+        background: #f8fafc;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 6px 8px;
+    }
+    .note-editable {
+        min-height: 140px;
+        font-family: 'Inter', sans-serif;
+        font-size: 13px;
+        line-height: 1.6;
+        background: #fff;
+    }
+    .note-statusbar { display: none; }
+    .note-btn { border-radius: 0.375rem; }
+</style>
+@endpush
+
+@push('scripts')
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-lite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-en-US.min.js"></script>
+<script>
+    $(function () {
+        $('#quotation_terms').summernote({
+            height: 160,
+            lang: 'en-US',
+            placeholder: 'Terms & Conditions...',
+            toolbar: [
+                ['font', ['bold', 'italic', 'underline', 'clear']],
+                ['para', ['ul', 'ol', 'paragraph']],
+                ['insert', ['link', 'hr']],
+                ['view', ['codeview']],
+            ],
+        });
+
+        $('#quotation-form').on('submit', function () {
+            $('#quotation_terms').val($('#quotation_terms').summernote('code'));
+        });
+    });
+</script>
+@endpush

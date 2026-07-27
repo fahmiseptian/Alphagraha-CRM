@@ -146,7 +146,20 @@
         @if ($quotation->notes || $quotation->terms)
         <x-card title="Notes & Terms">
             @if ($quotation->notes)<div class="mb-3"><p class="text-xs font-semibold uppercase text-slate-400">Notes</p><p class="mt-1 whitespace-pre-line text-sm text-slate-600">{{ $quotation->notes }}</p></div>@endif
-            @if ($quotation->terms)<div><p class="text-xs font-semibold uppercase text-slate-400">Terms & Conditions</p><p class="mt-1 whitespace-pre-line text-sm text-slate-600">{{ $quotation->terms }}</p></div>@endif
+            @if ($quotation->terms)
+                @php
+                    $termsContent = (string) $quotation->terms;
+                    $termsIsHtml = (bool) preg_match('/<[^>]+>/', $termsContent);
+                @endphp
+                <div>
+                    <p class="text-xs font-semibold uppercase text-slate-400">Terms & Conditions</p>
+                    @if ($termsIsHtml)
+                        <div class="mt-1 prose prose-sm max-w-none text-sm text-slate-600">{!! $termsContent !!}</div>
+                    @else
+                        <p class="mt-1 whitespace-pre-line text-sm text-slate-600">{{ $termsContent }}</p>
+                    @endif
+                </div>
+            @endif
         </x-card>
         @endif
 
@@ -163,11 +176,15 @@
                     </div>
                     <div class="flex items-center gap-3">
                         <span class="text-sm text-slate-600">{{ money(data_get($rev->snapshot, 'total', 0), $quotation->currency) }}</span>
-                        @if ($rev->rendered_html)
+                        @if ($rev->rendered_html && ! ($marginLocked && ! $canApproveMargin))
                             <a href="{{ route('quotations.revisions.preview', [$quotation, $rev]) }}" target="_blank"
                                class="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-brand-600 hover:bg-brand-50">
                                 <i class="bi bi-eye"></i> Lihat
                             </a>
+                        @elseif ($rev->rendered_html && $marginLocked)
+                            <span class="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700" title="Menunggu approval margin">
+                                <i class="bi bi-lock"></i> Terkunci
+                            </span>
                         @endif
                     </div>
                 </div>
@@ -176,7 +193,12 @@
             @endforelse
             @if (! $quotation->hasBeenSent())
                 <p class="border-t border-slate-50 px-5 py-2 text-xs text-slate-400">
-                    Revisi nomor (-R1, -R2, …) baru dibuat setelah status pernah <strong>Sent</strong> lalu isi dokumen diubah.
+                    Revisi nomor (-R1, -R2, …) baru dibuat saat status <strong>Sent</strong> lalu isi dokumen diubah.
+                    Setelah revisi, status kembali ke Draft — edit lagi tidak naik R sampai dikirim ulang.
+                </p>
+            @elseif ($quotation->status !== 'sent')
+                <p class="border-t border-slate-50 px-5 py-2 text-xs text-slate-400">
+                    Status Draft. Edit isi tidak menaikkan nomor R. Setelah di-<strong>Sent</strong> lagi, perubahan berikutnya baru menjadi R{{ (int) $quotation->document_revision + 1 }}.
                 </p>
             @endif
         </x-card>

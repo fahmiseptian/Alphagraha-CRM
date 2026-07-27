@@ -146,10 +146,22 @@ class Quotation extends Model
 
     /**
      * Apakah dokumen sudah pernah dikirim (status sent pernah terjadi).
+     * Tetap true setelah revisi mengembalikan status ke draft, agar histori R tidak dihapus.
      */
     public function hasBeenSent(): bool
     {
-        return $this->sent_at !== null || $this->status === 'sent';
+        return $this->sent_at !== null
+            || $this->status === 'sent'
+            || (int) $this->document_revision > 0;
+    }
+
+    /**
+     * Apakah edit isi saat ini akan menaikkan nomor revisi dokumen (R1, R2, …).
+     * Hanya saat status masih Sent — Draft setelah R tidak naik R lagi sampai dikirim ulang.
+     */
+    public function willBumpDocumentRevisionOnEdit(): bool
+    {
+        return $this->status === 'sent';
     }
 
     /**

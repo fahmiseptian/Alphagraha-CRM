@@ -81,7 +81,7 @@
             </div>
             <div>
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
-                    Nominal dengan Ongkir Pribadi <span class="text-red-500">*</span>
+                    Nominal dengan Ongkir BODETABEK <span class="text-red-500">*</span>
                 </label>
                 <input type="number" name="nominal_ongkir_pribadi" step="0.01" min="0" required
                        value="{{ $nOngkir }}"

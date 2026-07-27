@@ -18,7 +18,8 @@
         (function () {
             var url = @json(session('google_calendar_url'));
             if (!url) return;
-            window.open(url, '_blank', 'noopener');
+            // Jangan auto-open di sini: sering diblokir popup blocker setelah redirect.
+            // User bisa klik tombol "Buka Google Calendar" di flash message.
         })();
     </script>
 @endif

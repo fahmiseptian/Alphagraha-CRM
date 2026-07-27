@@ -32,6 +32,7 @@
                     <tr>
                         <th>Contact</th>
                         <th>Customer</th>
+                        <th>Job Role</th>
                         <th>Email / Phone</th>
                         <th></th>
                     </tr>
@@ -54,6 +55,7 @@
                                     <span class="text-slate-300">—</span>
                                 @endif
                             </td>
+                            <td class="text-slate-600">{{ $contact->job_role ?: '—' }}</td>
                             <td>
                                 <span class="block text-slate-600">{{ $contact->email ?: '—' }}</span>
                                 @if ($contact->phone)

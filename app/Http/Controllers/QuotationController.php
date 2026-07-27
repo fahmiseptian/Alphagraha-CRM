@@ -117,6 +117,11 @@ class QuotationController extends Controller
                         ->with('error', $error);
                 }
 
+                if ($error = $this->opportunityMarginBlockMessage($opportunity)) {
+                    return redirect()->route('opportunities.show', $opportunity)
+                        ->with('error', $error);
+                }
+
                 if ($opportunity->quotation) {
                     return redirect()->route('quotations.show', $opportunity->quotation)
                         ->with('success', 'This opportunity already has a quotation.');
@@ -207,6 +212,10 @@ class QuotationController extends Controller
             return back()->withInput()->with('error', $error);
         }
 
+        if ($error = $this->opportunityMarginBlockForPayload($data)) {
+            return back()->withInput()->with('error', $error);
+        }
+
         try {
             $quotation = DB::transaction(function () use ($data) {
                 $salesContext = $this->service->resolveSalesCodeContext(
@@ -268,8 +277,14 @@ class QuotationController extends Controller
     {
         $this->authorizeAccess($quotation);
 
-        // Rapikan histori ganda yang sempat terbentuk saat masih draft.
-        if (! $quotation->hasBeenSent() && $quotation->revisions()->count() > 1) {
+        // Rapikan histori ganda yang sempat terbentuk saat masih draft murni.
+        // Jangan jalankan bila sudah pernah Sent / sudah ada R1+ (sent_at atau document_revision).
+        if (
+            $quotation->sent_at === null
+            && (int) $quotation->document_revision === 0
+            && $quotation->status !== 'sent'
+            && $quotation->revisions()->count() > 1
+        ) {
             $this->refreshDraftSnapshot($quotation);
         }
 
@@ -298,49 +313,69 @@ class QuotationController extends Controller
         $becamePending = false;
         $becameRevision = false;
 
-        $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision) {
-            $before = $this->contentFingerprint($quotation);
-            $wasSent = $quotation->hasBeenSent();
+        try {
+            $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision) {
+                $before = $this->contentFingerprint($quotation);
+                $everSent = $quotation->hasBeenSent();
+                // Naik R hanya jika status SAAT INI Sent. Draft setelah R1 tidak boleh jadi R2.
+                $isCurrentlySent = $quotation->status === 'sent';
 
-            // Nomor tidak boleh diubah manual; pertahankan yang ada.
-            unset($data['number']);
+                // Nomor tidak boleh diubah manual; pertahankan yang ada.
+                unset($data['number']);
 
-            $quotation->fill($data);
-            $becamePending = $this->applyMarginApprovalState($quotation, isNew: false);
+                $quotation->fill($data);
+                $becamePending = $this->applyMarginApprovalState($quotation, isNew: false);
 
-            if ($quotation->isMarginLocked() && ($data['status'] ?? '') === 'sent') {
-                $quotation->status = $wasSent ? $quotation->getOriginal('status') : 'draft';
-                if (! $wasSent) {
-                    $quotation->sent_at = null;
+                if ($quotation->isMarginLocked() && ($data['status'] ?? '') === 'sent') {
+                    $quotation->status = $everSent ? $quotation->getOriginal('status') : 'draft';
+                    if (! $everSent) {
+                        $quotation->sent_at = null;
+                    }
+                } elseif (($data['status'] ?? '') === 'sent' && ! $quotation->sent_at) {
+                    $quotation->sent_at = now();
                 }
-            } elseif (($data['status'] ?? '') === 'sent' && ! $quotation->sent_at) {
-                $quotation->sent_at = now();
-            }
-            $quotation->save();
-
-            $this->syncItems($quotation, $data['items']);
-            $quotation->load('items');
-            $quotation->recalculateTotals();
-            $quotation->save();
-
-            $after = $this->contentFingerprint($quotation->fresh(['items']));
-            $contentChanged = $before !== $after;
-
-            if ($wasSent && $contentChanged) {
-                $quotation->document_revision = (int) $quotation->document_revision + 1;
-                $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
-                $quotation->base_number = $base;
-                $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
-                $quotation->revision = (int) $quotation->revision + 1;
                 $quotation->save();
-                $this->snapshotRevision($quotation, 'Revisi dokumen R'.$quotation->document_revision);
-                $becameRevision = true;
-            } elseif (! $wasSent) {
-                $this->refreshDraftSnapshot($quotation);
-            }
 
-            return $quotation;
-        });
+                $this->syncItems($quotation, $data['items']);
+                $quotation->load('items');
+                $quotation->recalculateTotals();
+                $quotation->save();
+
+                $after = $this->contentFingerprint($quotation->fresh(['items']));
+                $contentChanged = $before !== $after;
+
+                if ($isCurrentlySent && $contentChanged) {
+                    $quotation->document_revision = (int) $quotation->document_revision + 1;
+                    $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
+                    $quotation->base_number = $base;
+                    $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
+                    $quotation->revision = (int) $quotation->revision + 1;
+                    // Revisi baru harus dikirim ulang → kembali ke draft, tapi sent_at tetap
+                    // sebagai penanda "pernah sent" agar histori aman.
+                    $quotation->status = 'draft';
+                    if (! $quotation->sent_at) {
+                        $quotation->sent_at = now();
+                    }
+                    $quotation->save();
+                    $this->snapshotRevision($quotation, 'Revisi dokumen R'.$quotation->document_revision);
+                    $becameRevision = true;
+                } elseif (! $everSent) {
+                    $this->refreshDraftSnapshot($quotation);
+                } elseif ($contentChanged) {
+                    // Sudah pernah sent / sudah R*, tapi status masih Draft: simpan isi tanpa naik R.
+                    $this->refreshLatestRevisionSnapshot($quotation);
+                }
+
+                return $quotation->fresh(['items']);
+            });
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->withInput()->with(
+                'error',
+                'Gagal menyimpan quotation'.($e->getMessage() ? ': '.$e->getMessage() : '.')
+            );
+        }
 
         if ($becamePending) {
             $this->notifications->notifyMarginRequested($result);
@@ -348,7 +383,7 @@ class QuotationController extends Controller
 
         $msg = 'Quotation updated successfully.';
         if ($becameRevision) {
-            $msg = 'Quotation diperbarui sebagai revisi dokumen R'.$result->document_revision.' ('.$result->number.').';
+            $msg = 'Quotation diperbarui sebagai revisi dokumen R'.$result->document_revision.' ('.$result->number.'). Status dikembalikan ke Draft — kirim ulang setelah dicek.';
         }
         if ($result->marginNeedsApproval()) {
             $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';
@@ -473,6 +508,7 @@ class QuotationController extends Controller
     public function previewRevision(Quotation $quotation, QuotationRevision $revision)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureMarginUnlocked($quotation);
 
         if ((int) $revision->quotation_id !== (int) $quotation->id) {
             abort(404);
@@ -611,9 +647,15 @@ class QuotationController extends Controller
             'items' => $quotation->items->map(fn ($i) => [
                 'name' => $i->name,
                 'description' => (string) $i->description,
-                'quantity' => (float) $i->quantity,
+                'quantity' => round((float) $i->quantity, 4),
                 'unit' => (string) $i->unit,
-                'unit_price' => (float) $i->unit_price,
+                'unit_price' => round((float) $i->unit_price, 2),
+                'sell_exclude' => round((float) ($i->sell_exclude ?? 0), 2),
+                'discount_exclude' => round((float) ($i->discount_exclude ?? 0), 2),
+                'cost_exclude' => round((float) ($i->cost_exclude ?? 0), 2),
+                'tax_category' => (string) ($i->tax_category ?? ''),
+                'item_kind' => (string) ($i->item_kind ?? ''),
+                'vendor' => (string) ($i->vendor ?? ''),
             ])->values()->all(),
         ];
 
@@ -637,40 +679,47 @@ class QuotationController extends Controller
             $incomingList = isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null
                 ? (float) $item['sell_exclude']
                 : null;
+            $incomingCost = isset($item['cost_exclude']) && $item['cost_exclude'] !== '' && $item['cost_exclude'] !== null
+                ? (float) $item['cost_exclude']
+                : null;
 
-            // Sumber kebenaran harga list/diskon: opportunity (bila terhubung).
+            // Opportunity hanya sebagai fallback bila form tidak mengirim nilai.
+            // Jangan timpa harga yang diubah user di Quotation.
             $opp = $oppProducts?->values()->get($index);
             if ($opp) {
-                $oppList = (float) ($opp['sell_exclude'] ?? 0);
-                $oppDiscount = (float) ($opp['discount_exclude'] ?? 0);
-                if ($oppList > 0) {
-                    $incomingList = $oppList;
+                if (($incomingList === null || $incomingList <= 0) && (float) ($opp['sell_exclude'] ?? 0) > 0) {
+                    $incomingList = (float) $opp['sell_exclude'];
                 }
-                if ($oppDiscount > 0) {
-                    $incomingDiscount = $oppDiscount;
+                if ($incomingDiscount <= 0 && (float) ($opp['discount_exclude'] ?? 0) > 0) {
+                    $incomingDiscount = (float) $opp['discount_exclude'];
+                }
+                if ($incomingCost === null && isset($opp['cost_exclude'])) {
+                    $incomingCost = (float) $opp['cost_exclude'];
                 }
             }
 
             // unit_price di form = harga yang ditagihkan (setelah diskon item bila ada).
             if ($incomingDiscount > 0) {
-                $listPrice = $incomingList !== null && $incomingList > 0 ? $incomingList : $unitPrice;
-                // Pertahankan harga setelah diskon dari opportunity; jangan timpa dengan unit_price
-                // kecuali user mengubah harga tagihan menjauh dari diskon opportunity.
-                if ($opp && abs($unitPrice - $incomingDiscount) < 0.009) {
+                $listPrice = $incomingList !== null && $incomingList > 0 ? $incomingList : max($unitPrice, $incomingDiscount);
+
+                if (abs($unitPrice - $incomingDiscount) < 0.009) {
+                    // Tagihan masih = diskon item opportunity/form.
                     $discountExclude = $incomingDiscount;
-                } elseif ($opp && abs($unitPrice - (float) ($opp['effective_sell_exclude'] ?? 0)) < 0.009) {
-                    $discountExclude = $incomingDiscount;
+                } elseif ($listPrice > 0 && abs($unitPrice - $listPrice) < 0.009) {
+                    // User set tagihan = harga list → anggap tanpa diskon efektif di QO.
+                    $discountExclude = 0;
+                    $listPrice = $unitPrice;
                 } else {
-                    // User mengedit harga tagihan di form QO.
+                    // User mengubah harga tagihan di form QO.
                     $discountExclude = $unitPrice;
+                    if ($listPrice < $discountExclude) {
+                        $listPrice = $discountExclude;
+                    }
                 }
             } else {
-                $listPrice = $incomingList !== null && $incomingList > 0 ? $incomingList : $unitPrice;
+                // Tanpa diskon item: harga form = list = tagihan (hormati edit user).
+                $listPrice = $unitPrice;
                 $discountExclude = 0;
-                // Tanpa diskon item, list = harga tagihan.
-                if ($incomingDiscount <= 0 && ($incomingList === null || abs(($incomingList ?? 0) - $unitPrice) < 0.009)) {
-                    $listPrice = $unitPrice;
-                }
             }
 
             $enriched = OpportunityProductPricing::enrichRow([
@@ -680,7 +729,7 @@ class QuotationController extends Controller
                 'tax_category' => $item['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $item['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
                 'sell_exclude' => $listPrice,
-                'cost_exclude' => (float) ($item['cost_exclude'] ?? ($opp['cost_exclude'] ?? 0)),
+                'cost_exclude' => (float) ($incomingCost ?? 0),
                 'discount_exclude' => $discountExclude,
             ]);
 
@@ -750,6 +799,42 @@ class QuotationController extends Controller
             $quotation->revision = 1;
             $quotation->save();
         }
+    }
+
+    /**
+     * Update snapshot revisi terkini tanpa menaikkan nomor R
+     * (edit isi saat status masih Draft setelah R1/R2/…).
+     */
+    protected function refreshLatestRevisionSnapshot(Quotation $quotation): void
+    {
+        $quotation->load('items');
+        $template = $this->resolveTemplate($quotation);
+        $rendered = $this->service->render($quotation, $template->body_html, $template);
+        $payload = $this->revisionSnapshotPayload($quotation);
+
+        $latest = $quotation->revisions()->orderByDesc('id')->first();
+
+        if ($latest) {
+            $note = (int) $quotation->document_revision > 0
+                ? 'Revisi dokumen R'.$quotation->document_revision
+                : (string) $latest->note;
+
+            $latest->update([
+                'revision' => max(1, (int) $quotation->revision),
+                'snapshot' => $payload,
+                'rendered_html' => $rendered,
+                'note' => $note,
+            ]);
+
+            return;
+        }
+
+        $this->snapshotRevision(
+            $quotation,
+            (int) $quotation->document_revision > 0
+                ? 'Revisi dokumen R'.$quotation->document_revision
+                : 'Quotation created'
+        );
     }
 
     protected function revisionSnapshotPayload(Quotation $quotation): array
@@ -881,6 +966,45 @@ class QuotationController extends Controller
         }
 
         return null;
+    }
+
+    protected function opportunityMarginBlockMessage(Opportunity $opportunity): ?string
+    {
+        if (! $opportunity->isMarginLocked()) {
+            return null;
+        }
+
+        if ($opportunity->crm_margin_status === Opportunity::MARGIN_PENDING) {
+            return 'Opportunity menunggu approval margin — tidak dapat membuat Quotation. Hubungi Superadmin.';
+        }
+
+        if ($opportunity->crm_margin_status === Opportunity::MARGIN_REJECTED) {
+            return 'Margin opportunity ditolak — tidak dapat membuat Quotation. Perbarui opportunity atau minta approval ulang.';
+        }
+
+        return 'Opportunity tidak dapat membuat Quotation: '.$opportunity->marginStatusLabel().'.';
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    protected function opportunityMarginBlockForPayload(array $data): ?string
+    {
+        if (empty($data['opportunity_id'])) {
+            return null;
+        }
+
+        $query = Opportunity::query();
+        if (auth()->user()?->isSales()) {
+            $query->where('assigned_user_id', auth()->id());
+        }
+
+        $opportunity = $query->find($data['opportunity_id']);
+        if (! $opportunity) {
+            return null;
+        }
+
+        return $this->opportunityMarginBlockMessage($opportunity);
     }
 
     /**

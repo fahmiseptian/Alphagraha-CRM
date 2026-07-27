@@ -100,12 +100,24 @@
                             return;
                         }
                         const data = await response.json();
-                        if (calendarTab && data.google_calendar_url) {
-                            calendarTab.location.href = data.google_calendar_url;
-                        } else if (data.google_calendar_url) {
-                            window.open(data.google_calendar_url, '_blank', 'noopener');
+                        const calendarUrl = data.google_calendar_url || '';
+                        const redirectUrl = data.redirect || window.location.href;
+
+                        if (calendarUrl) {
+                            if (calendarTab && !calendarTab.closed) {
+                                calendarTab.location.href = calendarUrl;
+                                setTimeout(function () {
+                                    window.location.href = redirectUrl;
+                                }, 400);
+                                return;
+                            }
+                            const opened = window.open(calendarUrl, '_blank', 'noopener');
+                            if (!opened) {
+                                alert('Follow-up tersimpan. Izinkan popup browser, lalu klik ulang atau buka Google Calendar dari activity.');
+                            }
                         }
-                        window.location.href = data.redirect || window.location.href;
+
+                        window.location.href = redirectUrl;
                     } catch (err) {
                         if (calendarTab) calendarTab.close();
                         if (btn) btn.disabled = false;

@@ -9,16 +9,16 @@
     <p class="crm-page-desc">Here's your sales activity summary for today.</p>
 </div>
 
-{{-- Main stats --}}
+{{-- Nominal angka --}}
 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <x-stat-card title="Total Customers" :value="number_format($customersCount)" icon="bi-people" color="brand"
-                 :href="route('customers.index')" />
-    <x-stat-card title="Total Leads" :value="number_format($leadsCount)" icon="bi-funnel" color="purple"
-                 :href="route('leads.index')" />
-    <x-stat-card title="Total Quotations" :value="number_format($quotationsCount)" icon="bi-file-earmark-text" color="amber"
+    <x-stat-card title="Open Pipeline" :value="money($openPipeline)" icon="bi-kanban" color="brand"
+                 :href="route('opportunities.index')" />
+    <x-stat-card title="Active Quotation" :value="money($quotationsValue)" icon="bi-file-earmark-text" color="amber"
                  :sub="$sentCount.' sent'" :href="route('quotations.index')" />
-    <x-stat-card title="Active Quotation Value" :value="money($quotationsValue)" icon="bi-cash-stack" color="green"
-                 :sub="money($quotationsMargin).' margin'" :href="route('quotations.index')" />
+    <x-stat-card title="Total Penjualan (Closed Won)" :value="money($wonTotal)" icon="bi-trophy" color="green"
+                 :href="route('opportunities.index')" />
+    <x-stat-card title="Margin" :value="money($wonMargin)" icon="bi-graph-up-arrow" color="purple"
+                 :href="route('opportunities.index')" />
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
@@ -30,19 +30,17 @@
                 <p class="text-sm font-semibold text-slate-800">
                     <i class="bi bi-trophy text-amber-500"></i> Leaderboard
                 </p>
-                <form method="GET" action="{{ route('dashboard') }}" class="flex flex-wrap items-center justify-end gap-1.5">
+                <form method="GET" action="{{ route('dashboard') }}" class="flex flex-nowrap items-center justify-end gap-1.5">
                     @if (auth()->user()->isAdmin())
-                        <select name="leaderboard_sort" data-auto-submit
-                                class="select2 select2-compact crm-leaderboard-widget__select crm-leaderboard-widget__select--sort"
-                                data-placeholder="Sort">
+                        <select name="leaderboard_sort" onchange="this.form.submit()"
+                                class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">
                             <option value="total" @selected($leaderboardSort === 'total')>Sort: Total</option>
                             <option value="margin" @selected($leaderboardSort === 'margin')>Sort: Margin</option>
                             <option value="percent" @selected($leaderboardSort === 'percent')>Sort: % Target</option>
                         </select>
                     @endif
-                    <select name="leaderboard_period" data-auto-submit
-                            class="select2 select2-compact crm-leaderboard-widget__select"
-                            data-placeholder="Period">
+                    <select name="leaderboard_period" onchange="this.form.submit()"
+                            class="crm-leaderboard-widget__select">
                         <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
                         <option value="month" @selected($leaderboardPeriod === 'month')>This Month</option>
                         <option value="alltime" @selected($leaderboardPeriod === 'alltime')>All Time</option>
@@ -165,17 +163,6 @@
 
     {{-- Opportunity pipeline --}}
     <x-card title="Sales Pipeline" class="lg:col-span-2">
-        <div class="mb-5 grid grid-cols-2 gap-4">
-            <div class="rounded-lg bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">Open Pipeline</p>
-                <p class="mt-1 text-xl font-bold text-slate-800">{{ money($openPipeline) }}</p>
-            </div>
-            <div class="rounded-lg bg-green-50 p-4">
-                <p class="text-xs text-slate-500">Won This Month</p>
-                <p class="mt-1 text-xl font-bold text-green-700">{{ money($wonThisMonth) }}</p>
-            </div>
-        </div>
-
         @php $maxStage = max($stageDistribution ?: [1]); @endphp
         <div class="space-y-3">
             @forelse ($stageDistribution as $stage => $total)

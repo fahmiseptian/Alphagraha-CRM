@@ -187,7 +187,11 @@ class User extends Authenticatable
 
     public function canEditCustomerContact(): bool
     {
-        return $this->isSuperAdmin();
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+        ], true);
     }
 
     public function canDeleteCustomerContact(): bool

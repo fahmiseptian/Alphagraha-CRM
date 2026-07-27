@@ -66,6 +66,7 @@ class ContactController extends Controller
             'account_id' => ['required', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['nullable', 'string', 'max:100'],
+            'job_role' => ['nullable', 'string', 'max:100'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
         ]);
@@ -110,6 +111,7 @@ class ContactController extends Controller
             'account_id' => ['required', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['nullable', 'string', 'max:100'],
+            'job_role' => ['nullable', 'string', 'max:100'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
         ]);

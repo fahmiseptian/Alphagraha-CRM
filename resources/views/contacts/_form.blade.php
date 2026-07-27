@@ -32,6 +32,10 @@
                 <label class="crm-label">Last Name</label>
                 <input type="text" name="last_name" value="{{ old('last_name', $contact->last_name ?? '') }}" class="crm-field">
             </div>
+            <div class="sm:col-span-2">
+                <label class="crm-label">Job Role</label>
+                <input type="text" name="job_role" value="{{ old('job_role', $contact->job_role ?? '') }}" placeholder="Contoh: Purchasing, IT Manager" class="crm-field">
+            </div>
             <div>
                 <label class="crm-label">Email</label>
                 <input type="email" name="email" value="{{ old('email', $contact->email ?? '') }}" class="crm-field">
