@@ -4,9 +4,28 @@
 @section('content')
 @include('partials.deadline-alert')
 
-<div class="mb-6">
-    <h2 class="crm-page-title">Hi, {{ Str::before(auth()->user()->name, ' ') }}!</h2>
-    <p class="crm-page-desc">Here's your sales activity summary for today.</p>
+<div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+        <h2 class="crm-page-title">Hi, {{ Str::before(auth()->user()->name, ' ') }}!</h2>
+        <p class="crm-page-desc">Ringkasan aktivitas penjualan untuk {{ $periodLabel }}.</p>
+    </div>
+    <form method="GET" action="{{ route('dashboard') }}" class="flex items-center gap-2">
+        @if (request('leaderboard_period'))
+            <input type="hidden" name="leaderboard_period" value="{{ request('leaderboard_period') }}">
+        @endif
+        @if (request('leaderboard_sort'))
+            <input type="hidden" name="leaderboard_sort" value="{{ request('leaderboard_sort') }}">
+        @endif
+        <label class="text-xs font-medium text-slate-500">Periode</label>
+        <select name="period" onchange="this.form.submit()"
+                class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-200">
+            <option value="year" @selected($period === 'year')>Tahun ini</option>
+            <option value="month" @selected($period === 'month')>Bulan ini</option>
+            <option value="3months" @selected($period === '3months')>3 Bulan</option>
+            <option value="6months" @selected($period === '6months')>6 Bulan</option>
+            <option value="alltime" @selected($period === 'alltime')>All Time</option>
+        </select>
+    </form>
 </div>
 
 {{-- Nominal angka --}}
@@ -31,6 +50,7 @@
                     <i class="bi bi-trophy text-amber-500"></i> Leaderboard
                 </p>
                 <form method="GET" action="{{ route('dashboard') }}" class="flex flex-nowrap items-center justify-end gap-1.5">
+                    <input type="hidden" name="period" value="{{ $period }}">
                     @if (auth()->user()->isAdmin())
                         <select name="leaderboard_sort" onchange="this.form.submit()"
                                 class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">

@@ -172,17 +172,23 @@
                         <button type="button" @click="selectTaxCategory('non_wapu')"
                                 class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
                             <span class="block text-sm font-semibold text-slate-800">Non Wapu</span>
+                            @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Barang: PPN saja<br>Jasa: PPN + PPH</span>
+                            @endif
                         </button>
                         <button type="button" @click="selectTaxCategory('wapu')"
                                 class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
                             <span class="block text-sm font-semibold text-slate-800">Wapu</span>
+                            @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Barang: PPN + 1.5%<br>Jasa: PPN + 2%</span>
+                            @endif
                         </button>
                         <button type="button" @click="selectTaxCategory('inaproc')"
                                 class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
                             <span class="block text-sm font-semibold text-slate-800">Inaproc</span>
+                            @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Seperti Wapu + PNBP + PPH 29</span>
+                            @endif
                         </button>
                     </div>
                 </div>
@@ -207,7 +213,9 @@
                             </template>
                             <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
                         </div>
+                        @if (auth()->user()?->isSuperAdmin())
                         <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude &amp; % margin (putih) bisa diubah; Include / potongan / nilai margin (kuning) otomatis.</p>
+                        @endif
                     </div>
 
                     <div class="space-y-4">
@@ -367,10 +375,12 @@
                     <label class="mb-1 block text-xs font-medium text-slate-500">Ongkir jual</label>
                     <input type="number" step="0.01" min="0" name="shipping_sell" x-model.number="shippingSell"
                            class="crm-field w-full" placeholder="0">
+                    @if (auth()->user()?->isSuperAdmin())
                     <p class="mt-1 text-xs text-slate-400">
                         Jika dicentang, threshold margin nominal hanya memakai <em>Nominal Umum</em>
                         (tanpa Nominal Ongkir Pribadi).
                     </p>
+                    @endif
                 </div>
                 <p class="mt-2 text-xs" :class="isFreeShippingCity ? 'text-green-700' : 'text-slate-500'" x-show="accountId">
                     <span x-show="isFreeShippingCity"><i class="bi bi-check-circle mr-1"></i>Kota customer termasuk kawasan free ongkir.</span>
@@ -395,7 +405,9 @@
                                    class="crm-field w-full" placeholder="0">
                             <span class="shrink-0 text-sm font-semibold text-slate-600">%</span>
                         </div>
+                        @if (auth()->user()?->isSuperAdmin())
                         <p class="mt-1 text-xs text-slate-400">Isi % → nominal terisi otomatis dari total margin.</p>
+                        @endif
                     </div>
                     <div>
                         <label class="mb-1 block text-xs font-medium text-slate-500">Nominal diskon</label>

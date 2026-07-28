@@ -4,6 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sign In &middot; {{ config('app.name') }}</title>
+
+    {{-- Website icon & logo --}}
+    <link rel="shortcut icon" href="{{ asset('favicon.png') }}?v={{ config('app.version', '1') }}">
+    <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}?v={{ config('app.version', '1') }}">
+    <link rel="apple-touch-icon" href="{{ asset('favicon.png') }}?v={{ config('app.version', '1') }}">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = { theme: { extend: { colors: { brand: {
@@ -23,7 +29,8 @@
     <div class="relative hidden w-1/2 flex-col justify-between bg-gradient-to-br from-brand-700 to-brand-900 p-12 text-white lg:flex"
          style="background-image: linear-gradient(135deg, #1d4ed8, #1e3a8a);">
         <div class="flex items-center gap-2 text-lg font-semibold">
-            <i class="bi bi-bezier2"></i> AGC CRM
+            <img src="{{ asset('images/logo-crm.png') }}" alt="AGC CRM" class="h-6 w-6 object-contain">
+            AGC CRM
         </div>
         <div>
             <h2 class="text-3xl font-bold leading-tight">Manage customers & quotations<br>in one place.</h2>
@@ -37,7 +44,7 @@
         <div class="w-full max-w-sm">
             <div class="mb-8 text-center lg:text-left">
                 <div class="mb-2 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-white lg:hidden">
-                    <i class="bi bi-bezier2 text-xl"></i>
+                    <img src="{{ asset('images/logo-crm.png') }}" alt="AGC CRM" class="h-7 w-7 object-contain" loading="eager">
                 </div>
                 <h1 class="text-2xl font-bold text-slate-800">Welcome back</h1>
                 <p class="mt-1 text-sm text-slate-500">Sign in to continue to your dashboard.</p>

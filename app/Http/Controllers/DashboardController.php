@@ -22,6 +22,13 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
+        $period = $request->get('period', 'year');
+        if (! in_array($period, ['year', 'month', '3months', '6months', 'alltime'], true)) {
+            $period = 'year';
+        }
+        $periodRange = $this->periodDateRange($period);
+        $periodLabel = $this->periodLabel($period);
+
         $leaderboardPeriod = $request->get('leaderboard_period', 'year');
         if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year'], true)) {
             $leaderboardPeriod = 'year';
@@ -45,6 +52,7 @@ class DashboardController extends Controller
         if ($user->isSales()) {
             $quotationQuery->where('created_by', $user->id);
         }
+        $this->applyPeriodToDateColumn($quotationQuery, 'quotation_date', $periodRange);
         $quotationsCount = (clone $quotationQuery)->count();
         $activeQuotations = (clone $quotationQuery)
             ->where('status', 'sent')
@@ -54,7 +62,7 @@ class DashboardController extends Controller
         $quotationsMargin = $activeQuotations->sum(fn (Quotation $quotation) => $quotation->totalItemsMargin());
         $sentCount = (clone $quotationQuery)->where('status', 'sent')->count();
 
-        // Pipeline opportunity (deal) yang masih terbuka.
+        // Pipeline opportunity (deal) yang masih terbuka — snapshot terkini (tidak di-filter periode).
         $openPipeline = $this->scopeAssigned(Opportunity::query())
             ->whereIn('stage', Opportunity::OPEN_STAGES)
             ->sum('amount');
@@ -66,10 +74,11 @@ class DashboardController extends Controller
 
         $wonQuery = $this->scopeAssigned(Opportunity::query())
             ->where('stage', Opportunity::WON_STAGE);
+        $this->applyPeriodToDateColumn($wonQuery, 'close_date', $periodRange);
         $wonTotal = (clone $wonQuery)->sum('amount');
         $wonMargin = (float) (clone $wonQuery)->sum('crm_won_margin');
 
-        // Distribusi stage opportunity untuk grafik sederhana.
+        // Distribusi stage opportunity untuk grafik sederhana (snapshot terkini).
         $stageDistribution = $this->scopeAssigned(Opportunity::query())
             ->selectRaw('stage, COUNT(*) as total, SUM(amount) as value')
             ->groupBy('stage')
@@ -98,7 +107,8 @@ class DashboardController extends Controller
             ->count();
 
         // Penawaran terbaru.
-        $recentQuotations = (clone $quotationQuery)
+        $recentQuotations = Quotation::query()
+            ->when($user->isSales(), fn ($q) => $q->where('created_by', $user->id))
             ->with('creator')
             ->latest()
             ->limit(5)
@@ -121,7 +131,8 @@ class DashboardController extends Controller
             'sentCount', 'openPipeline', 'wonThisMonth', 'wonTotal', 'wonMargin', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
             'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
-            'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort'
+            'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort',
+            'period', 'periodLabel'
         ));
     }
 
@@ -215,17 +226,46 @@ class DashboardController extends Controller
 
     protected function applyLeaderboardPeriodToCloseDate($query, string $period): void
     {
-        if ($period === 'month') {
-            $query->whereBetween('close_date', [
-                Carbon::now()->startOfMonth()->toDateString(),
-                Carbon::now()->endOfMonth()->toDateString(),
-            ]);
-        } elseif ($period === 'year') {
-            $query->whereBetween('close_date', [
-                Carbon::now()->startOfYear()->toDateString(),
-                Carbon::now()->endOfYear()->toDateString(),
-            ]);
+        $this->applyPeriodToDateColumn($query, 'close_date', $this->periodDateRange($period));
+    }
+
+    /**
+     * @return array{0: Carbon, 1: Carbon}|null
+     */
+    protected function periodDateRange(string $period): ?array
+    {
+        $now = Carbon::now();
+
+        return match ($period) {
+            'month' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+            '3months' => [$now->copy()->subMonthsNoOverflow(3)->startOfDay(), $now->copy()->endOfDay()],
+            '6months' => [$now->copy()->subMonthsNoOverflow(6)->startOfDay(), $now->copy()->endOfDay()],
+            'year' => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+            'alltime' => null,
+            default => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+        };
+    }
+
+    protected function periodLabel(string $period): string
+    {
+        return match ($period) {
+            'month' => 'bulan ini',
+            '3months' => '3 bulan terakhir',
+            '6months' => '6 bulan terakhir',
+            'year' => 'tahun ini',
+            'alltime' => 'semua waktu',
+            default => 'tahun ini',
+        };
+    }
+
+    protected function applyPeriodToDateColumn($query, string $column, ?array $range): void
+    {
+        if ($range === null) {
+            return;
         }
+
+        [$start, $end] = $range;
+        $query->whereBetween($column, [$start, $end]);
     }
 
     protected function deadlineAlertsForUser($user): Collection

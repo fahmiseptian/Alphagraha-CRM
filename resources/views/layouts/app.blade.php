@@ -4,8 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>@yield('title', 'Dashboard') &middot; {{ config('app.name') }}</title>
 
+
+    {{-- Website icon & logo --}}
+    <link rel="icon" type="image/png" href="{{ asset('images/logo-crm.png') }}">
+    <link rel="apple-touch-icon" href="{{ asset('images/logo-crm.png') }}">
+    <link rel="shortcut icon" href="{{ asset('images/logo-crm.png') }}">
+    <title>@yield('title', 'Dashboard') &middot; {{ config('app.name') }}</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -50,7 +56,9 @@
            class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col transform bg-slate-900 text-slate-300 shadow-xl transition-transform duration-200 lg:translate-x-0">
         <div class="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-5">
             <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
-                <i class="bi bi-bezier2 text-lg"></i>
+                <img src="{{ asset('images/logo-crm.png') }}" alt="AGC CRM"
+                     class="h-7 w-7 object-contain"
+                     loading="eager">
             </div>
             <div>
                 <div class="text-sm font-semibold leading-tight text-white">AGC CRM</div>
