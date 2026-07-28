@@ -4,29 +4,135 @@
 @section('content')
 @include('partials.deadline-alert')
 
+@php
+    $dashQuery = array_filter([
+        'period' => $period,
+        'leaderboard_period' => $leaderboardPeriod,
+        'leaderboard_sort' => $leaderboardSort,
+        'sales' => $selectedSalesId,
+    ], fn ($v) => filled($v));
+@endphp
+
 <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
     <div>
         <h2 class="crm-page-title">Hi, {{ Str::before(auth()->user()->name, ' ') }}!</h2>
-        <p class="crm-page-desc">Ringkasan aktivitas penjualan untuk {{ $periodLabel }}.</p>
+        <p class="crm-page-desc">
+            Ringkasan aktivitas penjualan untuk {{ $periodLabel }}
+            @if ($selectedSales)
+                · <span class="font-medium text-brand-700">{{ $selectedSales->display_name }}</span>
+            @endif
+            .
+        </p>
     </div>
-    <form method="GET" action="{{ route('dashboard') }}" class="flex items-center gap-2">
-        @if (request('leaderboard_period'))
-            <input type="hidden" name="leaderboard_period" value="{{ request('leaderboard_period') }}">
-        @endif
-        @if (request('leaderboard_sort'))
-            <input type="hidden" name="leaderboard_sort" value="{{ request('leaderboard_sort') }}">
-        @endif
-        <label class="text-xs font-medium text-slate-500">Periode</label>
-        <select name="period" onchange="this.form.submit()"
-                class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-200">
-            <option value="year" @selected($period === 'year')>Tahun ini</option>
-            <option value="month" @selected($period === 'month')>Bulan ini</option>
-            <option value="3months" @selected($period === '3months')>3 Bulan</option>
-            <option value="6months" @selected($period === '6months')>6 Bulan</option>
-            <option value="alltime" @selected($period === 'alltime')>All Time</option>
-        </select>
-    </form>
+    <div class="flex flex-wrap items-center gap-2">
+        <a href="{{ route('dashboard', array_merge($dashQuery, ['detail' => 1, 'detail_start' => $detailStart->toDateString(), 'detail_end' => $detailEnd->toDateString()])) }}"
+           class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">
+            <i class="bi bi-bar-chart-line"></i> Detail
+        </a>
+        <form method="GET" action="{{ route('dashboard') }}" class="flex items-center gap-2">
+            @if ($leaderboardPeriod)<input type="hidden" name="leaderboard_period" value="{{ $leaderboardPeriod }}">@endif
+            @if ($leaderboardSort)<input type="hidden" name="leaderboard_sort" value="{{ $leaderboardSort }}">@endif
+            @if ($selectedSalesId)<input type="hidden" name="sales" value="{{ $selectedSalesId }}">@endif
+            <label class="text-xs font-medium text-slate-500">Periode</label>
+            <select name="period" onchange="this.form.submit()"
+                    class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-200">
+                <option value="year" @selected($period === 'year')>Tahun ini</option>
+                <option value="month" @selected($period === 'month')>Bulan ini</option>
+                <option value="3months" @selected($period === '3months')>3 Bulan</option>
+                <option value="6months" @selected($period === '6months')>6 Bulan</option>
+                <option value="alltime" @selected($period === 'alltime')>All Time</option>
+            </select>
+        </form>
+    </div>
 </div>
+
+@if ($showDetail)
+    <x-card class="mb-4" title="Detail Dashboard — Rekapan Penjualan & Margin">
+        <x-slot:action>
+            <a href="{{ route('dashboard', $dashQuery) }}" class="text-xs font-medium text-slate-500 hover:text-slate-700">
+                <i class="bi bi-x-lg"></i> Tutup
+            </a>
+        </x-slot:action>
+
+        <form method="GET" action="{{ route('dashboard') }}" class="mb-4 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="detail" value="1">
+            <input type="hidden" name="period" value="{{ $period }}">
+            @if ($leaderboardPeriod)<input type="hidden" name="leaderboard_period" value="{{ $leaderboardPeriod }}">@endif
+            @if ($leaderboardSort)<input type="hidden" name="leaderboard_sort" value="{{ $leaderboardSort }}">@endif
+            @if ($selectedSalesId)<input type="hidden" name="sales" value="{{ $selectedSalesId }}">@endif
+
+            <div>
+                <label class="mb-1 block text-xs font-medium text-slate-500">Start tanggal</label>
+                <input type="date" name="detail_start" value="{{ $detailStart->toDateString() }}"
+                       class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-200">
+            </div>
+            <div>
+                <label class="mb-1 block text-xs font-medium text-slate-500">End tanggal</label>
+                <input type="date" name="detail_end" value="{{ $detailEnd->toDateString() }}"
+                       class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-200">
+            </div>
+            <button type="submit"
+                    class="rounded-lg bg-brand-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700">
+                Tampilkan
+            </button>
+        </form>
+
+        @php
+            $recapTotal = $dailyRecap->sum('won_total');
+            $recapMargin = $dailyRecap->sum('won_margin');
+            $recapDeals = $dailyRecap->sum('deal_count');
+        @endphp
+
+        <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div class="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                <p class="text-xs text-slate-500">Total Penjualan</p>
+                <p class="mt-1 text-lg font-bold text-slate-800">{{ money($recapTotal) }}</p>
+            </div>
+            <div class="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                <p class="text-xs text-slate-500">Total Margin</p>
+                <p class="mt-1 text-lg font-bold text-green-700">{{ money($recapMargin) }}</p>
+            </div>
+            <div class="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                <p class="text-xs text-slate-500">Jumlah Deal Closed Won</p>
+                <p class="mt-1 text-lg font-bold text-slate-800">{{ number_format($recapDeals) }}</p>
+            </div>
+        </div>
+
+        @if ($dailyRecap->isNotEmpty())
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-left text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
+                            <th class="pb-2 pr-4 font-medium">Tanggal</th>
+                            <th class="pb-2 pr-4 font-medium text-right">Deal</th>
+                            <th class="pb-2 pr-4 font-medium text-right">Penjualan</th>
+                            <th class="pb-2 font-medium text-right">Margin</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-50">
+                        @foreach ($dailyRecap as $row)
+                            <tr>
+                                <td class="py-2.5 pr-4 font-medium text-slate-700">
+                                    {{ $row['day']->translatedFormat('d M Y') }}
+                                </td>
+                                <td class="py-2.5 pr-4 text-right text-slate-600">{{ $row['deal_count'] }}</td>
+                                <td class="py-2.5 pr-4 text-right font-medium text-slate-800">{{ money($row['won_total']) }}</td>
+                                <td class="py-2.5 text-right font-medium {{ $row['won_margin'] >= 0 ? 'text-green-700' : 'text-red-600' }}">
+                                    {{ money($row['won_margin']) }}
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            <p class="py-6 text-center text-sm text-slate-400">
+                Tidak ada Closed Won pada rentang tanggal ini
+                @if ($selectedSales) untuk {{ $selectedSales->display_name }} @endif.
+            </p>
+        @endif
+    </x-card>
+@endif
 
 {{-- Nominal angka --}}
 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -51,6 +157,7 @@
                 </p>
                 <form method="GET" action="{{ route('dashboard') }}" class="flex flex-nowrap items-center justify-end gap-1.5">
                     <input type="hidden" name="period" value="{{ $period }}">
+                    @if ($selectedSalesId)<input type="hidden" name="sales" value="{{ $selectedSalesId }}">@endif
                     @if (auth()->user()->isAdmin())
                         <select name="leaderboard_sort" onchange="this.form.submit()"
                                 class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">
@@ -63,6 +170,8 @@
                             class="crm-leaderboard-widget__select">
                         <option value="year" @selected($leaderboardPeriod === 'year')>This Year</option>
                         <option value="month" @selected($leaderboardPeriod === 'month')>This Month</option>
+                        <option value="3months" @selected($leaderboardPeriod === '3months')>3 Months</option>
+                        <option value="6months" @selected($leaderboardPeriod === '6months')>6 Months</option>
                         <option value="alltime" @selected($leaderboardPeriod === 'alltime')>All Time</option>
                     </select>
                 </form>
@@ -83,7 +192,22 @@
                 </div>
                 <ul class="divide-y divide-slate-50">
                     @foreach ($salesLeaderboard as $entry)
-                        <li @class(['crm-leaderboard-table__row', 'bg-brand-50/50' => $entry['user_id'] === auth()->id()])>
+                        @php
+                            $isSelected = $selectedSalesId === $entry['user_id'];
+                            $salesUrl = route('dashboard', array_merge(
+                                array_filter([
+                                    'period' => $period,
+                                    'leaderboard_period' => $leaderboardPeriod,
+                                    'leaderboard_sort' => $leaderboardSort,
+                                ]),
+                                $isSelected ? [] : ['sales' => $entry['user_id']]
+                            ));
+                        @endphp
+                        <li @class([
+                            'crm-leaderboard-table__row',
+                            'bg-brand-50/50' => $entry['user_id'] === auth()->id() && ! $isSelected,
+                            'bg-brand-50 ring-1 ring-inset ring-brand-200' => $isSelected,
+                        ])>
                             @if ($entry['rank'] === 1)
                                 <span class="crm-leaderboard-rank crm-leaderboard-rank--gold crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
                             @elseif ($entry['rank'] === 2)
@@ -94,12 +218,26 @@
                                 <span class="crm-leaderboard-rank crm-leaderboard-rank--sm">{{ $entry['rank'] }}</span>
                             @endif
                             <div class="crm-leaderboard-table__sales min-w-0">
-                                <p class="truncate text-xs font-medium text-slate-800">
-                                    {{ $entry['name'] }}
-                                    @if ($entry['user_id'] === auth()->id())
-                                        <span class="text-brand-600">· You</span>
-                                    @endif
-                                </p>
+                                @if (! auth()->user()->isSales())
+                                    <a href="{{ $salesUrl }}"
+                                       class="block truncate text-xs font-medium text-slate-800 hover:text-brand-700 hover:underline"
+                                       title="{{ $isSelected ? 'Tampilkan semua sales' : 'Lihat pipeline '.$entry['name'] }}">
+                                        {{ $entry['name'] }}
+                                        @if ($entry['user_id'] === auth()->id())
+                                            <span class="text-brand-600">· You</span>
+                                        @endif
+                                        @if ($isSelected)
+                                            <span class="text-brand-600">· aktif</span>
+                                        @endif
+                                    </a>
+                                @else
+                                    <p class="truncate text-xs font-medium text-slate-800">
+                                        {{ $entry['name'] }}
+                                        @if ($entry['user_id'] === auth()->id())
+                                            <span class="text-brand-600">· You</span>
+                                        @endif
+                                    </p>
+                                @endif
                                 @if (! empty($entry['target_period_label']))
                                     <p class="truncate text-[10px] text-slate-400">
                                         {{ $entry['target_period_label'] }}
@@ -111,11 +249,6 @@
                                 @if (! empty($entry['target_met']))
                                     <p class="truncate text-[10px] font-medium text-green-600" title="{{ money($entry['target_won_total']) }} / {{ money($entry['sales_target']) }}">
                                         <i class="bi bi-check-circle-fill"></i> Target terpenuhi
-                                    </p>
-                                @else
-                                    <p class="truncate text-[10px] font-medium text-amber-600"
-                                       title="Pencapaian {{ money($entry['target_won_total'] ?? 0) }} dari {{ money($entry['sales_target']) }}">
-                                        Belum terpenuhi · kurang {{ money_compact($entry['target_remaining'] ?? 0) }}
                                     </p>
                                 @endif
                             </div>
@@ -143,8 +276,16 @@
                     @endforeach
                 </ul>
             </div>
+            @if ($selectedSalesId && ! auth()->user()->isSales())
+                <div class="border-t border-slate-100 px-4 py-2">
+                    <a href="{{ route('dashboard', array_filter(['period' => $period, 'leaderboard_period' => $leaderboardPeriod, 'leaderboard_sort' => $leaderboardSort])) }}"
+                       class="text-xs font-medium text-brand-600 hover:text-brand-700">
+                        <i class="bi bi-x-circle"></i> Reset filter sales
+                    </a>
+                </div>
+            @endif
         @else
-            <p class="px-4 py-8 text-center text-xs text-slate-400">Belum ada deal Closed Won.</p>
+            <p class="px-4 py-8 text-center text-xs text-slate-400">Belum ada data sales di periode ini.</p>
         @endif
         </x-card>
 
@@ -182,7 +323,16 @@
     </div>
 
     {{-- Opportunity pipeline --}}
-    <x-card title="Sales Pipeline" class="lg:col-span-2">
+    <x-card :title="$pipelineTitle" class="lg:col-span-2">
+        @if ($selectedSales && ! auth()->user()->isSales())
+            <x-slot:action>
+                <a href="{{ route('dashboard', array_filter(['period' => $period, 'leaderboard_period' => $leaderboardPeriod, 'leaderboard_sort' => $leaderboardSort])) }}"
+                   class="text-xs font-medium text-slate-500 hover:text-slate-700">
+                    Semua sales
+                </a>
+            </x-slot:action>
+        @endif
+
         @php $maxStage = max($stageDistribution ?: [1]); @endphp
         <div class="space-y-3">
             @forelse ($stageDistribution as $stage => $total)
@@ -199,6 +349,48 @@
                 <p class="py-6 text-center text-sm text-slate-400">No opportunity data yet.</p>
             @endforelse
         </div>
+
+        {{-- Detail pipeline deals --}}
+        @if ($pipelineDetails->isNotEmpty())
+            <div class="mt-5 border-t border-slate-100 pt-4">
+                <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    Detail Pipeline
+                    @if ($selectedSales)
+                        — {{ $selectedSales->display_name }}
+                    @endif
+                </p>
+                <div class="max-h-80 space-y-1 overflow-y-auto">
+                    @foreach ($pipelineDetails as $opp)
+                        <a href="{{ route('opportunities.show', $opp) }}"
+                           class="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-slate-50">
+                            @php
+                                $stageColor = match ($opp->stage) {
+                                    'Closed Won' => 'bg-green-100 text-green-700',
+                                    'Closed Lost' => 'bg-red-100 text-red-700',
+                                    'Negotiation' => 'bg-amber-100 text-amber-700',
+                                    'Proposal' => 'bg-blue-100 text-blue-700',
+                                    default => 'bg-slate-100 text-slate-600',
+                                };
+                            @endphp
+                            <span class="w-24 shrink-0 truncate rounded-md px-2 py-0.5 text-[10px] font-semibold {{ $stageColor }}">
+                                {{ $opp->stage }}
+                            </span>
+                            <div class="min-w-0 flex-1">
+                                <p class="truncate text-sm font-medium text-slate-800">{{ $opp->name }}</p>
+                                <p class="truncate text-[11px] text-slate-400">
+                                    {{ optional($opp->account)->name ?: ($opp->company ?: '—') }}
+                                </p>
+                            </div>
+                            <span class="shrink-0 text-xs font-semibold text-slate-700">{{ money($opp->amount) }}</span>
+                        </a>
+                    @endforeach
+                </div>
+            </div>
+        @elseif ($selectedSales)
+            <p class="mt-5 border-t border-slate-100 pt-4 text-center text-sm text-slate-400">
+                Tidak ada deal di pipeline untuk {{ $selectedSales->display_name }} pada periode ini.
+            </p>
+        @endif
     </x-card>
 </div>
 

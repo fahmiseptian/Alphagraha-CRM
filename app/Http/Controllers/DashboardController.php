@@ -29,9 +29,9 @@ class DashboardController extends Controller
         $periodRange = $this->periodDateRange($period);
         $periodLabel = $this->periodLabel($period);
 
-        $leaderboardPeriod = $request->get('leaderboard_period', 'year');
-        if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year'], true)) {
-            $leaderboardPeriod = 'year';
+        $leaderboardPeriod = $request->get('leaderboard_period', $period);
+        if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year', '3months', '6months'], true)) {
+            $leaderboardPeriod = $period;
         }
 
         $leaderboardSort = $request->get('leaderboard_sort', 'total');
@@ -43,6 +43,21 @@ class DashboardController extends Controller
             $leaderboardSort = 'percent';
         }
 
+        $selectedSalesId = $request->get('sales');
+        if ($user->isSales()) {
+            $selectedSalesId = $user->id;
+        } elseif ($selectedSalesId && ! is_string($selectedSalesId)) {
+            $selectedSalesId = null;
+        }
+
+        $selectedSales = null;
+        if ($selectedSalesId) {
+            $selectedSales = EspoUser::query()->find($selectedSalesId);
+            if (! $selectedSales) {
+                $selectedSalesId = null;
+            }
+        }
+
         $salesLeaderboard = $this->buildSalesLeaderboard($leaderboardPeriod, $leaderboardSort);
 
         $customersCount = $this->scopeAssigned(Account::query())->count();
@@ -51,6 +66,8 @@ class DashboardController extends Controller
         $quotationQuery = Quotation::query();
         if ($user->isSales()) {
             $quotationQuery->where('created_by', $user->id);
+        } elseif ($selectedSalesId) {
+            $quotationQuery->where('created_by', $selectedSalesId);
         }
         $this->applyPeriodToDateColumn($quotationQuery, 'quotation_date', $periodRange);
         $quotationsCount = (clone $quotationQuery)->count();
@@ -62,28 +79,31 @@ class DashboardController extends Controller
         $quotationsMargin = $activeQuotations->sum(fn (Quotation $quotation) => $quotation->totalItemsMargin());
         $sentCount = (clone $quotationQuery)->where('status', 'sent')->count();
 
-        // Pipeline opportunity (deal) yang masih terbuka — snapshot terkini (tidak di-filter periode).
-        $openPipeline = $this->scopeAssigned(Opportunity::query())
-            ->whereIn('stage', Opportunity::OPEN_STAGES)
-            ->sum('amount');
+        // Open pipeline — ikut periode + filter sales (jika dipilih).
+        $openPipelineQuery = $this->scopeAssigned(Opportunity::query())
+            ->whereIn('stage', Opportunity::OPEN_STAGES);
+        $this->applySalesFilter($openPipelineQuery, $selectedSalesId);
+        $this->applyPeriodToOpenOpportunities($openPipelineQuery, $periodRange);
+        $openPipeline = $openPipelineQuery->sum('amount');
 
         $wonThisMonth = $this->scopeAssigned(Opportunity::query())
             ->where('stage', Opportunity::WON_STAGE)
-            ->whereBetween('close_date', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
-            ->sum('amount');
+            ->whereBetween('close_date', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()]);
+        $this->applySalesFilter($wonThisMonth, $selectedSalesId);
+        $wonThisMonth = $wonThisMonth->sum('amount');
 
         $wonQuery = $this->scopeAssigned(Opportunity::query())
             ->where('stage', Opportunity::WON_STAGE);
+        $this->applySalesFilter($wonQuery, $selectedSalesId);
         $this->applyPeriodToDateColumn($wonQuery, 'close_date', $periodRange);
         $wonTotal = (clone $wonQuery)->sum('amount');
         $wonMargin = (float) (clone $wonQuery)->sum('crm_won_margin');
 
-        // Distribusi stage opportunity untuk grafik sederhana (snapshot terkini).
-        $stageDistribution = $this->scopeAssigned(Opportunity::query())
-            ->selectRaw('stage, COUNT(*) as total, SUM(amount) as value')
-            ->groupBy('stage')
-            ->pluck('total', 'stage')
-            ->toArray();
+        // Distribusi stage — ikut periode + filter sales.
+        $stageDistribution = $this->buildStageDistribution($periodRange, $selectedSalesId);
+
+        // Detail pipeline per deal (saat sales dipilih, atau selalu ringkas).
+        $pipelineDetails = $this->buildPipelineDetails($periodRange, $selectedSalesId);
 
         // Distribusi status penawaran.
         $quotationStatus = (clone $quotationQuery)
@@ -91,6 +111,21 @@ class DashboardController extends Controller
             ->groupBy('status')
             ->pluck('total', 'status')
             ->toArray();
+
+        // Detail Dashboard: rekapan harian penjualan & margin.
+        $detailStart = $request->get('detail_start')
+            ? Carbon::parse($request->get('detail_start'))->startOfDay()
+            : ($periodRange[0] ?? Carbon::now()->startOfMonth());
+        $detailEnd = $request->get('detail_end')
+            ? Carbon::parse($request->get('detail_end'))->endOfDay()
+            : ($periodRange[1] ?? Carbon::now()->endOfDay());
+        if ($detailStart->gt($detailEnd)) {
+            [$detailStart, $detailEnd] = [$detailEnd->copy()->startOfDay(), $detailStart->copy()->endOfDay()];
+        }
+        $showDetail = $request->boolean('detail');
+        $dailyRecap = $showDetail
+            ? $this->buildDailyRecap($detailStart, $detailEnd, $selectedSalesId)
+            : collect();
 
         // Aktivitas: tugas mendatang & terlambat milik user.
         $upcomingActivities = Activity::with(['account', 'lead'])
@@ -109,6 +144,7 @@ class DashboardController extends Controller
         // Penawaran terbaru.
         $recentQuotations = Quotation::query()
             ->when($user->isSales(), fn ($q) => $q->where('created_by', $user->id))
+            ->when(! $user->isSales() && $selectedSalesId, fn ($q) => $q->where('created_by', $selectedSalesId))
             ->with('creator')
             ->latest()
             ->limit(5)
@@ -126,14 +162,131 @@ class DashboardController extends Controller
 
         $showDeadlinePopup = session('show_deadline_popup') && $deadlineAlerts->isNotEmpty();
 
+        $pipelineTitle = $selectedSales
+            ? 'Sales Pipeline - '.$selectedSales->display_name
+            : 'Sales Pipeline';
+
         return view('dashboard', compact(
             'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue', 'quotationsMargin',
             'sentCount', 'openPipeline', 'wonThisMonth', 'wonTotal', 'wonMargin', 'stageDistribution',
             'quotationStatus', 'upcomingActivities', 'overdueCount',
             'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
             'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort',
-            'period', 'periodLabel'
+            'period', 'periodLabel',
+            'selectedSalesId', 'selectedSales', 'pipelineTitle', 'pipelineDetails',
+            'showDetail', 'detailStart', 'detailEnd', 'dailyRecap'
         ));
+    }
+
+    protected function applySalesFilter($query, ?string $salesId): void
+    {
+        if ($salesId) {
+            $query->where('assigned_user_id', $salesId);
+        }
+    }
+
+    protected function applyPeriodToOpenOpportunities($query, ?array $range): void
+    {
+        if ($range === null) {
+            return;
+        }
+
+        [$start, $end] = $range;
+        $query->whereBetween('created_at', [$start, $end]);
+    }
+
+    protected function buildStageDistribution(?array $periodRange, ?string $salesId): array
+    {
+        $query = $this->scopeAssigned(Opportunity::query());
+        $this->applySalesFilter($query, $salesId);
+        $this->applyPeriodToStageQuery($query, $periodRange);
+
+        $rows = $query
+            ->selectRaw('stage, COUNT(*) as total, COALESCE(SUM(amount), 0) as value')
+            ->groupBy('stage')
+            ->get()
+            ->keyBy('stage');
+
+        $distribution = [];
+        foreach (Opportunity::STAGES as $stage) {
+            if ($rows->has($stage)) {
+                $distribution[$stage] = (int) $rows->get($stage)->total;
+            }
+        }
+
+        // Stage lain (jika ada di data) tetap ditampilkan di akhir.
+        foreach ($rows as $stage => $row) {
+            if (! array_key_exists($stage, $distribution)) {
+                $distribution[$stage] = (int) $row->total;
+            }
+        }
+
+        return $distribution;
+    }
+
+    protected function applyPeriodToStageQuery($query, ?array $range): void
+    {
+        if ($range === null) {
+            return;
+        }
+
+        [$start, $end] = $range;
+        $closed = [Opportunity::WON_STAGE, Opportunity::LOST_STAGE];
+
+        $query->where(function ($q) use ($start, $end, $closed) {
+            $q->where(function ($q2) use ($start, $end, $closed) {
+                $q2->whereIn('stage', $closed)
+                    ->whereBetween('close_date', [$start->toDateString(), $end->toDateString()]);
+            })->orWhere(function ($q2) use ($start, $end, $closed) {
+                $q2->whereNotIn('stage', $closed)
+                    ->whereBetween('created_at', [$start, $end]);
+            });
+        });
+    }
+
+    protected function buildPipelineDetails(?array $periodRange, ?string $salesId): Collection
+    {
+        if (! $salesId && ! auth()->user()?->isSales()) {
+            // Tanpa sales terpilih: tampilkan ringkas top deal open saja.
+            $query = $this->scopeAssigned(Opportunity::query())
+                ->with('account')
+                ->whereIn('stage', Opportunity::OPEN_STAGES)
+                ->orderByDesc('amount')
+                ->limit(8);
+            $this->applyPeriodToOpenOpportunities($query, $periodRange);
+
+            return $query->get();
+        }
+
+        $query = $this->scopeAssigned(Opportunity::query())
+            ->with('account')
+            ->orderByRaw("FIELD(stage, 'Prospecting','Qualification','Proposal','Negotiation','Closed Won','Closed Lost')")
+            ->orderByDesc('amount')
+            ->limit(40);
+        $this->applySalesFilter($query, $salesId);
+        $this->applyPeriodToStageQuery($query, $periodRange);
+
+        return $query->get();
+    }
+
+    protected function buildDailyRecap(Carbon $start, Carbon $end, ?string $salesId): Collection
+    {
+        $query = $this->scopeAssigned(Opportunity::query())
+            ->where('stage', Opportunity::WON_STAGE)
+            ->whereBetween('close_date', [$start->toDateString(), $end->toDateString()]);
+        $this->applySalesFilter($query, $salesId);
+
+        return $query
+            ->selectRaw('DATE(close_date) as day, COUNT(*) as deal_count, COALESCE(SUM(amount), 0) as won_total, COALESCE(SUM(crm_won_margin), 0) as won_margin')
+            ->groupByRaw('DATE(close_date)')
+            ->orderBy('day')
+            ->get()
+            ->map(fn ($row) => [
+                'day' => Carbon::parse($row->day),
+                'deal_count' => (int) $row->deal_count,
+                'won_total' => (float) $row->won_total,
+                'won_margin' => (float) $row->won_margin,
+            ]);
     }
 
     protected function buildSalesLeaderboard(string $period, string $sort = 'total'): Collection
@@ -147,41 +300,60 @@ class DashboardController extends Controller
         $wonRows = $wonQuery
             ->selectRaw('assigned_user_id, COUNT(*) as won_count, COALESCE(SUM(amount), 0) as won_total, COALESCE(SUM(crm_won_margin), 0) as won_margin')
             ->groupBy('assigned_user_id')
-            ->get();
+            ->get()
+            ->keyBy('assigned_user_id');
 
-        if ($wonRows->isEmpty()) {
+        // Sertakan sales yang punya deal open di periode, agar nama tetap muncul.
+        $openQuery = Opportunity::query()
+            ->whereIn('stage', Opportunity::OPEN_STAGES)
+            ->whereNotNull('assigned_user_id');
+        $openRange = $this->periodDateRange($period);
+        $this->applyPeriodToOpenOpportunities($openQuery, $openRange);
+        $openRows = $openQuery
+            ->selectRaw('assigned_user_id, COUNT(*) as open_count, COALESCE(SUM(amount), 0) as open_total')
+            ->groupBy('assigned_user_id')
+            ->get()
+            ->keyBy('assigned_user_id');
+
+        $userIds = $wonRows->keys()->merge($openRows->keys())->unique()->values();
+
+        if ($userIds->isEmpty()) {
             return collect();
         }
 
         $users = EspoUser::query()
-            ->whereIn('id', $wonRows->pluck('assigned_user_id'))
+            ->whereIn('id', $userIds)
             ->get()
             ->keyBy('id');
 
         $profiles = UserProfile::query()
-            ->whereIn('user_id', $wonRows->pluck('assigned_user_id'))
+            ->whereIn('user_id', $userIds)
             ->get()
             ->keyBy('user_id');
 
-        $entries = $wonRows->map(function ($row) use ($users, $profiles) {
-            $user = $users->get($row->assigned_user_id);
-            $profile = $profiles->get($row->assigned_user_id);
+        $entries = $userIds->map(function ($userId) use ($users, $profiles, $wonRows, $openRows) {
+            $user = $users->get($userId);
+            $profile = $profiles->get($userId);
+            $won = $wonRows->get($userId);
+            $open = $openRows->get($userId);
             $salesTarget = $profile?->resolvedSalesTarget()
                 ?? UserProfile::DEFAULT_SALES_TARGET;
-            $wonTotal = (float) $row->won_total;
+            $wonTotal = (float) ($won->won_total ?? 0);
             $targetWonTotal = $profile
-                ? $this->wonTotalForTargetPeriod($row->assigned_user_id, $profile)
+                ? $this->wonTotalForTargetPeriod($userId, $profile)
                 : $wonTotal;
             $deadline = $profile?->resolvedSalesTargetDeadline();
             $targetRemaining = max(0, $salesTarget - $targetWonTotal);
             $targetMet = $targetWonTotal >= $salesTarget && $salesTarget > 0;
 
             return [
-                'user_id' => $row->assigned_user_id,
+                'user_id' => $userId,
                 'name' => $user?->display_name ?? 'Unknown',
-                'won_count' => (int) $row->won_count,
+                'won_count' => (int) ($won->won_count ?? 0),
                 'won_total' => $wonTotal,
-                'won_margin' => (float) $row->won_margin,
+                'won_margin' => (float) ($won->won_margin ?? 0),
+                'open_count' => (int) ($open->open_count ?? 0),
+                'open_total' => (float) ($open->open_total ?? 0),
                 'sales_target' => $salesTarget,
                 'target_period' => $profile?->resolvedSalesTargetPeriod() ?? UserProfile::TARGET_PERIOD_1_YEAR,
                 'target_period_label' => $profile?->salesTargetPeriodLabel()
@@ -200,11 +372,14 @@ class DashboardController extends Controller
         $sorted = $entries->sort(function (array $a, array $b) use ($sort) {
             return match ($sort) {
                 'margin' => $b['won_margin'] <=> $a['won_margin']
-                    ?: $b['won_total'] <=> $a['won_total'],
+                    ?: $b['won_total'] <=> $a['won_total']
+                    ?: $b['open_total'] <=> $a['open_total'],
                 'percent' => $b['target_progress'] <=> $a['target_progress']
-                    ?: $b['won_total'] <=> $a['won_total'],
+                    ?: $b['won_total'] <=> $a['won_total']
+                    ?: $b['open_total'] <=> $a['open_total'],
                 default => $b['won_total'] <=> $a['won_total']
-                    ?: $b['won_margin'] <=> $a['won_margin'],
+                    ?: $b['won_margin'] <=> $a['won_margin']
+                    ?: $b['open_total'] <=> $a['open_total'],
             };
         })->values()->take(10);
 
