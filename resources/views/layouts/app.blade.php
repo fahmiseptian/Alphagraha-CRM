@@ -257,6 +257,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
+<script src="{{ asset('js/crm-number.js') }}"></script>
 <script src="{{ asset('js/crm-select2.js') }}"></script>
 @stack('scripts')
 </body>

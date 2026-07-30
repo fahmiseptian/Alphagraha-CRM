@@ -7,13 +7,21 @@
     $pphNwJasa = (float) old('pph_non_wapu_jasa', $pphNonWapuJasa);
     $pphWBarang = (float) old('pph_wapu_barang', $pphWapuBarang);
     $pphWJasa = (float) old('pph_wapu_jasa', $pphWapuJasa);
-    $pnbp = (float) old('pnbp_percent', $pnbpPercent);
     $pph29 = (float) old('pph29_percent', $pph29Percent);
+    $tiersOld = old('pnbp_tiers');
+    $tiers = collect(is_array($tiersOld) ? $tiersOld : ($pnbpTiers ?? []))->map(fn ($t) => [
+        'max' => $t['max'] ?? null,
+        'rate_percent' => (float) ($t['rate_percent'] ?? 0),
+        'cap' => (float) ($t['cap'] ?? 0),
+    ])->values()->all();
+    if ($tiers === []) {
+        $tiers = \App\Support\OpportunityProductPricing::defaultPnbpTiers();
+    }
 @endphp
 
 <div class="mb-4">
     <h2 class="text-lg font-semibold text-slate-800">Pengaturan Pajak</h2>
-    <p class="text-sm text-slate-500">PPN, PPH per kategori (Non Wapu / Wapu / Inaproc), PNBP, dan PPH Pasal 29.</p>
+    <p class="text-sm text-slate-500">PPN, PPH per kategori (Non Wapu / Wapu / Inaproc), PNBP berjenjang, dan PPH Pasal 29.</p>
 </div>
 
 <div class="grid max-w-6xl gap-5 lg:grid-cols-5"
@@ -22,8 +30,8 @@
          pphNonWapuJasa: {{ $pphNwJasa }},
          pphWapuBarang: {{ $pphWBarang }},
          pphWapuJasa: {{ $pphWJasa }},
-         pnbpPercent: {{ $pnbp }},
          pph29Percent: {{ $pph29 }},
+         pnbpTiers: {{ \Illuminate\Support\Js::from($tiers) }},
      })">
     <form method="POST" action="{{ route('settings.update') }}" class="space-y-5 lg:col-span-3">
         @csrf
@@ -40,8 +48,13 @@
         <x-card title="PPN">
             <div class="max-w-xs">
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">PPN (%) <span class="text-red-500">*</span></label>
-                <input type="number" name="ppn_percent" step="0.01" min="0" max="100" required x-model.number="ppn"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                <input type="text" inputmode="decimal" required
+                       x-effect="if (editingField !== 'ppn') $el.value = formatId(ppn, 2)"
+                       @focus="editingField = 'ppn'"
+                       @blur="editingField = null; $el.value = formatId(ppn, 2)"
+                       @input="ppn = parseId($event.target.value)"
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                <input type="hidden" name="ppn_percent" :value="ppn">
                 <p class="mt-1 text-xs text-slate-400">Konversi harga exclude ↔ include &amp; tax quotation.</p>
             </div>
         </x-card>
@@ -50,8 +63,13 @@
             <p class="mb-4 text-xs text-slate-500">Barang: PPN saja. Jasa: PPN + PPH di bawah.</p>
             <div class="max-w-xs">
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">PPH Jasa (%) <span class="text-red-500">*</span></label>
-                <input type="number" name="pph_non_wapu_jasa" step="0.01" min="0" max="100" required x-model.number="pphNonWapuJasa"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                <input type="text" inputmode="decimal" required
+                       x-effect="if (editingField !== 'pphNw') $el.value = formatId(pphNonWapuJasa, 2)"
+                       @focus="editingField = 'pphNw'"
+                       @blur="editingField = null; $el.value = formatId(pphNonWapuJasa, 2)"
+                       @input="pphNonWapuJasa = parseId($event.target.value)"
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                <input type="hidden" name="pph_non_wapu_jasa" :value="pphNonWapuJasa">
                 <p class="mt-1 text-xs text-slate-400">Default 2%.</p>
             </div>
         </x-card>
@@ -61,34 +79,104 @@
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                     <label class="mb-1.5 block text-sm font-medium text-slate-700">PPH Barang (%) <span class="text-red-500">*</span></label>
-                    <input type="number" name="pph_wapu_barang" step="0.01" min="0" max="100" required x-model.number="pphWapuBarang"
-                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <input type="text" inputmode="decimal" required
+                           x-effect="if (editingField !== 'pphWb') $el.value = formatId(pphWapuBarang, 2)"
+                           @focus="editingField = 'pphWb'"
+                           @blur="editingField = null; $el.value = formatId(pphWapuBarang, 2)"
+                           @input="pphWapuBarang = parseId($event.target.value)"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <input type="hidden" name="pph_wapu_barang" :value="pphWapuBarang">
                     <p class="mt-1 text-xs text-slate-400">Default 1.5%.</p>
                 </div>
                 <div>
                     <label class="mb-1.5 block text-sm font-medium text-slate-700">PPH Jasa (%) <span class="text-red-500">*</span></label>
-                    <input type="number" name="pph_wapu_jasa" step="0.01" min="0" max="100" required x-model.number="pphWapuJasa"
-                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <input type="text" inputmode="decimal" required
+                           x-effect="if (editingField !== 'pphWj') $el.value = formatId(pphWapuJasa, 2)"
+                           @focus="editingField = 'pphWj'"
+                           @blur="editingField = null; $el.value = formatId(pphWapuJasa, 2)"
+                           @input="pphWapuJasa = parseId($event.target.value)"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <input type="hidden" name="pph_wapu_jasa" :value="pphWapuJasa">
                     <p class="mt-1 text-xs text-slate-400">Default 2%.</p>
                 </div>
             </div>
         </x-card>
 
-        <x-card title="Inaproc — PNBP &\ PPH Pasal 29">
-            <p class="mb-4 text-xs text-slate-500">Hanya kategori Inaproc. PNBP dari basis jual; PPH 29 dari margin kotor.</p>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                    <label class="mb-1.5 block text-sm font-medium text-slate-700">PNBP (%) <span class="text-red-500">*</span></label>
-                    <input type="number" name="pnbp_percent" step="0.01" min="0" max="100" required x-model.number="pnbpPercent"
-                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
-                    <p class="mt-1 text-xs text-slate-400">Default 0.4%.</p>
-                </div>
-                <div>
-                    <label class="mb-1.5 block text-sm font-medium text-slate-700">PPH 29 (%) <span class="text-red-500">*</span></label>
-                    <input type="number" name="pph29_percent" step="0.01" min="0" max="100" required x-model.number="pph29Percent"
-                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
-                    <p class="mt-1 text-xs text-slate-400">Default 22% (dari margin kotor).</p>
-                </div>
+        <x-card title="Inaproc — PNBP berjenjang">
+            <p class="mb-3 text-xs text-slate-500">
+                Basis: <strong>harga jual include</strong>. Rumus tiap jenjang:
+                <code class="rounded bg-slate-100 px-1">MIN(jual_include × rate%, cap)</code>.
+                Batas kosong = di atas semua batas sebelumnya. Urutan otomatis dari batas terkecil.
+            </p>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+                            <th class="py-2 pr-2 font-medium">Batas jual include (≤)</th>
+                            <th class="py-2 pr-2 font-medium">Rate %</th>
+                            <th class="py-2 pr-2 font-medium">Cap (maks PNBP)</th>
+                            <th class="py-2 w-10"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(tier, i) in pnbpTiers" :key="i">
+                            <tr class="border-b border-slate-100">
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" placeholder="(di atas)"
+                                           x-effect="if (editingField !== `tmax-${i}`) $el.value = (tier.max === '' || tier.max === null) ? '' : formatId(tier.max)"
+                                           @focus="editingField = `tmax-${i}`"
+                                           @blur="editingField = null; $el.value = (tier.max === '' || tier.max === null) ? '' : formatId(tier.max)"
+                                           @input="tier.max = $event.target.value.trim() === '' ? '' : parseId($event.target.value)"
+                                           class="w-full min-w-[9rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`pnbp_tiers[${i}][max]`" :value="tier.max === '' || tier.max === null ? '' : tier.max">
+                                </td>
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" required
+                                           x-effect="if (editingField !== `trate-${i}`) $el.value = formatId(tier.rate_percent, 4)"
+                                           @focus="editingField = `trate-${i}`"
+                                           @blur="editingField = null; $el.value = formatId(tier.rate_percent, 4)"
+                                           @input="tier.rate_percent = parseId($event.target.value)"
+                                           class="w-full min-w-[5rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`pnbp_tiers[${i}][rate_percent]`" :value="tier.rate_percent">
+                                </td>
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" required
+                                           x-effect="if (editingField !== `tcap-${i}`) $el.value = formatId(tier.cap)"
+                                           @focus="editingField = `tcap-${i}`"
+                                           @blur="editingField = null; $el.value = formatId(tier.cap)"
+                                           @input="tier.cap = parseId($event.target.value)"
+                                           class="w-full min-w-[8rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`pnbp_tiers[${i}][cap]`" :value="tier.cap">
+                                </td>
+                                <td class="py-2 text-right">
+                                    <button type="button" @click="removePnbpTier(i)"
+                                            class="rounded p-1 text-red-500 hover:bg-red-50" title="Hapus"
+                                            :disabled="pnbpTiers.length <= 1">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <button type="button" @click="addPnbpTier()"
+                    class="mt-3 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <i class="bi bi-plus-lg"></i> Tambah jenjang
+            </button>
+        </x-card>
+
+        <x-card title="Inaproc — PPH Pasal 29">
+            <div class="max-w-xs">
+                <label class="mb-1.5 block text-sm font-medium text-slate-700">PPH 29 (%) <span class="text-red-500">*</span></label>
+                <input type="text" inputmode="decimal" required
+                       x-effect="if (editingField !== 'pph29') $el.value = formatId(pph29Percent, 2)"
+                       @focus="editingField = 'pph29'"
+                       @blur="editingField = null; $el.value = formatId(pph29Percent, 2)"
+                       @input="pph29Percent = parseId($event.target.value)"
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                <input type="hidden" name="pph29_percent" :value="pph29Percent">
+                <p class="mt-1 text-xs text-slate-400">Default 22%. Rumus: (jual exclude − modal exclude) × % × qty.</p>
             </div>
         </x-card>
 
@@ -119,13 +207,21 @@
                 </div>
                 <div>
                     <label class="mb-1 block text-xs font-medium text-slate-600">Harga jual exclude</label>
-                    <input type="number" step="0.01" min="0" x-model.number="sellExclude"
-                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm text-right">
+                    <input type="text" inputmode="decimal"
+                           x-effect="if (editingField !== 'calcSell') $el.value = formatId(sellExclude)"
+                           @focus="editingField = 'calcSell'"
+                           @blur="editingField = null; $el.value = formatId(sellExclude)"
+                           @input="sellExclude = parseId($event.target.value)"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm text-right tabular-nums">
                 </div>
                 <div>
                     <label class="mb-1 block text-xs font-medium text-slate-600">Modal / cost exclude</label>
-                    <input type="number" step="0.01" min="0" x-model.number="costExclude"
-                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm text-right">
+                    <input type="text" inputmode="decimal"
+                           x-effect="if (editingField !== 'calcCost') $el.value = formatId(costExclude)"
+                           @focus="editingField = 'calcCost'"
+                           @blur="editingField = null; $el.value = formatId(costExclude)"
+                           @input="costExclude = parseId($event.target.value)"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm text-right tabular-nums">
                 </div>
             </div>
 
@@ -141,15 +237,18 @@
                     <dd class="font-medium text-slate-800" x-text="format(pph)"></dd>
                 </div>
                 <div class="flex justify-between gap-3" x-show="taxCategory === 'inaproc'">
-                    <dt class="text-slate-500">PNBP <span x-text="pnbpPercent"></span>%</dt>
+                    <dt class="text-slate-500">
+                        PNBP
+                        <span class="text-xs text-slate-400" x-text="'· ' + matchedPnbpTier.rate_percent + '% cap ' + format(matchedPnbpTier.cap)"></span>
+                    </dt>
                     <dd class="font-medium text-slate-800" x-text="format(pnbp)"></dd>
                 </div>
                 <div class="flex justify-between gap-3 border-b border-slate-100 pb-2">
-                    <dt class="text-slate-500">Margin kotor</dt>
+                    <dt class="text-slate-500">Margin kotor <span class="text-xs text-slate-400" x-show="taxCategory === 'wapu' || taxCategory === 'inaproc'">(jual − PPH − modal include)</span></dt>
                     <dd class="font-medium text-slate-800" x-text="format(grossMargin)"></dd>
                 </div>
                 <div class="flex justify-between gap-3" x-show="taxCategory === 'inaproc'">
-                    <dt class="text-slate-500">PPH 29 <span x-text="pph29Percent"></span>% (dari kotor)</dt>
+                    <dt class="text-slate-500">PPH 29 <span x-text="pph29Percent"></span>% <span class="text-xs text-slate-400">(jual − modal) exclude</span></dt>
                     <dd class="font-medium text-slate-800" x-text="format(pph29)"></dd>
                 </div>
                 <div class="flex justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2">
@@ -172,15 +271,57 @@
             pphNonWapuJasa: Number(initial.pphNonWapuJasa) || 2,
             pphWapuBarang: Number(initial.pphWapuBarang) || 1.5,
             pphWapuJasa: Number(initial.pphWapuJasa) || 2,
-            pnbpPercent: Number(initial.pnbpPercent) || 0.4,
             pph29Percent: Number(initial.pph29Percent) || 22,
+            pnbpTiers: (initial.pnbpTiers || []).map(t => ({
+                max: t.max === null || t.max === undefined || t.max === '' ? '' : Number(t.max),
+                rate_percent: Number(t.rate_percent) || 0,
+                cap: Number(t.cap) || 0,
+            })),
+            editingField: null,
             taxCategory: 'non_wapu',
             itemKind: 'barang',
             sellExclude: 1000000,
             costExclude: 800000,
             round(v) { return Math.round((Number(v) || 0) * 100) / 100; },
+            formatId(value, decimals = 0) {
+                if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
+                return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: decimals });
+            },
+            parseId(str) {
+                if (window.CrmNumber) return window.CrmNumber.parse(str);
+                return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+            },
             format(v) {
-                return (Number(v) || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+                return this.formatId(v, 2);
+            },
+            addPnbpTier() {
+                this.pnbpTiers.push({ max: '', rate_percent: 0.05, cap: 0 });
+            },
+            removePnbpTier(i) {
+                if (this.pnbpTiers.length <= 1) return;
+                this.pnbpTiers.splice(i, 1);
+            },
+            sortedPnbpTiers() {
+                return [...this.pnbpTiers].map(t => ({
+                    max: t.max === '' || t.max === null || t.max === undefined ? null : Number(t.max),
+                    rate_percent: Number(t.rate_percent) || 0,
+                    cap: Number(t.cap) || 0,
+                })).sort((a, b) => {
+                    if (a.max === null && b.max === null) return 0;
+                    if (a.max === null) return 1;
+                    if (b.max === null) return -1;
+                    return a.max - b.max;
+                });
+            },
+            get matchedPnbpTier() {
+                const include = this.sellInclude;
+                const tiers = this.sortedPnbpTiers();
+                let fallback = tiers[tiers.length - 1] || { max: null, rate_percent: 0, cap: 0 };
+                for (const tier of tiers) {
+                    if (tier.max === null) return tier;
+                    if (include <= tier.max) return tier;
+                }
+                return fallback;
             },
             get pphPct() {
                 if (this.taxCategory === 'non_wapu' && this.itemKind === 'barang') return 0;
@@ -200,9 +341,11 @@
                     return 'Wapu · ' + (this.itemKind === 'barang' ? 'Barang' : 'Jasa')
                         + ': PPN ' + ppn + '% + PPH ' + this.pphPct + '%';
                 }
+                const t = this.matchedPnbpTier;
                 return 'Inaproc · ' + (this.itemKind === 'barang' ? 'Barang' : 'Jasa')
-                    + ': PPN ' + ppn + '% + PPH ' + this.pphPct + '% + PNBP ' + this.pnbpPercent
-                    + '% + PPH 29 ' + this.pph29Percent + '%';
+                    + ': PPN ' + ppn + '% + PPH ' + this.pphPct
+                    + '% + PNBP MIN(include×' + t.rate_percent + '%, ' + this.format(t.cap) + ')'
+                    + ' + PPH 29 ' + this.pph29Percent + '%';
             },
             get sellInclude() {
                 return this.round(this.sellExclude * (1 + (Number(this.ppn) || 0) / 100));
@@ -213,22 +356,42 @@
             },
             get pnbp() {
                 if (this.taxCategory !== 'inaproc') return 0;
-                return this.round(this.sellExclude * (Number(this.pnbpPercent) || 0) / 100);
+                const include = this.sellInclude;
+                if (include <= 0) return 0;
+                const t = this.matchedPnbpTier;
+                let amount = include * ((Number(t.rate_percent) || 0) / 100);
+                const cap = Number(t.cap) || 0;
+                if (cap > 0) amount = Math.min(amount, cap);
+                return this.round(amount);
             },
             get grossMargin() {
-                return this.round(this.sellExclude - this.pph - this.pnbp - (Number(this.costExclude) || 0));
+                const sell = Number(this.sellExclude) || 0;
+                const cost = Number(this.costExclude) || 0;
+                if (this.taxCategory === 'wapu' || this.taxCategory === 'inaproc') {
+                    const costInclude = this.round(cost * (1 + (Number(this.ppn) || 0) / 100));
+                    return this.round(sell - this.pph - costInclude);
+                }
+                return this.round(sell - this.pph - cost);
             },
             get pph29() {
-                if (this.taxCategory !== 'inaproc' || this.grossMargin <= 0) return 0;
-                return this.round(this.grossMargin * (Number(this.pph29Percent) || 0) / 100);
+                if (this.taxCategory !== 'inaproc') return 0;
+                const spread = (Number(this.sellExclude) || 0) - (Number(this.costExclude) || 0);
+                if (spread <= 0) return 0;
+                return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
             get netMargin() {
-                return this.round(this.grossMargin - this.pph29);
+                return this.round(this.grossMargin - this.pnbp - this.pph29);
             },
             get marginPercentLabel() {
                 const base = Number(this.sellExclude) || 0;
                 if (base <= 0) return '—';
-                return this.round((this.netMargin / base) * 100).toLocaleString('id-ID', {
+                const denom = (this.taxCategory === 'wapu' || this.taxCategory === 'inaproc')
+                    ? (base - this.pph)
+                    : base;
+
+                if (denom <= 0) return '—';
+
+                return this.round((this.netMargin / denom) * 100).toLocaleString('id-ID', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                 }) + '%';

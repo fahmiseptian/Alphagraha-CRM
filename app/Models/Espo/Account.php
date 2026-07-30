@@ -6,6 +6,7 @@ use App\Models\Activity;
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\Quotation;
 use App\Support\PaymentLevel;
+use App\Support\CustomerTop;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -23,7 +24,7 @@ class Account extends Model
         'name', 'type', 'industry', 'website', 'description',
         'billing_address_street', 'billing_address_city', 'billing_address_state',
         'billing_address_country', 'billing_address_postal_code', 'assigned_user_id',
-        'crm_payment_level',
+        'crm_payment_level', 'crm_top',
         'crm_province_code', 'crm_regency_code', 'crm_district_code', 'crm_billing_district',
     ];
 
@@ -57,6 +58,21 @@ class Account extends Model
     public function minMarginPercent(): ?float
     {
         return PaymentLevel::minMarginPercent($this->paymentLevel());
+    }
+
+    public function top(): string
+    {
+        return CustomerTop::normalize($this->crm_top);
+    }
+
+    public function topLabel(): string
+    {
+        return CustomerTop::label($this->crm_top);
+    }
+
+    public function topDays(): int
+    {
+        return CustomerTop::days($this->crm_top);
     }
 
     public function contacts(): HasMany

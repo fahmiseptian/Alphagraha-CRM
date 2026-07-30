@@ -37,27 +37,27 @@
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     Lancar <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="margin_lancar" step="0.01" min="0" max="100" required
+                <input type="text" inputmode="decimal" name="margin_lancar" required data-crm-number data-decimals="2"
                        value="{{ $mLancar }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Default 5%</p>
             </div>
             <div>
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     Mandek <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="margin_mandek" step="0.01" min="0" max="100" required
+                <input type="text" inputmode="decimal" name="margin_mandek" required data-crm-number data-decimals="2"
                        value="{{ $mMandek }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Default 8%</p>
             </div>
             <div>
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     Jelek <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="margin_jelek" step="0.01" min="0" max="100" required
+                <input type="text" inputmode="decimal" name="margin_jelek" required data-crm-number data-decimals="2"
                        value="{{ $mJelek }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Default 15%</p>
             </div>
         </div>
@@ -74,18 +74,18 @@
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     Nominal Umum <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="nominal_umum" step="0.01" min="0" required
+                <input type="text" inputmode="decimal" name="nominal_umum" required data-crm-number data-decimals="0"
                        value="{{ $nUmum }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Ambang margin nominal umum (Rp).</p>
             </div>
             <div>
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     Nominal dengan Ongkir BODETABEK <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="nominal_ongkir_pribadi" step="0.01" min="0" required
+                <input type="text" inputmode="decimal" name="nominal_ongkir_pribadi" required data-crm-number data-decimals="0"
                        value="{{ $nOngkir }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Ambang margin nominal bila memakai ongkir pribadi (Rp).</p>
             </div>
         </div>

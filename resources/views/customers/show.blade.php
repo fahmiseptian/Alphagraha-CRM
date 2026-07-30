@@ -28,6 +28,7 @@
                             };
                         @endphp
                         <x-badge :color="$levelColor">{{ $account->paymentLevelLabel() }}</x-badge>
+                        <x-badge color="slate">{{ $account->topLabel() }}</x-badge>
                     </div>
                 </div>
             </div>
@@ -40,6 +41,7 @@
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-person mr-1"></i>Sales</dt><dd class="text-slate-700">{{ optional($account->assignedUser)->display_name ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-cash-coin mr-1"></i>Level</dt><dd class="text-slate-700">{{ $account->paymentLevelLabel() }}@if ($account->minMarginPercent() !== null) <span class="text-xs text-slate-400">(min margin {{ number_format($account->minMarginPercent(), 0) }}%)</span>@endif</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-calendar2-check mr-1"></i>TOP</dt><dd class="text-slate-700">{{ $account->topLabel() }}</dd></div>
             </dl>
 
             <div class="mt-5 flex flex-wrap gap-2">

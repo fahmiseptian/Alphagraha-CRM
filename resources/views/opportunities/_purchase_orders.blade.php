@@ -44,6 +44,7 @@
             number: @js($poFormInitial['number']),
             paymentTerm: @js($poFormInitial['paymentTerm']),
             items: @js($poFormInitial['items'] ?: []),
+            editingField: null,
             openId: null,
             storeUrl: @js($poStoreUrl),
             updateBase: @js($poUpdateBase),
@@ -131,9 +132,17 @@
             grandTotal() {
                 return this.items.reduce((sum, item) => sum + this.lineTotal(item), 0);
             },
+            formatId(value, decimals = 0) {
+                if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
+                return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: decimals });
+            },
+            parseId(str) {
+                if (window.CrmNumber) return window.CrmNumber.parse(str);
+                return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+            },
             formatMoney(amount) {
                 const n = Math.round(Number(amount) || 0);
-                return 'Rp ' + n.toLocaleString('id-ID');
+                return 'Rp ' + this.formatId(n, 0);
             },
          }">
         <div class="flex items-center justify-between gap-3 px-5 pt-4">
@@ -163,7 +172,6 @@
         <div class="mx-5 mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5"
              x-data="{
                 editing: @js(old('crm_shipping_cost') !== null),
-                amount: @js(old('crm_shipping_cost', $opportunity->crm_shipping_cost)),
              }">
             <form method="POST" action="{{ route('opportunities.shipping-cost.update', $opportunity) }}"
                   class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -181,11 +189,12 @@
                         </span>
                     </template>
                     <template x-if="editing">
-                        <input type="number" name="crm_shipping_cost" step="0.01" min="0"
-                               x-model="amount"
+                        <input type="text" inputmode="decimal" name="crm_shipping_cost" data-crm-number data-decimals="0"
+                               value="{{ old('crm_shipping_cost', $opportunity->crm_shipping_cost ?? 0) }}"
                                placeholder="0"
-                               class="crm-field w-full max-w-[200px] text-right text-sm"
-                               autofocus>
+                               class="crm-field w-full max-w-[200px] text-right text-sm tabular-nums"
+                               autofocus
+                               x-init="$nextTick(() => window.CrmNumber && CrmNumber.enhance($el.parentElement))">
                     </template>
                 </div>
                 <div class="flex items-center gap-1.5">
@@ -198,7 +207,7 @@
                     </template>
                     <template x-if="editing">
                         <div class="flex items-center gap-1.5">
-                            <button type="button" @click="editing = false; amount = @js($opportunity->crm_shipping_cost)"
+                            <button type="button" @click="editing = false"
                                     class="text-xs text-slate-500 hover:text-slate-700">Batal</button>
                             <button type="submit"
                                     class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
@@ -273,13 +282,23 @@
                                 </div>
                                 <div class="sm:col-span-2">
                                     <label class="crm-label text-xs">Qty</label>
-                                    <input type="number" step="0.01" min="0.01" :name="'items[' + i + '][quantity]'"
-                                           x-model.number="item.quantity" required class="crm-field w-full text-right">
+                                    <input type="text" inputmode="decimal" required
+                                           x-effect="if (editingField !== `pq-${i}`) $el.value = formatId(item.quantity, 2)"
+                                           @focus="editingField = `pq-${i}`"
+                                           @blur="editingField = null; $el.value = formatId(item.quantity, 2)"
+                                           @input="item.quantity = parseId($event.target.value)"
+                                           class="crm-field w-full text-right tabular-nums">
+                                    <input type="hidden" :name="'items[' + i + '][quantity]'" :value="item.quantity">
                                 </div>
                                 <div class="sm:col-span-3">
                                     <label class="crm-label text-xs">Harga modal</label>
-                                    <input type="number" step="0.01" min="0" :name="'items[' + i + '][unit_price]'"
-                                           x-model.number="item.unit_price" required class="crm-field w-full text-right">
+                                    <input type="text" inputmode="decimal" required
+                                           x-effect="if (editingField !== `pp-${i}`) $el.value = formatId(item.unit_price)"
+                                           @focus="editingField = `pp-${i}`"
+                                           @blur="editingField = null; $el.value = formatId(item.unit_price)"
+                                           @input="item.unit_price = parseId($event.target.value)"
+                                           class="crm-field w-full text-right tabular-nums">
+                                    <input type="hidden" :name="'items[' + i + '][unit_price]'" :value="item.unit_price">
                                 </div>
                                 <div class="flex items-end justify-between gap-2 sm:col-span-2">
                                     <div class="min-w-0 flex-1">

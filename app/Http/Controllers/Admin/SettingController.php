@@ -19,7 +19,7 @@ class SettingController extends Controller
             'pphNonWapuJasa' => OpportunityProductPricing::pphNonWapuJasaPercent(),
             'pphWapuBarang' => OpportunityProductPricing::pphWapuBarangPercent(),
             'pphWapuJasa' => OpportunityProductPricing::pphWapuJasaPercent(),
-            'pnbpPercent' => OpportunityProductPricing::pnbpPercent(),
+            'pnbpTiers' => OpportunityProductPricing::pnbpTiers(),
             'pph29Percent' => OpportunityProductPricing::pph29Percent(),
         ]);
     }
@@ -31,8 +31,11 @@ class SettingController extends Controller
             'pph_non_wapu_jasa' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph_wapu_barang' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph_wapu_jasa' => ['required', 'numeric', 'min:0', 'max:100'],
-            'pnbp_percent' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph29_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+            'pnbp_tiers' => ['required', 'array', 'min:1'],
+            'pnbp_tiers.*.max' => ['nullable', 'numeric', 'min:0'],
+            'pnbp_tiers.*.rate_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+            'pnbp_tiers.*.cap' => ['required', 'numeric', 'min:0'],
         ]);
 
         CrmSetting::set('tax.ppn_percent', round((float) $data['ppn_percent'], 2), [
@@ -71,18 +74,26 @@ class SettingController extends Controller
             'description' => 'PPH untuk item Wapu + Jasa.',
         ]);
 
-        CrmSetting::set('tax.pnbp_percent', round((float) $data['pnbp_percent'], 2), [
+        $tiers = OpportunityProductPricing::normalizePnbpTiers($data['pnbp_tiers']);
+        CrmSetting::set('tax.pnbp_tiers', $tiers, [
+            'type' => 'json',
+            'group' => 'tax',
+            'label' => 'PNBP berjenjang',
+            'description' => 'Jenjang PNBP Inaproc dari harga jual include: batas, rate %, cap (MIN).',
+        ]);
+        // Legacy single % = rate jenjang pertama.
+        CrmSetting::set('tax.pnbp_percent', round((float) ($tiers[0]['rate_percent'] ?? 0.4), 4), [
             'type' => 'number',
             'group' => 'tax',
             'label' => 'PNBP (%)',
-            'description' => 'Persentase PNBP untuk kategori Inaproc (dari basis jual exclude).',
+            'description' => 'Legacy: disamakan dengan rate PNBP jenjang pertama.',
         ]);
 
         CrmSetting::set('tax.pph29_percent', round((float) $data['pph29_percent'], 2), [
             'type' => 'number',
             'group' => 'tax',
             'label' => 'PPH Pasal 29 (%)',
-            'description' => 'Tarif PPH badan (Pasal 29) untuk Inaproc, dihitung dari margin kotor.',
+            'description' => 'PPH Pasal 29 Inaproc: (jual exclude − modal exclude) × % × qty.',
         ]);
 
         return redirect()

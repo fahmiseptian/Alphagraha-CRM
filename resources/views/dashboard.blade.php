@@ -326,9 +326,12 @@
     <x-card :title="$pipelineTitle" class="lg:col-span-2">
         @if ($selectedSales && ! auth()->user()->isSales())
             <x-slot:action>
-                <a href="{{ route('dashboard', array_filter(['period' => $period, 'leaderboard_period' => $leaderboardPeriod, 'leaderboard_sort' => $leaderboardSort])) }}"
-                   class="text-xs font-medium text-slate-500 hover:text-slate-700">
-                    Semua sales
+                <a href="{{ route('opportunities.index', array_filter([
+                        'assigned_user_id' => $selectedSalesId,
+                        'period' => $period,
+                    ])) }}"
+                   class="text-xs font-semibold text-brand-600 hover:text-brand-700">
+                    Detail
                 </a>
             </x-slot:action>
         @endif

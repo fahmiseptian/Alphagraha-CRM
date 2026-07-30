@@ -81,10 +81,19 @@
                     <div class="flex w-full max-w-md shrink-0 flex-col gap-3"
                          x-data="{
                              adjustMode: false,
+                             editingField: null,
                              marginTotal: {{ json_encode($marginTotal) }},
                              discountPercent: {{ json_encode($discPct ?? 0) }},
                              discountAmount: {{ json_encode((float) old('discount_amount', $discountAmount)) }},
                              round(n) { return Math.round(n * 100) / 100; },
+                             formatId(value, decimals = 0) {
+                                 if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
+                                 return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: decimals });
+                             },
+                             parseId(str) {
+                                 if (window.CrmNumber) return window.CrmNumber.parse(str);
+                                 return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+                             },
                              onDiscountPercentChange() {
                                  const pct = Number(this.discountPercent) || 0;
                                  if (this.marginTotal > 0) {
@@ -122,20 +131,24 @@
                                     <div>
                                         <label class="mb-0.5 block text-[11px] text-slate-500">% dari margin</label>
                                         <div class="flex items-center gap-1.5">
-                                            <input type="number" step="0.01" min="0"
-                                                   x-model.number="discountPercent"
-                                                   @input="onDiscountPercentChange()"
-                                                   class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-sm text-slate-700"
-                                                   placeholder="0">
+                                            <input type="text" inputmode="decimal" placeholder="0"
+                                                   x-effect="if (editingField !== 'pct') $el.value = formatId(discountPercent, 2)"
+                                                   @focus="editingField = 'pct'"
+                                                   @blur="editingField = null; $el.value = formatId(discountPercent, 2)"
+                                                   @input="discountPercent = parseId($event.target.value); onDiscountPercentChange()"
+                                                   class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-sm tabular-nums text-slate-700">
                                             <span class="shrink-0 text-xs font-semibold text-slate-500">%</span>
                                         </div>
                                     </div>
                                     <div>
                                         <label class="mb-0.5 block text-[11px] text-slate-500">Nominal diskon <span class="text-red-500">*</span></label>
-                                        <input type="number" step="0.01" min="0" name="discount_amount" required
-                                               x-model.number="discountAmount"
-                                               @input="onDiscountAmountChange()"
-                                               class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-sm text-slate-700">
+                                        <input type="text" inputmode="decimal" required
+                                               x-effect="if (editingField !== 'amt') $el.value = formatId(discountAmount)"
+                                               @focus="editingField = 'amt'"
+                                               @blur="editingField = null; $el.value = formatId(discountAmount)"
+                                               @input="discountAmount = parseId($event.target.value); onDiscountAmountChange()"
+                                               class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-sm tabular-nums text-slate-700">
+                                        <input type="hidden" name="discount_amount" :value="discountAmount">
                                     </div>
                                 </div>
                                 @unless ($marginTotal > 0)

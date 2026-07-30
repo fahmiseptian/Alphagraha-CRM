@@ -120,20 +120,29 @@
                                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
                                 <div class="col-span-4 sm:col-span-2">
-                                    <input type="number" step="0.01" min="0" :name="`items[${index}][quantity]`" x-model.number="item.quantity" placeholder="Qty"
+                                    <input type="text" inputmode="decimal" placeholder="Qty"
+                                           x-effect="if (editingField !== `q-${index}`) $el.value = formatId(item.quantity, 2)"
+                                           @focus="editingField = `q-${index}`"
+                                           @blur="editingField = null; $el.value = formatId(item.quantity, 2)"
+                                           @input="item.quantity = parseId($event.target.value)"
                                            @if ($isCreate) required @endif
-                                           class="w-full rounded-lg border border-slate-300 py-2 px-2 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                                           class="w-full rounded-lg border border-slate-300 py-2 px-2 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                                    <input type="hidden" :name="`items[${index}][quantity]`" :value="item.quantity">
                                 </div>
                                 <div class="col-span-3 sm:col-span-1">
                                     <input type="text" :name="`items[${index}][unit]`" x-model="item.unit" placeholder="unit"
                                            class="w-full rounded-lg border border-slate-300 py-2 px-2 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
                                 <div class="col-span-5 sm:col-span-3">
-                                    <input type="number" step="0.01" min="0" :name="`items[${index}][unit_price]`" x-model.number="item.unit_price" placeholder="Harga exclude"
-                                           @input="onUnitPriceChange(item)"
+                                    <input type="text" inputmode="decimal" placeholder="Harga exclude"
+                                           x-effect="if (editingField !== `p-${index}`) $el.value = formatId(item.unit_price)"
+                                           @focus="editingField = `p-${index}`"
+                                           @blur="editingField = null; $el.value = formatId(item.unit_price)"
+                                           @input="item.unit_price = parseId($event.target.value); onUnitPriceChange(item)"
                                            @if ($isCreate) required @endif
-                                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
+                                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
                                            title="Harga jual exclude (setelah diskon item bila ada)">
+                                    <input type="hidden" :name="`items[${index}][unit_price]`" :value="item.unit_price">
                                 </div>
                                 <div class="col-span-12 flex items-center justify-between sm:col-span-1 sm:justify-center">
                                     <span class="text-sm font-medium text-slate-700 sm:hidden" x-text="formatMoney(item.quantity * item.unit_price)"></span>
@@ -269,7 +278,15 @@
                     </div>
                     <div class="flex items-center justify-between">
                         <dt class="text-slate-500">Discount</dt>
-                        <dd><input type="number" step="0.01" min="0" name="discount" x-model.number="discount" class="w-28 rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200"></dd>
+                        <dd>
+                            <input type="text" inputmode="decimal"
+                                   x-effect="if (editingField !== 'discount') $el.value = formatId(discount)"
+                                   @focus="editingField = 'discount'"
+                                   @blur="editingField = null; $el.value = formatId(discount)"
+                                   @input="discount = parseId($event.target.value)"
+                                   class="w-32 rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                            <input type="hidden" name="discount" :value="discount">
+                        </dd>
                     </div>
                     <div class="flex items-center justify-between">
                         <dt class="text-slate-500">Tax (PPN)</dt>
@@ -312,6 +329,7 @@
 
         return {
             items,
+            editingField: null,
             discount: config.discount,
             taxPercent: config.taxPercent,
             currency: config.currency,
@@ -321,6 +339,14 @@
             companyName: config.companyName || '',
             customerAddress: config.customerAddress || '',
 
+            formatId(value, decimals = 0) {
+                if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
+                return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: decimals });
+            },
+            parseId(str) {
+                if (window.CrmNumber) return window.CrmNumber.parse(str);
+                return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+            },
             get subtotal() {
                 return this.items.reduce((sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
             },
@@ -369,7 +395,7 @@
             formatMoney(value) {
                 value = Number(value) || 0;
                 if (this.currency === 'IDR') {
-                    return 'Rp ' + value.toLocaleString('id-ID', { maximumFractionDigits: 0 });
+                    return 'Rp ' + this.formatId(value, 0);
                 }
                 return this.currency + ' ' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             },

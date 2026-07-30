@@ -105,7 +105,7 @@
             </div>
         @endif
         @if (auth()->user()->canEditPaymentLevel())
-            <div class="sm:col-span-2">
+            <div>
                 <label class="crm-label">Level Pembayaran <span class="text-red-500">*</span></label>
                 <select name="crm_payment_level" class="select2 w-full" required data-placeholder="— Pilih level —">
                     @foreach ($paymentLevels as $value => $label)
@@ -115,11 +115,20 @@
                 <p class="mt-1 text-xs text-slate-400">Hanya Finance / Superadmin. Suspend = tidak boleh membuat Quotation.</p>
             </div>
         @else
-            <div class="sm:col-span-2">
+            <div>
                 <label class="crm-label">Level Pembayaran</label>
                 <p class="py-2 text-sm font-medium text-slate-700">{{ $account->paymentLevelLabel() }}</p>
             </div>
         @endif
+        <div>
+            <label class="crm-label">TOP <span class="text-red-500">*</span></label>
+            <select name="crm_top" class="select2 w-full" required data-placeholder="— Pilih TOP —">
+                @foreach ($topOptions as $value => $label)
+                    <option value="{{ $value }}" @selected(old('crm_top', $account->crm_top ?: 'cash') === (string) $value)>{{ $label }}</option>
+                @endforeach
+            </select>
+            <p class="mt-1 text-xs text-slate-400">Terms of Payment. Default: Cash.</p>
+        </div>
         <div class="sm:col-span-2">
             <label class="crm-label">Description</label>
             <textarea name="description" rows="3" class="crm-field">{{ old('description', $account->description) }}</textarea>

@@ -304,16 +304,41 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
+     * Denominator untuk perhitungan margin %.
+     *
+     * Historis: untuk Wapu, margin% dibandingkan terhadap harga setelah PPH.
+     * Untuk kategori lain, tetap dibandingkan dengan effective sell exclude.
+     */
+    public function totalMarginPercentDenominator(): float
+    {
+        return round(
+            $this->products->sum(function (array $row) {
+                $qty = (float) ($row['quantity'] ?? 1);
+                $taxCategory = (string) ($row['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU);
+                $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
+
+                if ($taxCategory === OpportunityProductPricing::TAX_WAPU) {
+                    $pph = (float) ($row['pph'] ?? 0);
+                    return $qty * ($effectiveSell - $pph);
+                }
+
+                return $qty * $effectiveSell;
+            }),
+            2
+        );
+    }
+
+    /**
      * Margin keseluruhan opportunity (%): total margin / total jual exclude.
      */
     public function overallMarginPercent(): ?float
     {
-        $sell = $this->totalSellExclude();
-        if ($sell <= 0) {
+        $denom = $this->totalMarginPercentDenominator();
+        if ($denom <= 0) {
             return null;
         }
 
-        return round(($this->totalProductsMargin() / $sell) * 100, 2);
+        return round(($this->totalProductsMargin() / $denom) * 100, 2);
     }
 
     /**

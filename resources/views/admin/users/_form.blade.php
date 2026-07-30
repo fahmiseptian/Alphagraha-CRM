@@ -57,14 +57,13 @@
     @if (($role ?? $user->role) === \App\Models\User::ROLE_SALES || old('role') === \App\Models\User::ROLE_SALES)
         <div>
             <label class="mb-1.5 block text-sm font-medium text-slate-700">Sales Target <span class="text-red-500">*</span></label>
-            <input type="number" step="1" min="0" name="sales_target"
+            <input type="text" inputmode="decimal" name="sales_target" required data-crm-number data-decimals="0"
                    value="{{ old('sales_target', $user->profile?->resolvedSalesTarget()) }}"
-                   required
-                   class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_target') border-red-400 @enderror">
+                   class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200 @error('sales_target') border-red-400 @enderror">
             @error('sales_target')
                 <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
             @else
-                <p class="mt-1 text-xs text-slate-400">Target penjualan Closed Won. Contoh: 1000000000 = Rp 1 miliar.</p>
+                <p class="mt-1 text-xs text-slate-400">Target penjualan Closed Won. Contoh: 1.000.000.000 = Rp 1 miliar.</p>
             @enderror
         </div>
         <div>

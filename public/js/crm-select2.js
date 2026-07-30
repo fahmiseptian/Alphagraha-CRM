@@ -33,7 +33,9 @@
     }
 
     function bindAutoSubmit($el) {
-        if (!$el.data('autoSubmit')) {
+        // Support boolean HTML attribute (e.g. data-auto-submit)
+        // which jQuery can read as empty string / falsey.
+        if (!$el.is('[data-auto-submit]')) {
             return;
         }
 

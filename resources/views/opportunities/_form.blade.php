@@ -21,6 +21,7 @@
     $pphWapuBarang = \App\Support\OpportunityProductPricing::pphWapuBarangPercent();
     $pphWapuJasa = \App\Support\OpportunityProductPricing::pphWapuJasaPercent();
     $pnbpPercent = \App\Support\OpportunityProductPricing::pnbpPercent();
+    $pnbpTiers = \App\Support\OpportunityProductPricing::pnbpTiers();
     $pph29Percent = \App\Support\OpportunityProductPricing::pph29Percent();
     $purchasingMode = $purchasingMode ?? false;
 @endphp
@@ -37,6 +38,7 @@
           'pphWapuBarang' => $pphWapuBarang,
           'pphWapuJasa' => $pphWapuJasa,
           'pnbpPercent' => $pnbpPercent,
+          'pnbpTiers' => $pnbpTiers,
           'pph29Percent' => $pph29Percent,
           'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
           'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
@@ -133,8 +135,13 @@
                     <div>
                         <label class="crm-label">Amount <span class="text-red-500">*</span></label>
                         <div class="flex gap-2">
-                            <input type="number" step="0.01" min="0" name="amount" x-model.number="amount" required
-                                   class="crm-field min-w-[200px] flex-1" :readonly="products.length > 0 || purchasingMode">
+                            <input type="text" inputmode="decimal" required
+                                   x-effect="if (editingField !== 'amount') $el.value = formatId(amount)"
+                                   @focus="editingField = 'amount'"
+                                   @blur="editingField = null; $el.value = formatId(amount)"
+                                   @input="amount = parseId($event.target.value)"
+                                   class="crm-field min-w-[200px] flex-1 tabular-nums" :readonly="products.length > 0 || purchasingMode">
+                            <input type="hidden" name="amount" :value="amount">
                             <select name="amount_currency" class="select2 select2-compact w-28 shrink-0" @disabled($purchasingMode)>
                                 @foreach (['IDR', 'USD', 'EUR', 'SGD'] as $cur)
                                     <option value="{{ $cur }}" @selected(old('amount_currency', $opportunity->amount_currency ?: 'IDR') === $cur)>{{ $cur }}</option>
@@ -148,8 +155,9 @@
                     </div>
                     <div>
                         <label class="crm-label">Probability, % <span class="text-red-500">*</span></label>
-                        <input type="number" min="0" max="100" name="probability" value="{{ old('probability', $opportunity->probability ?? 10) }}" required
-                               class="crm-field" @readonly($purchasingMode)>
+                        <input type="text" inputmode="decimal" name="probability" required data-crm-number data-decimals="0"
+                               value="{{ old('probability', $opportunity->probability ?? 10) }}"
+                               class="crm-field tabular-nums" @readonly($purchasingMode)>
                     </div>
                     <div>
                         <label class="crm-label">Close Date <span class="text-red-500">*</span></label>
@@ -187,7 +195,7 @@
                                 class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
                             <span class="block text-sm font-semibold text-slate-800">Inaproc</span>
                             @if (auth()->user()?->isSuperAdmin())
-                            <span class="mt-1 block text-xs text-slate-500">Seperti Wapu + PNBP + PPH 29</span>
+                            <span class="mt-1 block text-xs text-slate-500">Seperti Wapu + PNBP berjenjang + PPH 29</span>
                             @endif
                         </button>
                     </div>
@@ -236,9 +244,13 @@
                                     </div>
                                     <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Qty</label>
-                                        <input type="number" step="0.01" min="0" :name="`products[${i}][quantity]`" x-model.number="p.quantity"
-                                               @input="refreshDiscountFromMargin()"
+                                        <input type="text" inputmode="decimal"
+                                               x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(p.quantity, 2)"
+                                               @focus="editingField = `qty-${i}`"
+                                               @blur="editingField = null; $el.value = formatId(p.quantity, 2)"
+                                               @input="p.quantity = parseId($event.target.value); refreshDiscountFromMargin()"
                                                class="crm-field w-full min-w-[5.5rem] text-right tabular-nums" :readonly="purchasingMode">
+                                        <input type="hidden" :name="`products[${i}][quantity]`" :value="p.quantity">
                                     </div>
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Vendor</label>
@@ -262,13 +274,17 @@
                                         <tr>
                                             <td class="py-2 pr-3 font-medium text-slate-600">Harga Jual</td>
                                             <td class="py-2 pr-3">
-                                                <input type="number" step="0.01" min="0" :name="`products[${i}][sell_exclude]`" x-model.number="p.sell_exclude"
-                                                       @input="onSellChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right" :readonly="purchasingMode">
+                                                <input type="text" inputmode="decimal"
+                                                       x-effect="if (editingField !== `sell-${i}`) $el.value = formatId(p.sell_exclude)"
+                                                       @focus="editingField = `sell-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(p.sell_exclude)"
+                                                       @input="p.sell_exclude = parseId($event.target.value); onSellChange(p)"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
+                                                <input type="hidden" :name="`products[${i}][sell_exclude]`" :value="p.sell_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatNumber(sellInclude(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                <input type="text" readonly :value="formatId(sellInclude(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
                                         <tr>
@@ -277,50 +293,57 @@
                                                 <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Harga net (0 = pakai harga jual)</span>
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="number" step="0.01" min="0" :name="`products[${i}][discount_exclude]`" x-model.number="p.discount_exclude"
-                                                       @input="onDiscountItemChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right" :readonly="purchasingMode"
-                                                       placeholder="0">
+                                                <input type="text" inputmode="decimal" placeholder="0"
+                                                       x-effect="if (editingField !== `disc-${i}`) $el.value = formatId(p.discount_exclude)"
+                                                       @focus="editingField = `disc-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(p.discount_exclude)"
+                                                       @input="p.discount_exclude = parseId($event.target.value); onDiscountItemChange(p)"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
+                                                <input type="hidden" :name="`products[${i}][discount_exclude]`" :value="p.discount_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatNumber(discountInclude(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                <input type="text" readonly :value="formatId(discountInclude(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
                                         <tr>
                                             <td class="py-2 pr-3 font-medium text-slate-600">Harga Beli / Modal</td>
                                             <td class="py-2 pr-3">
-                                                <input type="number" step="0.01" min="0" :name="`products[${i}][cost_exclude]`" x-model.number="p.cost_exclude"
-                                                       @input="onCostChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right">
+                                                <input type="text" inputmode="decimal"
+                                                       x-effect="if (editingField !== `cost-${i}`) $el.value = formatId(p.cost_exclude)"
+                                                       @focus="editingField = `cost-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(p.cost_exclude)"
+                                                       @input="p.cost_exclude = parseId($event.target.value); onCostChange(p)"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums">
+                                                <input type="hidden" :name="`products[${i}][cost_exclude]`" :value="p.cost_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatNumber(costInclude(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                <input type="text" readonly :value="formatId(costInclude(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
                                             <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH ' + pphPercentFor(p) + '%'"></td>
                                             <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pphPercentFor(p) + '%'"></td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatNumber(pphAmount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                <input type="text" readonly :value="formatId(pphAmount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPnbp(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PNBP ' + pnbpPercent + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pnbpPercent + '%'"></td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">PNBP</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">MIN(include × rate, cap)</td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatNumber(pnbpAmount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                <input type="text" readonly :value="formatId(pnbpAmount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph29(p)">
                                             <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH 29 ' + pph29Percent + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">Dari margin kotor</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">(Jual − Modal) exclude</td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatNumber(pph29Amount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                <input type="text" readonly :value="formatId(pph29Amount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
                                         <tr>
@@ -328,13 +351,15 @@
                                             <td class="py-2 pr-3 text-xs text-slate-400" x-text="marginLabel(p)"></td>
                                             <td class="py-2 pr-3">
                                                 <div class="flex items-center gap-2">
-                                                    <input type="text" readonly :value="formatNumber(marginAmount(p))"
-                                                           class="crm-field min-w-[8rem] flex-1 cursor-default border-amber-200 bg-amber-50 text-right text-slate-700">
+                                                    <input type="text" readonly :value="formatId(marginAmount(p))"
+                                                           class="crm-field min-w-[8rem] flex-1 cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                                     <div class="flex shrink-0 items-center gap-1">
-                                                        <input type="number" step="0.01" min="0" max="99.99"
-                                                               x-model.number="p.margin_percent"
-                                                               @input="onMarginPercentChange(p)"
-                                                               class="crm-field w-20 bg-white text-right text-sm"
+                                                        <input type="text" inputmode="decimal"
+                                                               x-effect="if (editingField !== `mgn-${i}`) $el.value = formatId(p.margin_percent, 2)"
+                                                               @focus="editingField = `mgn-${i}`"
+                                                               @blur="editingField = null; $el.value = formatId(p.margin_percent, 2)"
+                                                               @input="p.margin_percent = parseId($event.target.value); onMarginPercentChange(p)"
+                                                               class="crm-field w-24 bg-white text-right text-sm tabular-nums"
                                                                title="Ubah % margin untuk hitung ulang harga jual / diskon"
                                                                :readonly="purchasingMode">
                                                         <span class="text-xs font-semibold text-slate-600">%</span>
@@ -373,8 +398,13 @@
                 </label>
                 <div x-show="hasShippingCharge" x-cloak class="mt-3 max-w-sm">
                     <label class="mb-1 block text-xs font-medium text-slate-500">Ongkir jual</label>
-                    <input type="number" step="0.01" min="0" name="shipping_sell" x-model.number="shippingSell"
-                           class="crm-field w-full" placeholder="0">
+                    <input type="text" inputmode="decimal" placeholder="0"
+                           x-effect="if (editingField !== 'shipping') $el.value = formatId(shippingSell)"
+                           @focus="editingField = 'shipping'"
+                           @blur="editingField = null; $el.value = formatId(shippingSell)"
+                           @input="shippingSell = parseId($event.target.value)"
+                           class="crm-field w-full tabular-nums">
+                    <input type="hidden" name="shipping_sell" :value="shippingSell">
                     @if (auth()->user()?->isSuperAdmin())
                     <p class="mt-1 text-xs text-slate-400">
                         Jika dicentang, threshold margin nominal hanya memakai <em>Nominal Umum</em>
@@ -400,9 +430,12 @@
                     <div>
                         <label class="mb-1 block text-xs font-medium text-slate-500">Persentase dari margin</label>
                         <div class="flex items-center gap-2">
-                            <input type="number" step="0.01" min="0" x-model.number="discountPercent"
-                                   @input="onDiscountPercentChange()"
-                                   class="crm-field w-full" placeholder="0">
+                            <input type="text" inputmode="decimal" placeholder="0"
+                                   x-effect="if (editingField !== 'discPct') $el.value = formatId(discountPercent, 2)"
+                                   @focus="editingField = 'discPct'"
+                                   @blur="editingField = null; $el.value = formatId(discountPercent, 2)"
+                                   @input="discountPercent = parseId($event.target.value); onDiscountPercentChange()"
+                                   class="crm-field w-full tabular-nums">
                             <span class="shrink-0 text-sm font-semibold text-slate-600">%</span>
                         </div>
                         @if (auth()->user()?->isSuperAdmin())
@@ -411,9 +444,13 @@
                     </div>
                     <div>
                         <label class="mb-1 block text-xs font-medium text-slate-500">Nominal diskon</label>
-                        <input type="number" step="0.01" min="0" name="discount_amount" x-model.number="discountAmount"
-                               @input="onDiscountAmountChange()"
-                               class="crm-field w-full" placeholder="0">
+                        <input type="text" inputmode="decimal" placeholder="0"
+                               x-effect="if (editingField !== 'discAmt') $el.value = formatId(discountAmount)"
+                               @focus="editingField = 'discAmt'"
+                               @blur="editingField = null; $el.value = formatId(discountAmount)"
+                               @input="discountAmount = parseId($event.target.value); onDiscountAmountChange()"
+                               class="crm-field w-full tabular-nums">
+                        <input type="hidden" name="discount_amount" :value="discountAmount">
                         <p class="mt-1 text-xs text-slate-400">Setiap diskon &gt; 0 wajib approval Superadmin.</p>
                     </div>
                 </div>
@@ -489,6 +526,11 @@
         const PPH_WAPU_BARANG = Number(config.pphWapuBarang) || 1.5;
         const PPH_WAPU_JASA = Number(config.pphWapuJasa) || 2;
         const PNBP_PERCENT = Number(config.pnbpPercent) || 0.4;
+        const PNBP_TIERS = (config.pnbpTiers || []).map(t => ({
+            max: t.max === null || t.max === undefined || t.max === '' ? null : Number(t.max),
+            rate_percent: Number(t.rate_percent) || 0,
+            cap: Number(t.cap) || 0,
+        }));
         const PPH29_PERCENT = Number(config.pph29Percent) || 22;
 
         function pphPercentLookup(taxCategory, itemKind) {
@@ -499,17 +541,46 @@
             return PPH_NON_WAPU_JASA;
         }
 
-        function calcNetMargin(base, cost, taxCategory, itemKind) {
+        function matchPnbpTier(sellInclude) {
+            const tiers = [...PNBP_TIERS].sort((a, b) => {
+                if (a.max === null && b.max === null) return 0;
+                if (a.max === null) return 1;
+                if (b.max === null) return -1;
+                return a.max - b.max;
+            });
+            let fallback = tiers[tiers.length - 1] || { max: null, rate_percent: PNBP_PERCENT, cap: 0 };
+            for (const tier of tiers) {
+                if (tier.max === null) return tier;
+                if (sellInclude <= tier.max) return tier;
+            }
+            return fallback;
+        }
+
+        function calcPnbpFromInclude(sellInclude) {
+            if (sellInclude <= 0) return 0;
+            const tier = matchPnbpTier(sellInclude);
+            let amount = sellInclude * ((Number(tier.rate_percent) || 0) / 100);
+            const cap = Number(tier.cap) || 0;
+            if (cap > 0) amount = Math.min(amount, cap);
+            return Math.round(amount * 100) / 100;
+        }
+
+        function calcNetMargin(base, costExclude, taxCategory, itemKind) {
             const pphPct = pphPercentLookup(taxCategory, itemKind);
             const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
-            const pnbp = taxCategory === 'inaproc'
-                ? Math.round(base * (PNBP_PERCENT / 100) * 100) / 100
-                : 0;
-            const gross = Math.round((base - pph - pnbp - cost) * 100) / 100;
-            const pph29 = (taxCategory === 'inaproc' && gross > 0)
-                ? Math.round(gross * (PPH29_PERCENT / 100) * 100) / 100
-                : 0;
-            return Math.round((gross - pph29) * 100) / 100;
+            if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
+                const costInclude = Math.round(costExclude * TAX_MULTIPLIER * 100) / 100;
+                const gross = Math.round((base - pph - costInclude) * 100) / 100;
+                const pnbp = taxCategory === 'inaproc'
+                    ? calcPnbpFromInclude(Math.round(base * TAX_MULTIPLIER * 100) / 100)
+                    : 0;
+                const spread = base - costExclude;
+                const pph29 = (taxCategory === 'inaproc' && spread > 0)
+                    ? Math.round(spread * (PPH29_PERCENT / 100) * 100) / 100
+                    : 0;
+                return Math.round((gross - pnbp - pph29) * 100) / 100;
+            }
+            return Math.round((base - pph - costExclude) * 100) / 100;
         }
 
         const initialProducts = (config.products || []).map(p => {
@@ -520,7 +591,10 @@
             const discount = Number(p.discount_exclude) || 0;
             const base = discount > 0 ? discount : sell;
             const margin = calcNetMargin(base, cost, taxCategory, itemKind);
-            const marginPercent = base > 0 ? Math.round((margin / base) * 10000) / 100 : 0;
+            const pphPct = pphPercentLookup(taxCategory, itemKind);
+            const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
+            const denom = (taxCategory === 'wapu' || taxCategory === 'inaproc') ? (base - pph) : base;
+            const marginPercent = denom > 0 ? Math.round((margin / denom) * 10000) / 100 : 0;
 
             return {
                 name: p.name ?? '',
@@ -538,6 +612,7 @@
 
         return {
             products: initialProducts,
+            editingField: null,
             selectedTaxCategory: config.initialTaxCategory || null,
             contacts: config.contacts || [],
             accountId: config.accountId || '',
@@ -548,6 +623,7 @@
             pphWapuBarang: PPH_WAPU_BARANG,
             pphWapuJasa: PPH_WAPU_JASA,
             pnbpPercent: PNBP_PERCENT,
+            pnbpTiers: PNBP_TIERS,
             pph29Percent: PPH29_PERCENT,
             amount: {{ (float) old('amount', $opportunity->amount ?? 0) }},
             hasDiscount: !!config.hasDiscount,
@@ -582,15 +658,20 @@
                 return this.round(umum + (Number(this.marginNominalOngkirPribadi) || 0));
             },
             get overallMarginPercent() {
-                const sell = this.products.reduce((s, p) => {
+                const denom = this.products.reduce((s, p) => {
                     const qty = Number(p.quantity) || 0;
-                    const disc = Number(p.discount_exclude) || 0;
-                    const sellEx = Number(p.sell_exclude) || 0;
-                    const base = disc > 0 ? disc : sellEx;
-                    return s + qty * base;
+                    const effSell = this.effectiveSellExclude(p);
+                    const taxCategory = p.tax_category || 'non_wapu';
+
+                    if (taxCategory === 'wapu') {
+                        const pph = this.pphAmount(p);
+                        return s + qty * (effSell - pph);
+                    }
+
+                    return s + qty * effSell;
                 }, 0);
-                if (sell <= 0) return null;
-                return this.round((this.productsMarginTotal / sell) * 100);
+                if (denom <= 0) return null;
+                return this.round((this.productsMarginTotal / denom) * 100);
             },
             get marginBelowPercent() {
                 const min = this.accountMinMarginPct;
@@ -692,26 +773,35 @@
             },
             pnbpAmount(p) {
                 if (!this.appliesPnbp(p)) return 0;
-                return this.round(this.effectiveSellExclude(p) * (Number(this.pnbpPercent) || 0) / 100);
+                return calcPnbpFromInclude(this.effectiveSellInclude(p));
             },
             grossMarginAmount(p) {
                 const base = this.effectiveSellExclude(p);
-                const cost = Number(p.cost_exclude) || 0;
-                return this.round(base - this.pphAmount(p) - this.pnbpAmount(p) - cost);
+                const costExclude = Number(p.cost_exclude) || 0;
+                const taxCategory = p.tax_category || 'non_wapu';
+                if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
+                    const costInclude = this.round(costExclude * TAX_MULTIPLIER);
+                    return this.round(base - this.pphAmount(p) - costInclude);
+                }
+                return this.round(base - this.pphAmount(p) - costExclude);
             },
             pph29Amount(p) {
                 if (!this.appliesPph29(p)) return 0;
-                const gross = this.grossMarginAmount(p);
-                if (gross <= 0) return 0;
-                return this.round(gross * (Number(this.pph29Percent) || 0) / 100);
+                const spread = this.effectiveSellExclude(p) - (Number(p.cost_exclude) || 0);
+                if (spread <= 0) return 0;
+                return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
             marginAmount(p) {
-                return this.round(this.grossMarginAmount(p) - this.pph29Amount(p));
+                return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p));
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
                 const base = this.effectiveSellExclude(p);
-                return base > 0 ? this.round((margin / base) * 100) : 0;
+                const taxCategory = p.tax_category || 'non_wapu';
+                const denom = (taxCategory === 'wapu' || taxCategory === 'inaproc')
+                    ? (base - this.pphAmount(p))
+                    : base;
+                return denom > 0 ? this.round((margin / denom) * 100) : 0;
             },
             marginPercent(p) {
                 return Number(p.margin_percent) || 0;
@@ -719,8 +809,11 @@
             marginLabel(p) {
                 const hasItemDiscount = (Number(p.discount_exclude) || 0) > 0;
                 const head = hasItemDiscount ? 'Diskon' : 'Jual Exclude';
+                if ((p.tax_category || 'non_wapu') === 'wapu') {
+                    return head + ' − PPH − Modal Include';
+                }
                 if (this.appliesPph29(p)) {
-                    return head + ' − PPH − PNBP − PPH29 − Modal';
+                    return head + ' − PPH − PNBP − PPH29 − Modal Include';
                 }
                 if (this.appliesPph(p)) {
                     return head + ' − PPH − Modal';
@@ -729,7 +822,8 @@
             },
             /**
              * Dari % margin target (net) + modal → hitung harga basis.
-             * Inaproc: base = cost*(1-r29) / ((1-rPph-rPnbp)*(1-r29) - pct/100)
+             * Wapu: base = costInclude / ((1-rPph) * (1 - pct/100))
+             * Inaproc: % vs (jual−PPH); iterasi karena PNBP berjenjang + modal include.
              */
             sellFromMarginPercent(p) {
                 const pct = Number(p.margin_percent) || 0;
@@ -739,15 +833,43 @@
                 }
 
                 const rPph = this.pphPercentFor(p) / 100;
-                const rPnbp = this.appliesPnbp(p) ? (Number(this.pnbpPercent) || 0) / 100 : 0;
-                const r29 = this.appliesPph29(p) ? (Number(this.pph29Percent) || 0) / 100 : 0;
-                const keep = (1 - rPph - rPnbp) * (1 - r29);
-                const denom = keep - (pct / 100);
-                if (denom <= 0) {
-                    return this.effectiveSellExclude(p);
+                const isWapu = (p.tax_category || 'non_wapu') === 'wapu';
+                const costInclude = this.round(cost * TAX_MULTIPLIER);
+                const pctDec = pct / 100;
+
+                if (isWapu) {
+                    const denom = (1 - rPph) * (1 - pctDec);
+                    if (denom <= 0) {
+                        return this.effectiveSellExclude(p);
+                    }
+                    return this.round(costInclude / denom);
                 }
 
-                return this.round(cost * (1 - r29) / denom);
+                if (!this.appliesPph29(p)) {
+                    const denom = 1 - pctDec;
+                    if (denom <= 0) return this.effectiveSellExclude(p);
+                    return this.round(cost / denom);
+                }
+
+                const r29 = (Number(this.pph29Percent) || 0) / 100;
+                let base = this.effectiveSellExclude(p) || cost;
+
+                // net = (base−PPH−modalIncl) − PNBP − r29*(base−modalExcl)
+                // % terhadap (base − PPH); PNBP berjenjang → iterasi.
+                for (let i = 0; i < 10; i++) {
+                    const pnbp = calcPnbpFromInclude(this.round(base * TAX_MULTIPLIER));
+                    const coeff = (1 - rPph) * (1 - pctDec) - r29;
+                    if (coeff <= 0) {
+                        return this.effectiveSellExclude(p);
+                    }
+                    const next = this.round((costInclude - r29 * cost + pnbp) / coeff);
+                    if (Math.abs(next - base) < 0.5) {
+                        return next;
+                    }
+                    base = next;
+                }
+
+                return this.round(base);
             },
             applyMarginPercentToPrice(p) {
                 const next = this.sellFromMarginPercent(p);
@@ -777,10 +899,16 @@
             },
             onMarginPercentChange(p) {
                 let pct = Number(p.margin_percent) || 0;
+                const isWapu = (p.tax_category || 'non_wapu') === 'wapu';
                 const rPph = this.pphPercentFor(p) / 100;
-                const rPnbp = this.appliesPnbp(p) ? (Number(this.pnbpPercent) || 0) / 100 : 0;
                 const r29 = this.appliesPph29(p) ? (Number(this.pph29Percent) || 0) / 100 : 0;
-                const maxPct = Math.max((1 - rPph - rPnbp) * (1 - r29) * 100 - 0.01, 0);
+                // Wapu: % vs (jual−PPH). Inaproc: coeff (1−rPph)*(1−pct) − r29 > 0.
+                let maxPct = Math.max(100 - 0.01, 0);
+                if (this.appliesPph29(p) && (1 - rPph) > 0) {
+                    maxPct = Math.max((1 - r29 / (1 - rPph)) * 100 - 0.01, 0);
+                } else if (isWapu) {
+                    maxPct = Math.max(100 - 0.01, 0);
+                }
                 if (pct < 0) pct = 0;
                 if (pct > maxPct) pct = maxPct;
                 p.margin_percent = pct;
@@ -799,14 +927,27 @@
                 }
                 this.refreshDiscountFromMargin();
             },
+            formatId(value, decimals = 0) {
+                if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
+                const n = Number(value) || 0;
+                return n.toLocaleString('id-ID', { maximumFractionDigits: decimals });
+            },
+            parseId(str) {
+                if (window.CrmNumber) return window.CrmNumber.parse(str);
+                return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+            },
             formatNumber(value) {
-                value = Number(value) || 0;
-                if (this.currency === 'IDR') return value.toLocaleString('id-ID', { maximumFractionDigits: 0 });
-                return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return this.formatId(value, this.currency === 'IDR' ? 0 : 2);
             },
             formatPercent(value) {
-                const n = Number(value) || 0;
-                return n.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+                return this.formatId(value, 2) + '%';
+            },
+            formatMoney(value) {
+                value = Number(value) || 0;
+                if (this.currency === 'IDR') {
+                    return 'Rp ' + this.formatId(value, 0);
+                }
+                return this.currency + ' ' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             },
             onAccountChange() {
                 const list = this.filteredContacts;
@@ -898,11 +1039,6 @@
                     this.refreshContactSelect();
                     this.syncDiscountPercentFromAmount();
                 });
-            },
-            formatMoney(value) {
-                value = Number(value) || 0;
-                if (this.currency === 'IDR') return 'Rp ' + value.toLocaleString('id-ID', { maximumFractionDigits: 0 });
-                return this.currency + ' ' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             },
         };
     }

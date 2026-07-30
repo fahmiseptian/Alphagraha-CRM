@@ -63,6 +63,7 @@ crm_discount_*          — metadata request/review (by, at, note)
 
 ```
 crm_payment_level       — lancar | mandek | jelek | suspend (default: lancar)
+crm_top                 — cash | 7 | 14 | 30 | 45 | 60 (Terms of Payment, default: cash)
 ```
 
 Threshold margin per level di `crm_settings` (group `payment_level`):
@@ -272,7 +273,7 @@ Placeholder utama:
 
 | Sub | Route | Isi |
 |-----|-------|-----|
-| Tax | `/settings` | PPN; PPH Non Wapu Jasa; PPH Wapu Barang/Jasa; PNBP; PPH 29 |
+| Tax | `/settings` | PPN; PPH Non Wapu Jasa; PPH Wapu Barang/Jasa; PNBP berjenjang; PPH 29 |
 | Margin | `/settings/margin` | Threshold % per payment level + margin nominal (umum / ongkir pribadi) |
 | PO | `/settings/po` | Surcharge Cash % / TOP % |
 | Terms QO | `/settings/terms` | Default Terms & Conditions Quotation (`quotation.default_terms`, placeholder `{{ppn}}`) |
@@ -292,11 +293,14 @@ Semua kalkulasi terpusat di `App\Support\OpportunityProductPricing`:
 | Kategori | `non_wapu` · `wapu` · `inaproc` |
 | Non Wapu + Barang | PPN saja (PPH 0%) |
 | Non Wapu + Jasa | PPN + `tax.pph_non_wapu_jasa` (default 2%) |
-| Wapu + Barang / Jasa | PPN + 1.5% / 2% |
-| Inaproc | seperti Wapu + PNBP (dari basis) + PPH 29 (dari margin kotor) |
-| PNBP / PPH 29 | `pnbpPercent()` / `pph29Percent()` — aktif hanya Inaproc |
+| Wapu + Barang / Jasa | PPN + 1.5% / 2%; margin = (jual − PPH) − modal include |
+| Inaproc | PPN + PPH + PNBP berjenjang + PPH 29; margin kotor pakai modal include |
+| PNBP | `pnbpFromInclude()` / `tax.pnbp_tiers` — `MIN(include × rate, cap)` per jenjang; admin bisa tambah batas |
+| PPH 29 | `(jual exclude − modal exclude) × rate` per unit; × qty di total — hanya Inaproc |
 | Exclude → Include | `includeFromExclude()` |
-| Margin | net setelah potongan pajak kategori − cost |
+| Margin Non Wapu | basis − PPH − modal exclude |
+| Margin Wapu | (basis − PPH) − modal include |
+| Margin kotor Inaproc | (basis − PPH) − modal include; lalu − PNBP − PPH 29 = bersih |
 | Terms QO | `defaultQuotationTerms()` |
 
 **Perubahan penting (Juli 2026):** Quotation dan tampilan template beralih ke terminologi **exclude PPN** (`sell_exclude`) agar konsisten dengan perhitungan margin di opportunity.

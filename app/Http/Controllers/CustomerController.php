@@ -9,6 +9,7 @@ use App\Models\WilayahDistrict;
 use App\Models\WilayahProvince;
 use App\Models\WilayahRegency;
 use App\Services\EspoEntityWriter;
+use App\Support\CustomerTop;
 use App\Support\PaymentLevel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -169,6 +170,7 @@ class CustomerController extends Controller
             'billing_address_country' => ['nullable', 'string', 'max:100'],
             'description' => ['nullable', 'string'],
             'assigned_user_id' => ['nullable', 'string', Rule::exists('user', 'id')->where('deleted', 0)],
+            'crm_top' => ['required', Rule::in(CustomerTop::OPTIONS)],
         ];
 
         if (auth()->user()?->canEditPaymentLevel()) {
@@ -232,6 +234,8 @@ class CustomerController extends Controller
             $account->crm_payment_level = PaymentLevel::LANCAR;
         }
 
+        $account->crm_top = CustomerTop::normalize($data['crm_top'] ?? null);
+
         if ($this->isAdmin()) {
             $account->assigned_user_id = ($data['assigned_user_id'] ?? null) ?: null;
         } elseif ($isNew) {
@@ -244,6 +248,7 @@ class CustomerController extends Controller
         return [
             'types' => Account::TYPES,
             'paymentLevels' => PaymentLevel::LABELS,
+            'topOptions' => CustomerTop::LABELS,
             'salesUsers' => EspoUser::query()->activeRegular()->orderBy('name')->get(),
             'provinces' => WilayahProvince::query()->orderBy('name')->get(['code', 'name']),
         ];

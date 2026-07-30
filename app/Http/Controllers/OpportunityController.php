@@ -28,6 +28,9 @@ class OpportunityController extends Controller
     {
         $kanbanStages = Opportunity::KANBAN_STAGES;
         $selectedUserId = $this->resolveAssignedUserFilter($request);
+        $period = $this->resolvePeriodFilter($request);
+        $periodRange = $this->periodDateRange($period);
+        $periodLabel = $this->periodLabel($period);
 
         $query = Opportunity::query()->with(['account', 'assignedUser']);
         $user = $this->currentUser();
@@ -41,6 +44,8 @@ class OpportunityController extends Controller
         } else {
             $query = $this->scopeAssigned($query);
         }
+
+        $this->applyPeriodToOpportunityQuery($query, $periodRange);
 
         $allOpportunities = $query->orderByDesc('created_at')->get();
 
@@ -56,9 +61,11 @@ class OpportunityController extends Controller
             'duplicateMap' => Opportunity::duplicateMap($kanbanOpportunities),
             'summary' => $this->buildOpportunitySummary($allOpportunities, $kanbanStages),
             'salesUsers' => $this->isAdmin()
-                ? EspoUser::query()->activeRegular()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
+                ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
                 : collect(),
             'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $periodLabel,
         ]);
     }
 
@@ -819,9 +826,72 @@ class OpportunityController extends Controller
             return null;
         }
 
-        $exists = EspoUser::query()->activeRegular()->where('id', $id)->exists();
+        $exists = EspoUser::query()->activeSales()->where('id', $id)->exists();
 
         return $exists ? $id : null;
+    }
+
+    protected function resolvePeriodFilter(Request $request): string
+    {
+        $period = (string) $request->get('period', 'year');
+
+        if (! in_array($period, ['year', 'month', '3months', '6months', 'alltime'], true)) {
+            return 'year';
+        }
+
+        return $period;
+    }
+
+    /**
+     * @return array{0: Carbon, 1: Carbon}|null
+     */
+    protected function periodDateRange(string $period): ?array
+    {
+        $now = Carbon::now();
+
+        return match ($period) {
+            'month' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+            '3months' => [$now->copy()->subMonthsNoOverflow(3)->startOfDay(), $now->copy()->endOfDay()],
+            '6months' => [$now->copy()->subMonthsNoOverflow(6)->startOfDay(), $now->copy()->endOfDay()],
+            'year' => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+            'alltime' => null,
+            default => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+        };
+    }
+
+    protected function periodLabel(string $period): string
+    {
+        return match ($period) {
+            'month' => 'bulan ini',
+            '3months' => '3 bulan terakhir',
+            '6months' => '6 bulan terakhir',
+            'year' => 'tahun ini',
+            'alltime' => 'semua waktu',
+            default => 'tahun ini',
+        };
+    }
+
+    /**
+     * Closed Won/Lost → close_date; stage terbuka → created_at (sama seperti dashboard).
+     */
+    protected function applyPeriodToOpportunityQuery($query, ?array $range): void
+    {
+        if ($range === null) {
+            return;
+        }
+
+        [$start, $end] = $range;
+        $closed = [Opportunity::WON_STAGE, Opportunity::LOST_STAGE];
+
+        $query->where(function ($q) use ($start, $end, $closed) {
+            $q->where(function ($q2) use ($start, $end, $closed) {
+                $q2->whereIn('stage', $closed)
+                    ->whereBetween('close_date', [$start->toDateString(), $end->toDateString()]);
+            })->orWhere(function ($q2) use ($start, $end, $closed) {
+                $q2->whereNotIn('stage', $closed)
+                    ->whereBetween('created_at', [$start, $end]);
+            });
+        });
     }
 
     protected function buildOpportunitySummary(Collection $opportunities, array $kanbanStages): array

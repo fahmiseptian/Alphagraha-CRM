@@ -33,18 +33,18 @@
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     Cash (%) <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="surcharge_cash_percent" step="0.01" min="0" max="100" required
+                <input type="text" inputmode="decimal" name="surcharge_cash_percent" required data-crm-number data-decimals="2"
                        value="{{ $cash }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Default 1% — ditambahkan ke modal exclude &amp; include.</p>
             </div>
             <div>
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">
                     TOP (%) <span class="text-red-500">*</span>
                 </label>
-                <input type="number" name="surcharge_top_percent" step="0.01" min="0" max="100" required
+                <input type="text" inputmode="decimal" name="surcharge_top_percent" required data-crm-number data-decimals="2"
                        value="{{ $top }}"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                 <p class="mt-1 text-xs text-slate-400">Default 0% — tanpa tambahan.</p>
             </div>
         </div>

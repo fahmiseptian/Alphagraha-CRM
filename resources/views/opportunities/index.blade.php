@@ -2,7 +2,7 @@
 @section('title', 'Opportunities')
 
 @section('content')
-<x-page-header title="Opportunity / Deal" description="Sales pipeline & deal progress">
+<x-page-header title="Opportunity / Deal" :description="'Sales pipeline & deal progress · '.$periodLabel">
     <x-slot:actions>
         @if (auth()->user()->canCreateOpportunity())
             <x-btn href="{{ route('opportunities.create') }}" icon="bi-plus-lg">New Opportunity</x-btn>
@@ -11,30 +11,45 @@
 </x-page-header>
 
 {{-- Filter --}}
-@if (auth()->user()->isAdmin())
-    <x-card class="mb-4" :padding="false">
-        <form method="GET" action="{{ route('opportunities.index') }}" class="crm-kanban-toolbar">
-            <div class="min-w-0 flex-1 sm:max-w-md">
-                <label class="crm-label">Assigned User</label>
-                <select name="assigned_user_id" class="select2 select2-search" data-placeholder="All sales">
-                    <option value="">All sales</option>
-                    @foreach ($salesUsers as $user)
-                        <option value="{{ $user->id }}" @selected($selectedUserId === $user->id)>
-                            {{ $user->display_name }}
-                        </option>
-                    @endforeach
+<x-card class="mb-4" :padding="false">
+    <form method="GET" action="{{ route('opportunities.index') }}" class="crm-kanban-toolbar">
+        <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-end">
+            @if (auth()->user()->isAdmin())
+                <div class="min-w-0 flex-1 sm:max-w-md">
+                    <label class="crm-label">Assigned User</label>
+                    <select name="assigned_user_id" class="select2 select2-search" data-placeholder="All sales">
+                        <option value="">All sales</option>
+                        @foreach ($salesUsers as $user)
+                            <option value="{{ $user->id }}" @selected($selectedUserId === $user->id)>
+                                {{ $user->display_name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+            @endif
+            <div class="w-full sm:w-44">
+                <label class="crm-label">Periode</label>
+                <select name="period" class="select2 select2-compact w-full" data-placeholder="Periode">
+                    <option value="year" @selected($period === 'year')>Tahun ini</option>
+                    <option value="month" @selected($period === 'month')>Bulan ini</option>
+                    <option value="3months" @selected($period === '3months')>3 Bulan</option>
+                    <option value="6months" @selected($period === '6months')>6 Bulan</option>
+                    <option value="alltime" @selected($period === 'alltime')>All Time</option>
                 </select>
             </div>
-            <div class="flex shrink-0 items-end gap-2">
-                <x-btn type="submit" variant="primary" icon="bi-funnel">Filter</x-btn>
-                @if ($selectedUserId)
-                    <x-btn href="{{ route('opportunities.index') }}" variant="ghost">Reset</x-btn>
-                @endif
-                <p class="crm-kanban-total">Total: <strong>{{ number_format($summary['total']) }}</strong></p>
-            </div>
-        </form>
-    </x-card>
-@endif
+        </div>
+        <div class="flex shrink-0 items-end gap-2">
+            <x-btn type="submit" variant="primary" icon="bi-funnel">Filter</x-btn>
+            @if ($selectedUserId || ($period ?? 'year') !== 'year')
+                <x-btn href="{{ route('opportunities.index') }}" variant="ghost">Reset</x-btn>
+            @endif
+            <p class="crm-kanban-total">
+                Total: <strong>{{ number_format($summary['total']) }}</strong>
+                <span class="ml-1 text-xs text-slate-400">· {{ $periodLabel }}</span>
+            </p>
+        </div>
+    </form>
+</x-card>
 
 {{-- Summary --}}
 <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

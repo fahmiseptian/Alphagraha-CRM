@@ -44,7 +44,7 @@ class OpportunityProductPricing
         $pphJasaNw = self::formatPercentLabel(self::pphNonWapuJasaPercent());
         $pphBarang = self::formatPercentLabel(self::pphWapuBarangPercent());
         $pphJasa = self::formatPercentLabel(self::pphWapuJasaPercent());
-        $pnbp = self::formatPercentLabel(self::pnbpPercent());
+        $pnbp = 'berjenjang (jual include)';
         $pph29 = self::formatPercentLabel(self::pph29Percent());
 
         return match ($taxCategory) {
@@ -55,8 +55,8 @@ class OpportunityProductPricing
             ],
             self::TAX_INAPROC => [
                 'label' => 'Inaproc',
-                'barang' => "PPN {$ppn}% + PPH {$pphBarang}% + PNBP {$pnbp}% + PPH 29 {$pph29}%",
-                'jasa' => "PPN {$ppn}% + PPH {$pphJasa}% + PNBP {$pnbp}% + PPH 29 {$pph29}%",
+                'barang' => "PPN {$ppn}% + PPH {$pphBarang}% + PNBP {$pnbp} + PPH 29 {$pph29}%",
+                'jasa' => "PPN {$ppn}% + PPH {$pphJasa}% + PNBP {$pnbp} + PPH 29 {$pph29}%",
             ],
             default => [
                 'label' => 'Non Wapu',
@@ -121,7 +121,139 @@ class OpportunityProductPricing
 
     public static function pnbpPercent(): float
     {
-        return CrmSetting::getFloat('tax.pnbp_percent', 0.4);
+        // Legacy: rate jenjang pertama (untuk ringkasan UI lama).
+        $tiers = self::pnbpTiers();
+
+        return (float) ($tiers[0]['rate_percent'] ?? CrmSetting::getFloat('tax.pnbp_percent', 0.4));
+    }
+
+    /**
+     * Default PNBP berjenjang (basis: harga jual include).
+     * Setiap jenjang: MAX(jual_include) → MIN(jual_include × rate, cap).
+     *
+     * @return list<array{max: ?float, rate_percent: float, cap: float}>
+     */
+    public static function defaultPnbpTiers(): array
+    {
+        return [
+            ['max' => 200_000_000.0, 'rate_percent' => 0.4, 'cap' => 600_000.0],
+            ['max' => 1_000_000_000.0, 'rate_percent' => 0.3, 'cap' => 2_000_000.0],
+            ['max' => 5_000_000_000.0, 'rate_percent' => 0.2, 'cap' => 5_000_000.0],
+            ['max' => 50_000_000_000.0, 'rate_percent' => 0.1, 'cap' => 25_000_000.0],
+            ['max' => null, 'rate_percent' => 0.05, 'cap' => 200_000_000.0],
+        ];
+    }
+
+    /**
+     * @return list<array{max: ?float, rate_percent: float, cap: float}>
+     */
+    public static function pnbpTiers(): array
+    {
+        $stored = CrmSetting::get('tax.pnbp_tiers', null);
+        if (is_array($stored) && $stored !== []) {
+            return self::normalizePnbpTiers($stored);
+        }
+
+        return self::defaultPnbpTiers();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>|array<int, mixed>  $tiers
+     * @return list<array{max: ?float, rate_percent: float, cap: float}>
+     */
+    public static function normalizePnbpTiers(array $tiers): array
+    {
+        $normalized = [];
+
+        foreach ($tiers as $tier) {
+            if (! is_array($tier)) {
+                continue;
+            }
+
+            $maxRaw = $tier['max'] ?? null;
+            $max = ($maxRaw === null || $maxRaw === '' || (float) $maxRaw <= 0)
+                ? null
+                : round((float) $maxRaw, 2);
+            $rate = round((float) ($tier['rate_percent'] ?? 0), 4);
+            $cap = round((float) ($tier['cap'] ?? 0), 2);
+
+            if ($rate < 0) {
+                $rate = 0.0;
+            }
+            if ($cap < 0) {
+                $cap = 0.0;
+            }
+
+            $normalized[] = [
+                'max' => $max,
+                'rate_percent' => $rate,
+                'cap' => $cap,
+            ];
+        }
+
+        if ($normalized === []) {
+            return self::defaultPnbpTiers();
+        }
+
+        usort($normalized, function (array $a, array $b) {
+            if ($a['max'] === null && $b['max'] === null) {
+                return 0;
+            }
+            if ($a['max'] === null) {
+                return 1;
+            }
+            if ($b['max'] === null) {
+                return -1;
+            }
+
+            return $a['max'] <=> $b['max'];
+        });
+
+        return array_values($normalized);
+    }
+
+    /**
+     * @return array{max: ?float, rate_percent: float, cap: float}
+     */
+    public static function matchPnbpTier(float $sellInclude): array
+    {
+        $tiers = self::pnbpTiers();
+        $fallback = end($tiers) ?: [
+            'max' => null,
+            'rate_percent' => 0.0,
+            'cap' => 0.0,
+        ];
+
+        foreach ($tiers as $tier) {
+            if ($tier['max'] === null) {
+                return $tier;
+            }
+            if ($sellInclude <= (float) $tier['max']) {
+                return $tier;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * PNBP dari harga jual include: MIN(include × rate, cap) sesuai jenjang.
+     */
+    public static function pnbpFromInclude(float $sellInclude): float
+    {
+        if ($sellInclude <= 0) {
+            return 0.0;
+        }
+
+        $tier = self::matchPnbpTier($sellInclude);
+        $rate = ((float) $tier['rate_percent']) / 100;
+        $amount = $sellInclude * $rate;
+        $cap = (float) ($tier['cap'] ?? 0);
+        if ($cap > 0) {
+            $amount = min($amount, $cap);
+        }
+
+        return round($amount, 2);
     }
 
     public static function pph29Percent(): float
@@ -234,16 +366,14 @@ class OpportunityProductPricing
             return 0;
         }
 
-        $rate = self::pnbpPercent() / 100;
-        if ($rate <= 0) {
-            return 0;
-        }
-
-        return round($sellExclude * $rate, 2);
+        return self::pnbpFromInclude(self::includeFromExclude($sellExclude));
     }
 
     /**
-     * Margin kotor setelah PPH (+ PNBP untuk Inaproc), sebelum PPH 29.
+     * Margin kotor setelah PPH, sebelum PNBP / PPH 29.
+     *
+     * Wapu & Inaproc: (harga jual − PPH) − modal include
+     * Non Wapu: basis − PPH − modal exclude
      */
     public static function grossMargin(
         float $sellExclude,
@@ -254,27 +384,29 @@ class OpportunityProductPricing
     ): float {
         $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
         $pph = self::pph($base, $taxCategory, $itemKind);
-        $pnbp = self::pnbp($base, $taxCategory);
 
-        return round($base - $pph - $pnbp - $costExclude, 2);
+        if ($taxCategory === self::TAX_WAPU || $taxCategory === self::TAX_INAPROC) {
+            $costInclude = self::includeFromExclude($costExclude);
+
+            return round($base - $pph - $costInclude, 2);
+        }
+
+        return round($base - $pph - $costExclude, 2);
     }
 
     /**
-     * PPH Pasal 29 — hanya Inaproc, dihitung dari margin kotor (bila positif).
+     * PPH Pasal 29 — hanya Inaproc.
+     * Per unit: (harga jual exclude − modal exclude) × rate.
+     * Total baris = hasil × qty (di pemanggil).
      */
     public static function pph29(
         float $sellExclude,
         float $costExclude,
         string $taxCategory,
-        string $itemKind,
+        string $itemKind = self::KIND_BARANG,
         float $itemDiscount = 0
     ): float {
         if (! self::appliesPph29($taxCategory)) {
-            return 0;
-        }
-
-        $gross = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        if ($gross <= 0) {
             return 0;
         }
 
@@ -283,7 +415,13 @@ class OpportunityProductPricing
             return 0;
         }
 
-        return round($gross * $rate, 2);
+        $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+        $spread = $base - $costExclude;
+        if ($spread <= 0) {
+            return 0;
+        }
+
+        return round($spread * $rate, 2);
     }
 
     /**
@@ -295,7 +433,11 @@ class OpportunityProductPricing
     }
 
     /**
-     * Margin bersih: basis − PPH − PNBP (Inaproc) − PPH 29 (Inaproc, dari margin kotor) − modal.
+     * Margin bersih.
+     * Wapu: (jual − PPH) − modal include
+     * Inaproc: (jual − PPH − modal include) − PNBP − PPH 29
+     *   PPH 29 = (jual exclude − modal exclude) × rate
+     * Non Wapu: basis − PPH − modal exclude
      */
     public static function margin(
         float $sellExclude,
@@ -304,20 +446,32 @@ class OpportunityProductPricing
         string $itemKind,
         float $itemDiscount = 0
     ): float {
+        $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
         $gross = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
+        $pnbp = self::pnbp($base, $taxCategory);
         $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
 
-        return round($gross - $pph29, 2);
+        return round($gross - $pnbp - $pph29, 2);
     }
 
     public static function marginPercent(
         float $margin,
         float $sellExclude,
+        string $taxCategory,
+        string $itemKind,
         float $itemDiscount = 0,
     ): ?float {
-        $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+        $effectiveSell = self::effectiveSellExclude($sellExclude, $itemDiscount);
 
-        return $base > 0 ? round(($margin / $base) * 100, 2) : null;
+        // Wapu & Inaproc: % terhadap harga setelah PPH (jual exclude − PPH).
+        if ($taxCategory === self::TAX_WAPU || $taxCategory === self::TAX_INAPROC) {
+            $pph = self::pph($effectiveSell, $taxCategory, $itemKind);
+            $denom = $effectiveSell - $pph;
+        } else {
+            $denom = $effectiveSell;
+        }
+
+        return $denom > 0 ? round(($margin / $denom) * 100, 2) : null;
     }
 
     /**
@@ -339,10 +493,13 @@ class OpportunityProductPricing
         $pphPercent = self::pphPercentFor($taxCategory, $itemKind);
         $pph = self::pph($effectiveSell, $taxCategory, $itemKind);
         $pnbp = self::pnbp($effectiveSell, $taxCategory);
+        $pnbpTier = self::appliesPnbp($taxCategory)
+            ? self::matchPnbpTier($effectiveInclude)
+            : null;
         $grossMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
         $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
         $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $marginPercent = self::marginPercent($margin, $sellExclude, $itemDiscount);
+        $marginPercent = self::marginPercent($margin, $sellExclude, $taxCategory, $itemKind, $itemDiscount);
         $qty = (float) ($row['quantity'] ?? 1);
 
         return array_merge($row, [
@@ -364,7 +521,8 @@ class OpportunityProductPricing
             'pph_percent' => $pphPercent,
             'pph_applicable' => self::appliesPph($taxCategory, $itemKind),
             'pnbp' => $pnbp,
-            'pnbp_percent' => self::appliesPnbp($taxCategory) ? self::pnbpPercent() : 0.0,
+            'pnbp_percent' => $pnbpTier ? (float) $pnbpTier['rate_percent'] : 0.0,
+            'pnbp_cap' => $pnbpTier ? (float) $pnbpTier['cap'] : null,
             'pnbp_applicable' => self::appliesPnbp($taxCategory),
             'gross_margin' => $grossMargin,
             'pph29' => $pph29,
