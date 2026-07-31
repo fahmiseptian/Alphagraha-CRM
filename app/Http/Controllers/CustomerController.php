@@ -122,6 +122,30 @@ class CustomerController extends Controller
             ->with('success', 'Customer updated successfully.');
     }
 
+    public function destroy(string $id)
+    {
+        if (! auth()->user()?->canDeleteCustomer()) {
+            abort(403, 'Hanya Superadmin yang dapat menghapus customer.');
+        }
+
+        $account = Account::query()->findOrFail($id);
+
+        if ($account->opportunities()->exists()) {
+            return back()->with('error', 'Customer tidak bisa dihapus karena masih memiliki opportunity.');
+        }
+
+        if ($account->quotations()->exists()) {
+            return back()->with('error', 'Customer tidak bisa dihapus karena masih memiliki quotation.');
+        }
+
+        $account->deleted = 1;
+        $account->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $account->save();
+
+        return redirect()->route('customers.index')
+            ->with('success', 'Customer berhasil dihapus.');
+    }
+
     public function show(string $id)
     {
         $account = $this->scopeAssigned(Account::query())

@@ -489,30 +489,79 @@ class NotificationService
 
     protected function syncActivityDeadlines(User $user, Carbon $until): void
     {
+        // Hanya muncul saat reminder sudah jatuh tempo (bukan "X hari lagi").
+        $now = Carbon::now();
+
         Activity::query()
             ->where('assigned_to', $user->id)
             ->whereNotIn('status', ['completed', 'cancelled'])
-            ->whereNotNull('due_at')
-            ->where('due_at', '<=', $until)
-            ->orderBy('due_at')
+            ->whereNotNull('reminder_at')
+            ->where('reminder_at', '<=', $now)
+            ->orderBy('reminder_at')
             ->limit(30)
             ->get()
             ->each(function (Activity $activity) use ($user) {
-                $date = $activity->due_at->copy()->startOfDay();
-                $label = $this->deadlineLabel($date);
+                $reminder = $activity->reminder_at->copy();
                 $typeLabel = Activity::TYPES[$activity->type] ?? $activity->type;
-                $overdue = $activity->isOverdue();
+                $dueLabel = $activity->due_at
+                    ? 'Jadwal '.$activity->due_at->translatedFormat('d M Y H:i')
+                    : null;
+
+                $body = $typeLabel.' — Reminder '.$reminder->translatedFormat('d M Y H:i');
+                if ($dueLabel) {
+                    $body .= ' · '.$dueLabel;
+                }
 
                 $this->notify(
                     $user->id,
                     CrmNotification::TYPE_ACTIVITY_DUE,
-                    ($overdue ? 'Acara/tugas lewat: ' : 'Acara/tugas mendekati: ').$activity->subject,
-                    $typeLabel.' — '.$activity->due_at->translatedFormat('d M Y H:i').' ('.$label.')',
+                    'Reminder activity: '.$activity->subject,
+                    $body,
                     route('activities.edit', $activity),
-                    showPopup: $overdue || $date->isToday() || $date->isTomorrow(),
-                    uniqueKey: 'activity_due:'.$activity->id.':'.$date->toDateString(),
-                    data: ['activity_id' => $activity->id, 'due_at' => $activity->due_at->toIso8601String()],
+                    showPopup: true,
+                    uniqueKey: 'activity_reminder:'.$activity->id.':'.$reminder->format('Y-m-d-H-i'),
+                    data: [
+                        'activity_id' => $activity->id,
+                        'reminder_at' => $reminder->toIso8601String(),
+                        'due_at' => $activity->due_at?->toIso8601String(),
+                    ],
                 );
+            });
+
+        // Hapus notifikasi activity yang masih unread tapi reminder belum jatuh / tidak relevan.
+        $this->prunePrematureActivityNotifications($user);
+    }
+
+    /**
+     * Bersihkan notifikasi activity lama yang dibuat sebelum waktunya (mis. "7 hari lagi").
+     */
+    protected function prunePrematureActivityNotifications(User $user): void
+    {
+        $now = Carbon::now();
+
+        CrmNotification::query()
+            ->where('user_id', $user->id)
+            ->where('type', CrmNotification::TYPE_ACTIVITY_DUE)
+            ->whereNull('read_at')
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get()
+            ->each(function (CrmNotification $notification) use ($now) {
+                $activityId = $notification->data['activity_id'] ?? null;
+                if (! $activityId) {
+                    $notification->delete();
+
+                    return;
+                }
+
+                $activity = Activity::query()->find($activityId);
+                if (! $activity
+                    || in_array($activity->status, ['completed', 'cancelled'], true)
+                    || ! $activity->reminder_at
+                    || $activity->reminder_at->gt($now)
+                ) {
+                    $notification->delete();
+                }
             });
     }
 
@@ -546,19 +595,102 @@ class NotificationService
 
     public function markAllRead(string $userId): void
     {
+        // Hanya notifikasi informatif — yang butuh aksi tetap unread sampai diaksi.
         CrmNotification::query()
             ->where('user_id', $userId)
             ->whereNull('read_at')
-            ->update(['read_at' => now()]);
+            ->whereNotIn('type', [
+                CrmNotification::TYPE_DISCOUNT_REQUESTED,
+                CrmNotification::TYPE_MARGIN_REQUESTED,
+                CrmNotification::TYPE_ACTIVITY_DUE,
+                CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
+            ])
+            ->update([
+                'read_at' => now(),
+                'show_popup' => false,
+            ]);
     }
 
-    public function markPopupsRead(string $userId): void
+    /**
+     * Tutup popup saja — status baca tidak berubah.
+     */
+    public function dismissPopups(string $userId): void
     {
         CrmNotification::query()
             ->where('user_id', $userId)
             ->whereNull('read_at')
             ->where('show_popup', true)
-            ->update(['read_at' => now()]);
+            ->update(['show_popup' => false]);
+    }
+
+    /**
+     * @param  list<int>  $ids
+     */
+    public function deleteForUser(string $userId, array $ids): int
+    {
+        return CrmNotification::query()
+            ->where('user_id', $userId)
+            ->whereIn('id', $ids)
+            ->delete();
+    }
+
+    /**
+     * Tandai dibaca setelah aksi bisnis selesai (approve/reject/complete, dll).
+     *
+     * @param  array<string, mixed>  $dataMatch  kunci di kolom JSON `data`
+     */
+    public function markActioned(string $type, array $dataMatch): void
+    {
+        $query = CrmNotification::query()
+            ->where('type', $type)
+            ->whereNull('read_at');
+
+        foreach ($dataMatch as $key => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $query->where("data->{$key}", $value);
+        }
+
+        $query->update([
+            'read_at' => now(),
+            'show_popup' => false,
+        ]);
+    }
+
+    public function markDiscountRequestActioned(Opportunity $opportunity): void
+    {
+        $this->markActioned(CrmNotification::TYPE_DISCOUNT_REQUESTED, [
+            'opportunity_id' => $opportunity->id,
+        ]);
+    }
+
+    public function markOpportunityMarginRequestActioned(Opportunity $opportunity): void
+    {
+        $this->markActioned(CrmNotification::TYPE_MARGIN_REQUESTED, [
+            'opportunity_id' => $opportunity->id,
+        ]);
+    }
+
+    public function markQuotationMarginRequestActioned(Quotation $quotation): void
+    {
+        $this->markActioned(CrmNotification::TYPE_MARGIN_REQUESTED, [
+            'quotation_id' => $quotation->id,
+        ]);
+    }
+
+    public function markActivityDueActioned(Activity $activity): void
+    {
+        $this->markActioned(CrmNotification::TYPE_ACTIVITY_DUE, [
+            'activity_id' => $activity->id,
+        ]);
+    }
+
+    public function markOpportunityDeadlineActioned(Opportunity $opportunity): void
+    {
+        $this->markActioned(CrmNotification::TYPE_OPPORTUNITY_DEADLINE, [
+            'opportunity_id' => $opportunity->id,
+        ]);
     }
 
     protected function deadlineLabel(Carbon $date): string

@@ -99,6 +99,10 @@ class ActivityController extends Controller
         $data = $this->validateData($request);
         $activity->update($data);
 
+        if (in_array($activity->status, ['completed', 'cancelled'], true)) {
+            app(\App\Services\NotificationService::class)->markActivityDueActioned($activity);
+        }
+
         return redirect()->route('activities.edit', $activity)->with('success', 'Activity updated successfully.');
     }
 
@@ -114,6 +118,8 @@ class ActivityController extends Controller
     {
         $this->authorizeOwnership($activity);
         $activity->update(['status' => 'completed', 'completed_at' => now()]);
+
+        app(\App\Services\NotificationService::class)->markActivityDueActioned($activity);
 
         return back()->with('success', 'Activity marked as completed.');
     }

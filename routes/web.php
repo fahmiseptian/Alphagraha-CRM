@@ -39,6 +39,7 @@ Route::middleware('auth')->group(function () {
     // Notifikasi
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::delete('/notifications/selected', [NotificationController::class, 'destroySelected'])->name('notifications.destroy-selected');
     Route::post('/notifications/dismiss-popups', [NotificationController::class, 'dismissPopups'])->name('notifications.dismiss-popups');
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
 
@@ -49,6 +50,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/customers/{id}', [CustomerController::class, 'show'])->name('customers.show');
     Route::get('/customers/{id}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
     Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
+    Route::delete('/customers/{id}', [CustomerController::class, 'destroy'])->name('customers.destroy');
     Route::post('/customers/{account}/contacts', [CustomerContactController::class, 'store'])->name('customers.contacts.store');
     Route::put('/customers/{account}/contacts/{contact}', [CustomerContactController::class, 'update'])->name('customers.contacts.update');
 

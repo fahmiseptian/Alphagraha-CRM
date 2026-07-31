@@ -199,6 +199,21 @@ class User extends Authenticatable
         return $this->isSuperAdmin();
     }
 
+    public function canDeleteCustomer(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canDeleteOpportunity(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canDeleteQuotation(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     // --- Remember token dinonaktifkan ---------------------------------------
 
     public function getRememberToken(): ?string
@@ -265,14 +280,35 @@ class User extends Authenticatable
     {
         $this->loadMissing('profile');
 
-        return (bool) $this->profile?->signatureAbsolutePath();
+        return (bool) $this->profile?->hasAllCompanySignatures();
     }
 
-    public function signatureAbsolutePath(): ?string
+    public function hasDigitalSignatureFor(?string $companyKey = null): bool
     {
         $this->loadMissing('profile');
 
-        return $this->profile?->signatureAbsolutePath();
+        if ($companyKey === null || $companyKey === '') {
+            return $this->hasDigitalSignature();
+        }
+
+        return (bool) $this->profile?->hasSignatureFor($companyKey);
+    }
+
+    public function signatureAbsolutePath(?string $companyKey = null): ?string
+    {
+        $this->loadMissing('profile');
+
+        return $this->profile?->signatureAbsolutePath($companyKey);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function missingSignatureLabels(): array
+    {
+        $this->loadMissing('profile');
+
+        return $this->profile?->missingSignatureLabels() ?? UserProfile::signatureCompanyLabels();
     }
 
     /**

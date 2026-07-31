@@ -7,6 +7,7 @@ use App\Services\EspoPassword;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\Rules\Password;
 
@@ -17,7 +18,10 @@ class ProfileController extends Controller
         $user = auth()->user();
         $user->load('profile');
 
-        return view('profile.edit', compact('user'));
+        return view('profile.edit', [
+            'user' => $user,
+            'signatureCompanies' => UserProfile::signatureCompanyLabels(),
+        ]);
     }
 
     public function update(Request $request)
@@ -53,35 +57,59 @@ class ProfileController extends Controller
     {
         $user = $request->user();
 
+        if (! $user->isSales() && ! $user->isSuperAdmin() && ! $user->isAdmin()) {
+            abort(403, 'Hanya sales yang perlu mengunggah tanda tangan.');
+        }
+
         $request->validate([
+            'company' => ['required', Rule::in(UserProfile::signatureCompanyKeys())],
             'signature' => ['required', File::image()->max(2048)],
         ]);
 
+        $companyKey = UserProfile::resolveCompanyKey($request->input('company'));
         $file = $request->file('signature');
-        $path = $file->storeAs('signatures', $user->id.'.'.$file->getClientOriginalExtension(), 'public');
+        $path = $file->storeAs(
+            'signatures/'.$companyKey,
+            $user->id.'.'.$file->getClientOriginalExtension(),
+            'public'
+        );
 
         $profile = UserProfile::ensureForUser($user->id, $user->isSales());
+        $oldPath = $profile->signaturePathFor($companyKey);
 
-        if ($profile->signature_path && $profile->signature_path !== $path) {
-            Storage::disk('public')->delete($profile->signature_path);
+        if ($oldPath && $oldPath !== $path) {
+            Storage::disk('public')->delete($oldPath);
         }
 
-        $profile->signature_path = $path;
+        $profile->setSignaturePathFor($companyKey, $path);
         $profile->save();
 
-        return back()->with('success', 'Tanda tangan digital berhasil diunggah.');
+        $label = UserProfile::signatureCompanyLabels()[$companyKey] ?? $companyKey;
+
+        return back()->with('success', 'Tanda tangan '.$label.' berhasil diunggah.');
     }
 
     public function destroySignature(Request $request)
     {
         $user = $request->user();
+        $request->validate([
+            'company' => ['required', Rule::in(UserProfile::signatureCompanyKeys())],
+        ]);
+
+        $companyKey = UserProfile::resolveCompanyKey($request->input('company'));
         $profile = UserProfile::query()->where('user_id', $user->id)->first();
 
-        if ($profile?->signature_path) {
-            Storage::disk('public')->delete($profile->signature_path);
-            $profile->update(['signature_path' => null]);
+        if ($profile) {
+            $path = $profile->signaturePathFor($companyKey);
+            if ($path) {
+                Storage::disk('public')->delete($path);
+            }
+            $profile->setSignaturePathFor($companyKey, null);
+            $profile->save();
         }
 
-        return back()->with('success', 'Tanda tangan digital dihapus.');
+        $label = UserProfile::signatureCompanyLabels()[$companyKey] ?? $companyKey;
+
+        return back()->with('success', 'Tanda tangan '.$label.' dihapus.');
     }
 }

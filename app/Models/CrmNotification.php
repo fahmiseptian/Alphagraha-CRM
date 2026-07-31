@@ -52,10 +52,26 @@ class CrmNotification extends Model
         return $this->read_at === null;
     }
 
+    /**
+     * Notifikasi yang butuh aksi bisnis — tidak boleh ditandai dibaca hanya karena dibuka/ditutup.
+     */
+    public function requiresAction(): bool
+    {
+        return in_array($this->type, [
+            self::TYPE_DISCOUNT_REQUESTED,
+            self::TYPE_MARGIN_REQUESTED,
+            self::TYPE_ACTIVITY_DUE,
+            self::TYPE_OPPORTUNITY_DEADLINE,
+        ], true);
+    }
+
     public function markAsRead(): void
     {
         if ($this->read_at === null) {
-            $this->forceFill(['read_at' => now()])->save();
+            $this->forceFill([
+                'read_at' => now(),
+                'show_popup' => false,
+            ])->save();
         }
     }
 

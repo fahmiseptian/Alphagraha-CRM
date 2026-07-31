@@ -36,7 +36,7 @@
                     <div class="min-w-0 flex-1">
                         <h3 class="text-base font-semibold text-slate-800">Notifikasi penting</h3>
                         <p class="mt-0.5 text-sm text-slate-500">
-                            {{ $popupNotifications->count() }} pemberitahuan belum dibaca
+                            {{ $popupNotifications->count() }} pemberitahuan menunggu perhatian
                         </p>
                     </div>
                     <button type="button" @click="dismiss()" class="text-slate-400 hover:text-slate-600">
@@ -48,20 +48,30 @@
             <div class="flex-1 overflow-y-auto px-5 py-3">
                 <ul class="space-y-2">
                     @foreach ($popupNotifications as $n)
+                        @php $needsAction = $n->requiresAction(); @endphp
                         <li>
                             <form method="POST" action="{{ route('notifications.read', $n) }}">
                                 @csrf
                                 <button type="submit"
-                                        class="flex w-full items-start gap-3 rounded-xl border border-slate-100 px-3 py-3 text-left transition hover:border-slate-200 hover:bg-slate-50">
+                                        @class([
+                                            'flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition',
+                                            'border-amber-300 bg-amber-50 hover:bg-amber-100' => $needsAction,
+                                            'border-brand-200 bg-brand-50 hover:bg-brand-100/70' => ! $needsAction,
+                                        ])>
                                     <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg {{ $n->colorClass() }}">
                                         <i class="bi {{ $n->icon() }}"></i>
                                     </span>
                                     <div class="min-w-0 flex-1">
-                                        <p class="text-sm font-medium text-slate-800">{{ $n->title }}</p>
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <p class="text-sm font-bold text-slate-900">{{ $n->title }}</p>
+                                            @if ($needsAction)
+                                                <span class="rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">Perlu aksi</span>
+                                            @endif
+                                        </div>
                                         @if ($n->body)
-                                            <p class="mt-0.5 text-xs text-slate-500">{{ $n->body }}</p>
+                                            <p class="mt-0.5 text-xs text-slate-700">{{ $n->body }}</p>
                                         @endif
-                                        <p class="mt-1 text-[11px] text-slate-400">{{ $n->created_at?->diffForHumans() }}</p>
+                                        <p class="mt-1 text-[11px] text-slate-500">{{ $n->created_at?->diffForHumans() }}</p>
                                     </div>
                                 </button>
                             </form>
@@ -70,11 +80,10 @@
                 </ul>
             </div>
 
-            <div class="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4">
+            <div class="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4">
                 <a href="{{ route('notifications.index') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
                     Lihat semua <i class="bi bi-arrow-right"></i>
                 </a>
-                <x-btn type="button" variant="primary" @click="dismiss()">Mengerti</x-btn>
             </div>
         </div>
     </div>

@@ -48,6 +48,9 @@
           'marginNominalUmum' => (float) ($marginNominalUmum ?? 0),
           'marginNominalOngkirPribadi' => (float) ($marginNominalOngkirPribadi ?? 0),
           'purchasingMode' => $purchasingMode,
+          'stage' => old('stage', $opportunity->stage ?: 'Prospecting'),
+          'initialStage' => $opportunity->stage ?: 'Prospecting',
+          'noApprovalStages' => \App\Models\Espo\Opportunity::NO_APPROVAL_STAGES,
       ]) }})">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
@@ -125,12 +128,35 @@
                     </div>
                     <div>
                         <label class="crm-label">Stage</label>
-                        <select name="stage" class="select2 w-full" @disabled($purchasingMode)>
+                        <select name="stage" class="select2 w-full"
+                                @change="stage = $event.target.value"
+                                @disabled($purchasingMode)>
                             @foreach ($stages as $st)
                                 <option value="{{ $st }}" @selected(old('stage', $opportunity->stage) === $st)>{{ $st }}</option>
                             @endforeach
                         </select>
                         @if ($purchasingMode)<input type="hidden" name="stage" value="{{ $opportunity->stage }}">@endif
+                        <p class="mt-1 text-xs text-slate-400"
+                           x-show="skipsApproval" x-cloak>
+                            Stage awal — approval margin &amp; diskon belum diperlukan.
+                        </p>
+                    </div>
+                    <div class="sm:col-span-2" x-show="stage === 'Closed Lost'" x-cloak>
+                        <label class="crm-label">
+                            Catatan kekalahan
+                            <span class="text-red-500" x-show="initialStage !== 'Closed Lost'">*</span>
+                        </label>
+                        <textarea
+                            name="lost_reason"
+                            rows="3"
+                            class="crm-field"
+                            :required="stage === 'Closed Lost' && initialStage !== 'Closed Lost'"
+                            placeholder="Jelaskan alasan kekalahan deal ini..."
+                            @readonly($purchasingMode)
+                        >{{ old('lost_reason', $opportunity->crm_lost_reason) }}</textarea>
+                        <p class="mt-1 text-xs text-slate-400">
+                            Wajib diisi saat menutup deal sebagai Closed Lost (minimal 10 karakter).
+                        </p>
                     </div>
                     <div>
                         <label class="crm-label">Amount <span class="text-red-500">*</span></label>
@@ -228,7 +254,13 @@
 
                     <div class="space-y-4">
                         <template x-for="(p, i) in products" :key="i">
-                            <div class="rounded-lg border border-slate-200 p-4">
+                            <div class="flex gap-3 rounded-lg border border-slate-200 p-4">
+                                <div class="flex w-8 shrink-0 flex-col items-center pt-6">
+                                    <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold tabular-nums text-slate-700"
+                                          x-text="i + 1"
+                                          :title="'Item ' + (i + 1)"></span>
+                                </div>
+                                <div class="min-w-0 flex-1">
                                 <input type="hidden" :name="`products[${i}][tax_category]`" :value="p.tax_category">
                                 <div class="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12">
                                     <div class="sm:col-span-2">
@@ -370,8 +402,9 @@
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
-                    </template>
+                                </div>
+                            </div>
+                        </template>
                         <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">Belum ada item. Klik tombol + di bawah untuk menambahkan.</p>
                     </div>
                     <div class="mt-3 flex items-center justify-between">
@@ -439,7 +472,7 @@
                             <span class="shrink-0 text-sm font-semibold text-slate-600">%</span>
                         </div>
                         @if (auth()->user()?->isSuperAdmin())
-                        <p class="mt-1 text-xs text-slate-400">Isi % → nominal terisi otomatis dari total margin.</p>
+                        <p class="mt-1 text-xs text-slate-400">Isi % → nominal terisi otomatis dari basis margin.</p>
                         @endif
                     </div>
                     <div>
@@ -451,13 +484,20 @@
                                @input="discountAmount = parseId($event.target.value); onDiscountAmountChange()"
                                class="crm-field w-full tabular-nums">
                         <input type="hidden" name="discount_amount" :value="discountAmount">
-                        <p class="mt-1 text-xs text-slate-400">Setiap diskon &gt; 0 wajib approval Superadmin.</p>
+                        <p class="mt-1 text-xs text-slate-400" x-show="!skipsApproval">
+                            Setiap diskon &gt; 0 wajib approval Superadmin (mulai stage Proposal).
+                        </p>
+                        <p class="mt-1 text-xs text-slate-400" x-show="skipsApproval" x-cloak>
+                            Di Prospecting/Qualification, diskon tambahan tidak perlu approval.
+                        </p>
                     </div>
                 </div>
-                <p class="mt-2 text-xs text-slate-500" x-show="hasDiscount && productsMarginTotal > 0">
-                    Basis: total margin <span class="font-medium" x-text="formatMoney(productsMarginTotal)"></span>
+                <p class="mt-2 text-xs text-slate-500" x-show="hasDiscount && discountBasisMarginTotal > 0">
+                    Basis:
+                    <span x-text="discountBasisIsGross ? 'margin kotor (sebelum PNBP & PPH 29)' : 'total margin'"></span>
+                    <span class="font-medium" x-text="formatMoney(discountBasisMarginTotal)"></span>
                 </p>
-                <p class="mt-2 text-xs text-amber-600" x-show="hasDiscount && productsMarginTotal <= 0">
+                <p class="mt-2 text-xs text-amber-600" x-show="hasDiscount && discountBasisMarginTotal <= 0">
                     Isi harga jual &amp; modal produk dulu agar % diskon bisa dihitung dari margin.
                 </p>
                 @if ($opportunity->exists && $opportunity->hasActiveDiscount())
@@ -477,7 +517,8 @@
                     · Minimal
                     <strong x-text="(accountMinMarginPct ?? '—') + '%'"></strong>
                     / <strong x-text="formatMoney(requiredNominalThreshold)"></strong>.
-                    Opportunity tetap bisa disimpan, tetapi memerlukan approval Superadmin.
+                    Opportunity tetap bisa disimpan, tetapi memerlukan approval Superadmin
+                    (kecuali stage Prospecting/Qualification).
                 </p>
             </div>
             @endunless
@@ -636,6 +677,12 @@
             marginNominalUmum: Number(config.marginNominalUmum) || 0,
             marginNominalOngkirPribadi: Number(config.marginNominalOngkirPribadi) || 0,
             purchasingMode: !!config.purchasingMode,
+            stage: config.stage || 'Prospecting',
+            initialStage: config.initialStage || config.stage || 'Prospecting',
+            noApprovalStages: config.noApprovalStages || ['Prospecting', 'Qualification'],
+            get skipsApproval() {
+                return this.noApprovalStages.includes(this.stage);
+            },
             get filteredContacts() {
                 if (!this.accountId) return [];
                 return this.contacts.filter(c => c.account_id === this.accountId);
@@ -684,6 +731,7 @@
                 return thr > 0 && this.productsMarginTotal < thr;
             },
             get marginNeedsApprovalHint() {
+                if (this.skipsApproval) return false;
                 return !!(this.accountId && (this.marginBelowPercent || this.marginBelowNominal));
             },
             get productsTotal() {
@@ -695,13 +743,26 @@
                     0
                 ));
             },
+            /** Basis % diskon: Inaproc = margin kotor; lainnya = margin bersih. */
+            get discountBasisMarginTotal() {
+                return this.round(this.products.reduce((s, p) => {
+                    const qty = Number(p.quantity) || 0;
+                    const unit = (p.tax_category || 'non_wapu') === 'inaproc'
+                        ? this.grossMarginAmount(p)
+                        : this.marginAmount(p);
+                    return s + qty * unit;
+                }, 0));
+            },
+            get discountBasisIsGross() {
+                return this.products.some(p => (p.tax_category || 'non_wapu') === 'inaproc');
+            },
             taxCategoryLabel(category) {
                 if (category === 'wapu') return 'Wapu';
                 if (category === 'inaproc') return 'Inaproc';
                 return 'Non Wapu';
             },
             syncDiscountPercentFromAmount() {
-                const margin = this.productsMarginTotal;
+                const margin = this.discountBasisMarginTotal;
                 const disc = Number(this.discountAmount) || 0;
                 if (margin > 0 && disc > 0) {
                     this.discountPercent = this.round((disc / margin) * 100);
@@ -714,7 +775,7 @@
                 let pct = Number(this.discountPercent) || 0;
                 if (pct < 0) pct = 0;
                 this.discountPercent = pct;
-                const margin = this.productsMarginTotal;
+                const margin = this.discountBasisMarginTotal;
                 if (margin > 0) {
                     this.discountAmount = this.round(margin * pct / 100);
                 }
@@ -726,7 +787,7 @@
             refreshDiscountFromMargin() {
                 if (!this.hasDiscount) return;
                 if (this._lockDiscountPercent && (Number(this.discountPercent) || 0) > 0) {
-                    const margin = this.productsMarginTotal;
+                    const margin = this.discountBasisMarginTotal;
                     if (margin > 0) {
                         this.discountAmount = this.round(margin * (Number(this.discountPercent) || 0) / 100);
                     }

@@ -18,34 +18,60 @@
                 </form>
             @elseif (! empty($closingStages))
                 @foreach ($closingStages as $stage)
-                    <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
-                        @csrf @method('PATCH')
-                        <input type="hidden" name="stage" value="{{ $stage }}">
-                        @if ($stage === \App\Models\Espo\Opportunity::WON_STAGE)
+                    @if ($stage === \App\Models\Espo\Opportunity::WON_STAGE)
+                        <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
+                            @csrf @method('PATCH')
+                            <input type="hidden" name="stage" value="{{ $stage }}">
                             <x-btn type="submit" icon="bi-trophy" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Closed Won</x-btn>
-                        @else
-                            <x-btn type="submit" variant="secondary" icon="bi-x-circle" class="!border-red-200 !text-red-600 hover:!bg-red-50">Closed Lost</x-btn>
-                        @endif
-                    </form>
+                        </form>
+                    @else
+                        <x-opportunity-closed-lost-form :opportunity="$opportunity" :open-on-error="true">
+                            <x-slot:trigger>
+                                <x-btn type="button" variant="secondary" icon="bi-x-circle" class="!border-red-200 !text-red-600 hover:!bg-red-50">Closed Lost</x-btn>
+                            </x-slot:trigger>
+                        </x-opportunity-closed-lost-form>
+                    @endif
                 @endforeach
             @endif
         @endif
         @if (auth()->user()->canEditOpportunityFully() || (auth()->user()->isPurchasing() && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE))
             <x-btn href="{{ route('opportunities.edit', $opportunity) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
         @endif
+        @if (auth()->user()->canDeleteOpportunity())
+            <form method="POST" action="{{ route('opportunities.destroy', $opportunity) }}"
+                  onsubmit="return confirm('Hapus opportunity ini? Tindakan tidak bisa dibatalkan.')">
+                @csrf @method('DELETE')
+                <x-btn type="submit" variant="secondary" icon="bi-trash" class="!border-red-200 !text-red-600 hover:!bg-red-50">Hapus</x-btn>
+            </form>
+        @endif
     </div>
 </div>
+
+@if ($opportunity->stage === \App\Models\Espo\Opportunity::LOST_STAGE && $opportunity->crm_lost_reason)
+    <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+        <p class="font-semibold text-red-800">
+            <i class="bi bi-journal-text mr-1"></i> Catatan kekalahan
+        </p>
+        <p class="mt-1 whitespace-pre-line">{{ $opportunity->crm_lost_reason }}</p>
+    </div>
+@endif
 
 @if ($opportunity->hasActiveDiscount())
     @php
         $discStatus = $opportunity->crm_discount_status;
         $discPct = $opportunity->discountPercent();
-        $isPending = $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_PENDING;
-        $isRejected = $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_REJECTED;
-        $isApproved = $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_APPROVED;
+        $isPending = $opportunity->discountNeedsAttention();
+        $isRejected = ! $opportunity->skipsApproval()
+            && $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_REJECTED;
+        $isApproved = ! $opportunity->skipsApproval()
+            && $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_APPROVED;
         $currency = $opportunity->amount_currency ?: 'IDR';
         $approvalProducts = $opportunity->products;
         $marginTotal = $opportunity->totalProductsMargin();
+        $discountBasisMargin = $opportunity->totalDiscountBasisMargin();
+        $discountBasisIsGross = $approvalProducts->contains(
+            fn ($p) => ($p['tax_category'] ?? '') === \App\Support\OpportunityProductPricing::TAX_INAPROC
+        );
         $discountAmount = (float) $opportunity->crm_discount_amount;
     @endphp
     <div @class([
@@ -82,7 +108,7 @@
                          x-data="{
                              adjustMode: false,
                              editingField: null,
-                             marginTotal: {{ json_encode($marginTotal) }},
+                             marginTotal: {{ json_encode($discountBasisMargin) }},
                              discountPercent: {{ json_encode($discPct ?? 0) }},
                              discountAmount: {{ json_encode((float) old('discount_amount', $discountAmount)) }},
                              round(n) { return Math.round(n * 100) / 100; },
@@ -129,7 +155,9 @@
                                 @csrf
                                 <div class="grid gap-2 sm:grid-cols-2">
                                     <div>
-                                        <label class="mb-0.5 block text-[11px] text-slate-500">% dari margin</label>
+                                        <label class="mb-0.5 block text-[11px] text-slate-500">
+                                            % dari {{ $discountBasisIsGross ? 'margin kotor' : 'margin' }}
+                                        </label>
                                         <div class="flex items-center gap-1.5">
                                             <input type="text" inputmode="decimal" placeholder="0"
                                                    x-effect="if (editingField !== 'pct') $el.value = formatId(discountPercent, 2)"
@@ -151,7 +179,7 @@
                                         <input type="hidden" name="discount_amount" :value="discountAmount">
                                     </div>
                                 </div>
-                                @unless ($marginTotal > 0)
+                                @unless ($discountBasisMargin > 0)
                                     <p class="text-[11px] text-amber-600">Margin belum tersedia; isi nominal langsung.</p>
                                 @endunless
                                 <p class="text-[11px] text-slate-400">Isi 0 lalu submit untuk menolak diskon sepenuhnya.</p>
@@ -200,15 +228,19 @@
                         <p class="text-sm font-semibold text-slate-800">
                             {{ $discPct !== null ? number_format($discPct, 2, ',', '.').'%' : '—' }}
                         </p>
-                        <p class="text-[10px] text-slate-400">dari total margin</p>
+                        <p class="text-[10px] text-slate-400">
+                            {{ $discountBasisIsGross ? 'dari margin kotor' : 'dari total margin' }}
+                        </p>
                     </div>
                     <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
                         <p class="text-[10px] uppercase tracking-wide text-slate-400">Nominal Diskon</p>
                         <p class="text-sm font-semibold text-slate-800">{{ money($discountAmount, $currency) }}</p>
                     </div>
                     <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
-                        <p class="text-[10px] uppercase tracking-wide text-slate-400">Total Margin</p>
-                        <p class="text-sm font-semibold text-slate-800">{{ money($marginTotal, $currency) }}</p>
+                        <p class="text-[10px] uppercase tracking-wide text-slate-400">
+                            {{ $discountBasisIsGross ? 'Margin Kotor' : 'Total Margin' }}
+                        </p>
+                        <p class="text-sm font-semibold text-slate-800">{{ money($discountBasisMargin, $currency) }}</p>
                     </div>
                     <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
                         <p class="text-[10px] uppercase tracking-wide text-slate-400">Kategori deal</p>
@@ -237,15 +269,18 @@
                             @foreach ($approvalProducts as $p)
                                 @php
                                     $qty = (float) ($p['quantity'] ?? 1);
-                                    $lineMargin = round($qty * (float) ($p['margin'] ?? 0), 2);
+                                    $taxCat = (string) ($p['tax_category'] ?? \App\Support\OpportunityProductPricing::TAX_NON_WAPU);
+                                    $lineBasisMargin = $taxCat === \App\Support\OpportunityProductPricing::TAX_INAPROC
+                                        ? round($qty * (float) ($p['gross_margin'] ?? $p['margin'] ?? 0), 2)
+                                        : round($qty * (float) ($p['margin'] ?? 0), 2);
                                     $lineCostExcl = round($qty * (float) ($p['cost_exclude'] ?? 0), 2);
                                     $lineCostIncl = round($qty * (float) ($p['cost_include'] ?? 0), 2);
                                     $lineSellExcl = round($qty * (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude'] ?? 0), 2);
-                                    $lineDiscShare = ($marginTotal > 0 && $lineMargin > 0)
-                                        ? round($discountAmount * ($lineMargin / $marginTotal), 2)
+                                    $lineDiscShare = ($discountBasisMargin > 0 && $lineBasisMargin > 0)
+                                        ? round($discountAmount * ($lineBasisMargin / $discountBasisMargin), 2)
                                         : 0.0;
-                                    $lineDiscPct = $lineMargin > 0
-                                        ? round(($lineDiscShare / $lineMargin) * 100, 2)
+                                    $lineDiscPct = $lineBasisMargin > 0
+                                        ? round(($lineDiscShare / $lineBasisMargin) * 100, 2)
                                         : null;
                                 @endphp
                                 <tr>
@@ -256,7 +291,7 @@
                                         </span>
                                     </td>
                                     <td class="px-3 py-2">
-                                        {{ $p['tax_category_label'] ?? \App\Support\OpportunityProductPricing::taxCategoryLabel((string) ($p['tax_category'] ?? 'non_wapu')) }}
+                                        {{ $p['tax_category_label'] ?? \App\Support\OpportunityProductPricing::taxCategoryLabel($taxCat) }}
                                     </td>
                                     <td class="px-3 py-2 text-right tabular-nums">{{ money($lineCostExcl, $currency) }}</td>
                                     <td class="px-3 py-2 text-right tabular-nums">{{ money($lineCostIncl, $currency) }}</td>
@@ -264,7 +299,7 @@
                                     <td class="px-3 py-2 text-right tabular-nums">
                                         {{ $p['margin_percent'] !== null ? number_format((float) $p['margin_percent'], 2, ',', '.').'%' : '—' }}
                                     </td>
-                                    <td class="px-3 py-2 text-right tabular-nums font-medium">{{ money($lineMargin, $currency) }}</td>
+                                    <td class="px-3 py-2 text-right tabular-nums font-medium">{{ money($lineBasisMargin, $currency) }}</td>
                                     <td class="px-3 py-2 text-right tabular-nums">
                                         {{ $lineDiscPct !== null ? number_format($lineDiscPct, 2, ',', '.').'%' : '—' }}
                                     </td>
@@ -276,7 +311,7 @@
                             <tr>
                                 <td class="px-3 py-2" colspan="5">Total</td>
                                 <td class="px-3 py-2 text-right tabular-nums text-slate-400">—</td>
-                                <td class="px-3 py-2 text-right tabular-nums">{{ money($marginTotal, $currency) }}</td>
+                                <td class="px-3 py-2 text-right tabular-nums">{{ money($discountBasisMargin, $currency) }}</td>
                                 <td class="px-3 py-2 text-right tabular-nums">
                                     {{ $discPct !== null ? number_format($discPct, 2, ',', '.').'%' : '—' }}
                                 </td>
@@ -289,10 +324,11 @@
                 <p class="text-xs">
                     Nominal: <strong>{{ money($discountAmount, $currency) }}</strong>
                     @if ($discPct !== null)
-                        &nbsp;·&nbsp; Persentase: <strong>{{ number_format($discPct, 2, ',', '.') }}%</strong> dari margin
+                        &nbsp;·&nbsp; Persentase: <strong>{{ number_format($discPct, 2, ',', '.') }}%</strong>
+                        {{ $discountBasisIsGross ? 'dari margin kotor' : 'dari margin' }}
                     @endif
-                    @if ($marginTotal > 0)
-                        &nbsp;·&nbsp; Margin: <strong>{{ money($marginTotal, $currency) }}</strong>
+                    @if ($discountBasisMargin > 0)
+                        &nbsp;·&nbsp; Basis: <strong>{{ money($discountBasisMargin, $currency) }}</strong>
                     @endif
                 </p>
             @endif
@@ -300,10 +336,10 @@
     </div>
 @endif
 
-@if ($opportunity->crm_margin_status)
+@if ($opportunity->crm_margin_status && ! $opportunity->skipsApproval())
     @php
         $marginStatus = $opportunity->crm_margin_status;
-        $isMarginPending = $marginStatus === \App\Models\Espo\Opportunity::MARGIN_PENDING;
+        $isMarginPending = $opportunity->marginNeedsApproval();
         $isMarginRejected = $marginStatus === \App\Models\Espo\Opportunity::MARGIN_REJECTED;
         $isMarginApproved = $marginStatus === \App\Models\Espo\Opportunity::MARGIN_APPROVED;
         $marginCurrency = $opportunity->amount_currency ?: 'IDR';
@@ -353,6 +389,9 @@
                     <p class="mt-2 text-xs font-medium opacity-90">
                         <i class="bi bi-lock mr-1"></i>
                         Quotation tidak dapat dibuat selama margin {{ $isMarginPending ? 'menunggu approval' : 'ditolak' }}.
+                        @if ($isMarginPending && $opportunity->stage === 'Negotiation')
+                            Closed Won juga terkunci sampai approval selesai.
+                        @endif
                     </p>
                 @endif
             </div>
@@ -393,7 +432,7 @@
                     </span>
                     <div class="flex items-center gap-2">
                         <a href="{{ route('opportunities.show', $dup) }}" class="text-xs font-medium text-brand-600 hover:underline">Lihat</a>
-                        @if (! $dup->quotation)
+                        @if (! $dup->quotation && auth()->user()->canDeleteOpportunity())
                             <form method="POST" action="{{ route('opportunities.destroy', $dup) }}" onsubmit="return confirm('Hapus deal duplikat ini?')">
                                 @csrf @method('DELETE')
                                 <button type="submit" class="text-xs font-medium text-red-600 hover:underline">Hapus duplikat</button>
@@ -435,7 +474,9 @@
                         <dd class="mt-0.5 font-medium text-slate-700">
                             {{ money($opportunity->crm_discount_amount, $opportunity->amount_currency ?: 'IDR') }}
                             @if ($opportunity->discountPercent() !== null)
-                                <span class="text-slate-500">({{ number_format($opportunity->discountPercent(), 2, ',', '.') }}% dari margin)</span>
+                                <span class="text-slate-500">({{ number_format($opportunity->discountPercent(), 2, ',', '.') }}%
+                                    {{ $opportunity->products->contains(fn ($p) => ($p['tax_category'] ?? '') === \App\Support\OpportunityProductPricing::TAX_INAPROC) ? 'dari margin kotor' : 'dari margin' }})
+                                </span>
                             @endif
                             <x-badge class="ml-1" :color="match($opportunity->crm_discount_status) {
                                 'approved' => 'green',
@@ -572,6 +613,11 @@
             <div x-show="open" x-cloak class="border-t border-slate-100">
                 @if ($opportunity->stage === 'Negotiation')
                     <p class="px-5 pt-3 text-xs text-slate-500">Pilih hasil akhir deal:</p>
+                    @if (! $opportunity->canMoveToClosedWon())
+                        <p class="px-5 pt-2 text-xs text-amber-700">
+                            <i class="bi bi-lock"></i> Closed Won terkunci sampai approval margin/diskon selesai.
+                        </p>
+                    @endif
                 @endif
                 <ul class="crm-stage-move">
                     @foreach (\App\Models\Espo\Opportunity::STAGES as $stage)
@@ -582,6 +628,9 @@
                             $isClosingOption = $opportunity->stage === 'Negotiation' && ($isWon || $isLost);
                             $isNext = $nextStage === $stage;
                             $canSelect = ! $isCurrent && ($isNext || $isClosingOption || ! in_array($stage, [\App\Models\Espo\Opportunity::WON_STAGE, \App\Models\Espo\Opportunity::LOST_STAGE], true));
+                            if ($isWon && $isClosingOption && ! $opportunity->canMoveToClosedWon()) {
+                                $canSelect = false;
+                            }
                         @endphp
                         <li>
                             @if ($isCurrent)
@@ -593,17 +642,27 @@
                                     <i class="bi bi-check-circle-fill"></i> {{ $stage }}
                                 </span>
                             @elseif ($canSelect)
-                                <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
-                                    @csrf @method('PATCH')
-                                    <input type="hidden" name="stage" value="{{ $stage }}">
-                                    <button type="submit" @class([
-                                        'crm-stage-move__item crm-stage-move__item--action',
-                                        'crm-stage-move__item--won' => $isWon,
-                                        'crm-stage-move__item--lost' => $isLost,
-                                    ])>
-                                        {{ $stage }}
-                                    </button>
-                                </form>
+                                @if ($isLost && $isClosingOption)
+                                    <x-opportunity-closed-lost-form :opportunity="$opportunity" :open-on-error="true">
+                                        <x-slot:trigger>
+                                            <button type="button" class="crm-stage-move__item crm-stage-move__item--action crm-stage-move__item--lost w-full text-left">
+                                                {{ $stage }}
+                                            </button>
+                                        </x-slot:trigger>
+                                    </x-opportunity-closed-lost-form>
+                                @else
+                                    <form method="POST" action="{{ route('opportunities.stage', $opportunity) }}">
+                                        @csrf @method('PATCH')
+                                        <input type="hidden" name="stage" value="{{ $stage }}">
+                                        <button type="submit" @class([
+                                            'crm-stage-move__item crm-stage-move__item--action',
+                                            'crm-stage-move__item--won' => $isWon,
+                                            'crm-stage-move__item--lost' => $isLost,
+                                        ])>
+                                            {{ $stage }}
+                                        </button>
+                                    </form>
+                                @endif
                             @else
                                 <span class="crm-stage-move__item text-slate-300">{{ $stage }}</span>
                             @endif

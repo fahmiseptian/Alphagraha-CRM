@@ -211,7 +211,7 @@ class QuotationService
             'sales_name' => (string) optional($creator)->display_name,
             'sales_job_position' => $jobPosition,
             'sales_title' => $jobPosition !== '' ? $jobPosition : (string) (optional($creator)->title ?: 'Account Manager'),
-            'sales_signature' => $this->renderSalesSignature($creator),
+            'sales_signature' => $this->renderSalesSignature($creator, $template),
             'revision' => (string) $quotation->revision,
             'items_table' => $this->renderItemsTable($quotation),
             'items_rows' => $this->renderItemsRows($quotation),
@@ -381,6 +381,13 @@ class QuotationService
 
     protected function companyConfigForTemplate(?QuotationTemplate $template): array
     {
+        $key = $this->companyKeyForTemplate($template);
+
+        return config("crm.quotation_companies.{$key}", config('crm.quotation_companies.agc', []));
+    }
+
+    public function companyKeyForTemplate(?QuotationTemplate $template): string
+    {
         $map = config('crm.quotation_company_map', []);
         $key = $map[$template?->category ?? ''] ?? null;
 
@@ -393,7 +400,7 @@ class QuotationService
             };
         }
 
-        return config("crm.quotation_companies.{$key}", config('crm.quotation_companies.agc', []));
+        return \App\Models\UserProfile::resolveCompanyKey($key);
     }
 
     /**
@@ -413,13 +420,14 @@ class QuotationService
         return nl2br(e($trimmed));
     }
 
-    protected function renderSalesSignature(?User $user): string
+    protected function renderSalesSignature(?User $user, ?QuotationTemplate $template = null): string
     {
         if (! $user) {
             return '';
         }
 
-        $path = $user->signatureAbsolutePath();
+        $companyKey = $this->companyKeyForTemplate($template);
+        $path = $user->signatureAbsolutePath($companyKey);
         if (! $path) {
             return '';
         }

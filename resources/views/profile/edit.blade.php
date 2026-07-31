@@ -7,37 +7,69 @@
     <p class="text-sm text-slate-500">Kelola password dan tanda tangan digital untuk penawaran</p>
 </div>
 
-<div class="max-w-2xl space-y-4">
+<div class="max-w-3xl space-y-4">
     <x-card title="Tanda Tangan Digital">
-        @if (auth()->user()->isSales())
+        @if (auth()->user()->isSales() || auth()->user()->isAdmin())
             <p class="mb-4 text-sm text-slate-600">
-                Tanda tangan ini otomatis muncul di penawaran (PDF) sesuai sales yang membuat quotation.
+                Upload <strong>3 tanda tangan</strong> sesuai perusahaan. Saat generate PDF Quotation,
+                sistem memakai TTD yang cocok dengan kategori perusahaan template.
             </p>
 
-            @if ($user->hasDigitalSignature())
-                <div class="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Preview TTD</p>
-                    <img src="{{ $user->profile?->signatureUrl() }}" alt="Signature" class="max-h-24">
-                </div>
-                <form method="POST" action="{{ route('profile.signature.destroy') }}" class="mb-4" onsubmit="return confirm('Hapus tanda tangan digital?')">
-                    @csrf @method('DELETE')
-                    <x-btn type="submit" variant="ghost" icon="bi-trash">Hapus TTD</x-btn>
-                </form>
-            @else
+            @php
+                $missing = $user->missingSignatureLabels();
+            @endphp
+            @if (count($missing) > 0)
                 <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     <i class="bi bi-exclamation-triangle"></i>
-                    Anda belum mengunggah tanda tangan digital. Upload di bawah agar bisa generate PDF penawaran.
+                    Belum lengkap:
+                    <strong>{{ implode(', ', $missing) }}</strong>.
+                    Upload semua agar preview/PDF penawaran tidak terblokir.
                 </div>
             @endif
 
-            <form method="POST" action="{{ route('profile.signature.store') }}" enctype="multipart/form-data" class="space-y-3">
-                @csrf
-                <div>
-                    <label class="crm-label">Upload TTD (PNG/JPG, max 2MB)</label>
-                    <input type="file" name="signature" accept="image/png,image/jpeg,image/webp" required class="crm-field">
-                </div>
-                <x-btn type="submit" variant="primary" icon="bi-upload">Upload Tanda Tangan</x-btn>
-            </form>
+            <div class="space-y-4">
+                @foreach ($signatureCompanies as $key => $label)
+                    @php
+                        $has = (bool) $user->profile?->hasSignatureFor($key);
+                        $url = $user->profile?->signatureUrl($key);
+                    @endphp
+                    <div class="rounded-xl border border-slate-200 p-4">
+                        <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                                <p class="text-sm font-semibold text-slate-800">{{ $label }}</p>
+                                <p class="text-xs text-slate-400">Kode: {{ strtoupper($key) }}</p>
+                            </div>
+                            @if ($has)
+                                <span class="rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700">Sudah diunggah</span>
+                            @else
+                                <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Belum ada</span>
+                            @endif
+                        </div>
+
+                        @if ($has && $url)
+                            <div class="mb-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                                <img src="{{ $url }}" alt="TTD {{ $label }}" class="max-h-20">
+                            </div>
+                            <form method="POST" action="{{ route('profile.signature.destroy') }}" class="mb-3"
+                                  onsubmit="return confirm('Hapus tanda tangan {{ $label }}?')">
+                                @csrf @method('DELETE')
+                                <input type="hidden" name="company" value="{{ $key }}">
+                                <x-btn type="submit" variant="ghost" icon="bi-trash">Hapus TTD</x-btn>
+                            </form>
+                        @endif
+
+                        <form method="POST" action="{{ route('profile.signature.store') }}" enctype="multipart/form-data" class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                            @csrf
+                            <input type="hidden" name="company" value="{{ $key }}">
+                            <div class="min-w-0 flex-1">
+                                <label class="crm-label">{{ $has ? 'Ganti' : 'Upload' }} TTD (PNG/JPG, max 2MB)</label>
+                                <input type="file" name="signature" accept="image/png,image/jpeg,image/webp" required class="crm-field">
+                            </div>
+                            <x-btn type="submit" variant="primary" icon="bi-upload">Upload</x-btn>
+                        </form>
+                    </div>
+                @endforeach
+            </div>
         @else
             <p class="text-sm text-slate-500">Tanda tangan digital hanya diperlukan untuk akun sales.</p>
         @endif

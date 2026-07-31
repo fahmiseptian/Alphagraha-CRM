@@ -45,28 +45,56 @@
     @stack('styles')
 </head>
 <body class="h-full bg-slate-50 text-slate-700 antialiased">
-<div x-data="{ sidebarOpen: false }" class="min-h-full">
+<div x-data="{
+        sidebarOpen: false,
+        sidebarCollapsed: localStorage.getItem('crm_sidebar_collapsed') === '1',
+        toggleSidebar() {
+            if (window.matchMedia('(min-width: 1024px)').matches) {
+                this.sidebarCollapsed = !this.sidebarCollapsed;
+                localStorage.setItem('crm_sidebar_collapsed', this.sidebarCollapsed ? '1' : '0');
+            } else {
+                this.sidebarOpen = !this.sidebarOpen;
+            }
+        },
+     }"
+     class="min-h-full">
 
     {{-- Overlay mobile --}}
     <div x-show="sidebarOpen" x-cloak @click="sidebarOpen = false"
          class="fixed inset-0 z-30 bg-slate-900/50 lg:hidden"></div>
 
     {{-- Sidebar --}}
-    <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-           class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col transform bg-slate-900 text-slate-300 shadow-xl transition-transform duration-200 lg:translate-x-0">
-        <div class="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-5">
-            <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
+    <aside :class="{
+               'translate-x-0': sidebarOpen,
+               '-translate-x-full': !sidebarOpen,
+               'crm-sidebar--collapsed': sidebarCollapsed,
+               'lg:w-16': sidebarCollapsed,
+               'lg:w-64': !sidebarCollapsed,
+           }"
+           class="crm-sidebar fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-900 text-slate-300 shadow-xl transition-all duration-200 lg:translate-x-0">
+        <div class="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
                 <img src="{{ asset('images/logo-crm.png') }}" alt="AGC CRM"
                      class="h-7 w-7 object-contain"
                      loading="eager">
             </div>
-            <div>
+            <div class="crm-sidebar-label min-w-0 flex-1">
                 <div class="text-sm font-semibold leading-tight text-white">AGC CRM</div>
                 <div class="text-[11px] leading-tight text-slate-400">Sales Workspace</div>
             </div>
+            <button type="button" @click="toggleSidebar()"
+                    class="crm-sidebar-label hidden rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white lg:inline-flex"
+                    title="Ciutkan sidebar">
+                <i class="bi bi-layout-sidebar-inset text-lg"></i>
+            </button>
+            <button type="button" @click="sidebarOpen = false"
+                    class="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden"
+                    title="Tutup">
+                <i class="bi bi-x-lg"></i>
+            </button>
         </div>
 
-        <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-4 text-sm">
+        <nav class="flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto px-2 py-4 text-sm">
             @php
                 $user = auth()->user();
                 $nav = [
@@ -86,16 +114,16 @@
             @endphp
             @foreach ($nav as [$route, $label, $icon])
                 @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
-                <a href="{{ route($route) }}"
-                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
+                <a href="{{ route($route) }}" title="{{ $label }}"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
                           {{ $active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi {{ $icon }} text-base"></i>
-                    <span>{{ $label }}</span>
+                    <i class="bi {{ $icon }} shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">{{ $label }}</span>
                 </a>
             @endforeach
 
             @if (auth()->user()->canAccessAdministration())
-                <div class="px-3 pt-5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Administration</div>
+                <div class="crm-sidebar-label px-3 pt-5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Administration</div>
                 @php
                     $userRoles = \App\Models\User::ROLES;
                     $usersMenuOpen = request()->routeIs('users.*');
@@ -103,26 +131,33 @@
                     $activeUserRole = request()->query('role')
                         ?? (is_object($routeUser) ? $routeUser->role : null)
                         ?? (request()->routeIs('users.create') ? request()->query('role', \App\Models\User::ROLE_SALES) : null);
+                    $settingsOpen = request()->routeIs('settings.*');
                 @endphp
 
-                <a href="{{ route('contacts.index') }}"
-                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                <a href="{{ route('contacts.index') }}" title="Contacts"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
                           {{ request()->routeIs('contacts.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-person-lines-fill text-base"></i>
-                    <span>Contacts</span>
+                    <i class="bi bi-person-lines-fill shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Contacts</span>
                 </a>
-                <a href="{{ route('templates.index') }}"
-                   class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                <a href="{{ route('templates.index') }}" title="Quotation Templates"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
                           {{ request()->routeIs('templates.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-file-earmark-richtext text-base"></i>
-                    <span>Quotation Templates</span>
+                    <i class="bi bi-file-earmark-richtext shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Quotation Templates</span>
                 </a>
 
-                <div x-data="{ open: {{ $usersMenuOpen ? 'true' : 'false' }} }" class="space-y-0.5">
+                {{-- Users: collapsed = direct link; expanded = submenu --}}
+                <a href="{{ route('users.index', ['role' => \App\Models\User::ROLE_SALES]) }}" title="Users"
+                   class="crm-sidebar-collapsed-only crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ $usersMenuOpen ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-person-gear shrink-0 text-base"></i>
+                </a>
+                <div x-data="{ open: {{ $usersMenuOpen ? 'true' : 'false' }} }" class="crm-sidebar-expanded-only space-y-0.5">
                     <button type="button" @click="open = !open"
                             class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
                                    {{ $usersMenuOpen ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
-                        <i class="bi bi-person-gear text-base"></i>
+                        <i class="bi bi-person-gear shrink-0 text-base"></i>
                         <span class="flex-1 text-left">Users</span>
                         <i class="bi text-xs transition-transform" :class="open ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
                     </button>
@@ -139,11 +174,17 @@
                     </div>
                 </div>
 
-                <div x-data="{ open: {{ request()->routeIs('settings.*') ? 'true' : 'false' }} }" class="space-y-0.5">
+                {{-- Settings: collapsed = direct link; expanded = submenu --}}
+                <a href="{{ route('settings.edit') }}" title="Settings"
+                   class="crm-sidebar-collapsed-only crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ $settingsOpen ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-gear shrink-0 text-base"></i>
+                </a>
+                <div x-data="{ open: {{ $settingsOpen ? 'true' : 'false' }} }" class="crm-sidebar-expanded-only space-y-0.5">
                     <button type="button" @click="open = !open"
                             class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
-                                   {{ request()->routeIs('settings.*') ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
-                        <i class="bi bi-gear text-base"></i>
+                                   {{ $settingsOpen ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                        <i class="bi bi-gear shrink-0 text-base"></i>
                         <span class="flex-1 text-left">Settings</span>
                         <i class="bi text-xs transition-transform" :class="open ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
                     </button>
@@ -191,11 +232,13 @@
     </aside>
 
     {{-- Konten utama --}}
-    <div class="lg:pl-64">
+    <div class="transition-[padding] duration-200" :class="sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'">
         {{-- Topbar --}}
         <header class="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-slate-200/80 bg-white/95 px-4 backdrop-blur-md lg:px-8">
-            <button @click="sidebarOpen = true" class="text-slate-500 lg:hidden">
-                <i class="bi bi-list text-2xl"></i>
+            <button type="button" @click="toggleSidebar()"
+                    class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    :title="sidebarCollapsed ? 'Perlebar sidebar' : 'Ciutkan sidebar'">
+                <i class="bi text-2xl" :class="sidebarCollapsed ? 'bi-layout-sidebar' : 'bi-list'"></i>
             </button>
 
             <h1 class="text-base font-semibold text-slate-800">@yield('title', 'Dashboard')</h1>
@@ -238,12 +281,18 @@
             </div>
         </header>
 
-        <main class="mx-auto max-w-7xl px-4 py-6 lg:px-8">
+        <main class="mx-auto w-full max-w-[1600px] px-4 py-6 lg:px-8">
             @include('partials.flash')
             @auth
                 @if (auth()->user()->isSales() && ! auth()->user()->hasDigitalSignature())
                     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        <span><i class="bi bi-pen"></i> Unggah tanda tangan digital agar bisa generate PDF penawaran.</span>
+                        <span>
+                            <i class="bi bi-pen"></i>
+                            Unggah 3 tanda tangan (AGC, EPS, PSI) agar bisa generate PDF penawaran.
+                            @if (count(auth()->user()->missingSignatureLabels()) > 0)
+                                Belum: <strong>{{ implode(', ', auth()->user()->missingSignatureLabels()) }}</strong>.
+                            @endif
+                        </span>
                         <a href="{{ route('profile.edit') }}" class="font-semibold text-amber-800 underline hover:text-amber-950">Ke Profile</a>
                     </div>
                 @endif

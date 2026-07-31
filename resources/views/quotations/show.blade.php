@@ -49,9 +49,11 @@
                 <form method="POST" action="{{ route('quotations.duplicate', $quotation) }}">@csrf
                     <button class="block w-full px-4 py-2 text-left text-sm hover:bg-slate-50"><i class="bi bi-files mr-2"></i> Duplicate</button>
                 </form>
-                <form method="POST" action="{{ route('quotations.destroy', $quotation) }}" onsubmit="return confirm('Delete this quotation?')">@csrf @method('DELETE')
-                    <button class="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"><i class="bi bi-trash mr-2"></i> Delete</button>
+                @if (auth()->user()->canDeleteQuotation())
+                <form method="POST" action="{{ route('quotations.destroy', $quotation) }}" onsubmit="return confirm('Hapus quotation ini?')">@csrf @method('DELETE')
+                    <button class="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"><i class="bi bi-trash mr-2"></i> Hapus</button>
                 </form>
+                @endif
             </div>
         </div>
     </div>

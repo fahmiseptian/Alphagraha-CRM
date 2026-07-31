@@ -25,7 +25,7 @@
                             Pengingat Follow-up Deadline
                         </h3>
                         <p class="mt-0.5 text-sm text-slate-500">
-                            {{ $deadlineAlerts->count() }} project / follow-up mendekati atau sudah melewati deadline.
+                            {{ $deadlineAlerts->count() }} pengingat: deadline opportunity atau reminder activity yang sudah jatuh tempo.
                         </p>
                     </div>
                     <button type="button" @click="open = false" class="text-slate-400 hover:text-slate-600">
@@ -50,7 +50,7 @@
                                 <div class="min-w-0 flex-1">
                                     <p class="truncate text-sm font-medium text-slate-800">{{ $alert['title'] }}</p>
                                     <p class="truncate text-xs text-slate-400">
-                                        {{ $alert['kind'] === 'opportunity' ? 'Opportunity' : 'Follow-up' }}
+                                        {{ $alert['kind'] === 'opportunity' ? 'Opportunity' : 'Activity' }}
                                         @if ($alert['subtitle'])
                                             &middot; {{ $alert['subtitle'] }}
                                         @endif

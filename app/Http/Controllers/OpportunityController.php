@@ -27,10 +27,21 @@ class OpportunityController extends Controller
     public function index(Request $request)
     {
         $kanbanStages = Opportunity::KANBAN_STAGES;
+        $view = $request->get('view') === 'list' ? 'list' : 'kanban';
         $selectedUserId = $this->resolveAssignedUserFilter($request);
         $period = $this->resolvePeriodFilter($request);
         $periodRange = $this->periodDateRange($period);
         $periodLabel = $this->periodLabel($period);
+
+        $search = trim((string) $request->get('q', ''));
+        $stageFilter = (string) $request->get('stage', '');
+        if ($stageFilter !== '' && ! in_array($stageFilter, Opportunity::STAGES, true)) {
+            $stageFilter = '';
+        }
+        $companyFilter = trim((string) $request->get('company', ''));
+        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
+            $companyFilter = '';
+        }
 
         $query = Opportunity::query()->with(['account', 'assignedUser']);
         $user = $this->currentUser();
@@ -46,33 +57,90 @@ class OpportunityController extends Controller
         }
 
         $this->applyPeriodToOpportunityQuery($query, $periodRange);
+        $this->applyOpportunityIndexFilters($query, $search, $stageFilter, $companyFilter);
+
+        $salesUsers = $this->isAdmin()
+            ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
+            : collect();
+
+        $filterState = [
+            'view' => $view,
+            'search' => $search,
+            'stageFilter' => $stageFilter,
+            'companyFilter' => $companyFilter,
+            'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $periodLabel,
+            'salesUsers' => $salesUsers,
+            'stages' => Opportunity::STAGES,
+            'companies' => Opportunity::COMPANIES,
+            'kanbanStages' => $kanbanStages,
+        ];
+
+        if ($view === 'list') {
+            $opportunities = (clone $query)
+                ->orderByDesc('created_at')
+                ->paginate(25)
+                ->withQueryString();
+
+            $summarySource = (clone $query)->orderByDesc('created_at')->get();
+
+            return view('opportunities.index', $filterState + [
+                'opportunities' => $opportunities,
+                'grouped' => collect(),
+                'duplicateMap' => Opportunity::duplicateMap($summarySource),
+                'summary' => $this->buildOpportunitySummary($summarySource, $kanbanStages),
+            ]);
+        }
 
         $allOpportunities = $query->orderByDesc('created_at')->get();
-
         $kanbanOpportunities = $allOpportunities->whereIn('stage', $kanbanStages);
-
         $grouped = collect($kanbanStages)->mapWithKeys(
             fn (string $stage) => [$stage => $kanbanOpportunities->where('stage', $stage)->values()]
         );
 
-        return view('opportunities.index', [
+        return view('opportunities.index', $filterState + [
+            'opportunities' => null,
             'grouped' => $grouped,
-            'kanbanStages' => $kanbanStages,
             'duplicateMap' => Opportunity::duplicateMap($kanbanOpportunities),
             'summary' => $this->buildOpportunitySummary($allOpportunities, $kanbanStages),
-            'salesUsers' => $this->isAdmin()
-                ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
-                : collect(),
-            'selectedUserId' => $selectedUserId,
-            'period' => $period,
-            'periodLabel' => $periodLabel,
         ]);
+    }
+
+    /**
+     * Filter tambahan index: nama deal, stage, nama perusahaan/customer.
+     */
+    protected function applyOpportunityIndexFilters($query, string $search, string $stage, string $company): void
+    {
+        $table = $query->getModel()->getTable();
+
+        if ($search !== '') {
+            $query->where($table.'.name', 'like', '%'.$search.'%');
+        }
+
+        if ($stage !== '') {
+            $query->where($table.'.stage', $stage);
+        }
+
+        if ($company !== '') {
+            $query->where($table.'.company', $company);
+        }
     }
 
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
         $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.items']);
+
+        // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
+        if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {
+            $opportunity->load('quotation.creator');
+            if (! $opportunity->isMarginLocked() && $opportunity->quotation) {
+                app(\App\Services\NotificationService::class)
+                    ->markQuotationMarginRequestActioned($opportunity->quotation);
+            }
+        }
+
         $mediaDocuments = $opportunity->getMedia('documents');
         $nextStage = $opportunity->nextStage();
         $closingStages = $opportunity->closingStageOptions();
@@ -110,7 +178,7 @@ class OpportunityController extends Controller
             abort(403, 'Anda tidak memiliki akses untuk membuat Opportunity.');
         }
 
-        $data = $this->validateData($request);
+        $data = $this->validateData($request, creating: true);
 
         $now = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity = new Opportunity();
@@ -121,8 +189,8 @@ class OpportunityController extends Controller
         $opportunity->created_by_id = auth()->id();
 
         $this->applyValidatedData($opportunity, $data, $request, isNew: true);
-        $notifyDiscount = $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING;
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: true);
+        $notifyDiscount = $opportunity->discountNeedsAttention();
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
@@ -134,10 +202,10 @@ class OpportunityController extends Controller
         }
 
         $message = 'Opportunity created successfully.';
-        if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
+        if ($opportunity->discountNeedsAttention()) {
             $message .= ' Diskon menunggu approval Superadmin.';
         }
-        if ($opportunity->crm_margin_status === Opportunity::MARGIN_PENDING) {
+        if ($opportunity->marginNeedsApproval()) {
             $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
 
@@ -177,28 +245,52 @@ class OpportunityController extends Controller
             return $this->updatePurchasingFields($request, $opportunity);
         }
 
-        $data = $this->validateData($request);
+        $data = $this->validateData($request, creating: false, opportunity: $opportunity);
         $this->applyValidatedData($opportunity, $data, $request);
-        $notifyDiscount = $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING
-            && ($opportunity->isDirty('crm_discount_status') || $opportunity->isDirty('crm_discount_amount'));
+
+        if ($opportunity->isDirty('stage')
+            && $opportunity->stage === Opportunity::WON_STAGE
+            && ! $opportunity->canMoveToClosedWon()) {
+            return back()->withInput()->with('error', $opportunity->closedWonBlockReason());
+        }
+
+        $notifyDiscount = $opportunity->activateDiscountApprovalIfNeeded()
+            || (
+                $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING
+                && ($opportunity->isDirty('crm_discount_status') || $opportunity->isDirty('crm_discount_amount'))
+            );
+        $opportunity->loadMissing('quotation');
+        $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
+            || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $opportunity->syncLinkedQuotationMarginApproval();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
-        if ($notifyDiscount) {
+        if ($notifyDiscount && $opportunity->discountNeedsAttention()) {
             app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
         }
         if ($notifyMargin) {
             app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
         }
+        if ($wasMarginPending && ! $opportunity->marginNeedsApproval()) {
+            app(\App\Services\NotificationService::class)->markOpportunityMarginRequestActioned($opportunity);
+            if ($opportunity->quotation) {
+                app(\App\Services\NotificationService::class)
+                    ->markQuotationMarginRequestActioned($opportunity->quotation);
+            }
+        }
+        if (in_array($opportunity->stage, [Opportunity::WON_STAGE, Opportunity::LOST_STAGE], true)) {
+            app(\App\Services\NotificationService::class)->markOpportunityDeadlineActioned($opportunity);
+        }
 
         $message = 'Opportunity updated successfully.';
-        if ($opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
+        if ($opportunity->discountNeedsAttention()) {
             $message .= ' Diskon menunggu approval Superadmin.';
         }
-        if ($opportunity->crm_margin_status === Opportunity::MARGIN_PENDING) {
+        if ($opportunity->marginNeedsApproval()) {
             $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
 
@@ -239,6 +331,7 @@ class OpportunityController extends Controller
             $opportunity->crm_discount_reviewed_by = auth()->id();
             $opportunity->crm_discount_reviewed_at = now();
             $opportunity->crm_discount_note = $note;
+            $opportunity->syncWonMargin();
             $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
             $opportunity->modified_by_id = auth()->id();
             $opportunity->save();
@@ -249,6 +342,7 @@ class OpportunityController extends Controller
                 revised: $revised,
                 note: $note,
             );
+            app(\App\Services\NotificationService::class)->markDiscountRequestActioned($opportunity);
 
             $message = $revised
                 ? 'Diskon disesuaikan & disetujui. Sales mendapat notifikasi.'
@@ -261,6 +355,7 @@ class OpportunityController extends Controller
         $opportunity->crm_discount_reviewed_by = auth()->id();
         $opportunity->crm_discount_reviewed_at = now();
         $opportunity->crm_discount_note = $note;
+        $opportunity->syncWonMargin();
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
@@ -271,6 +366,7 @@ class OpportunityController extends Controller
             revised: false,
             note: $note,
         );
+        app(\App\Services\NotificationService::class)->markDiscountRequestActioned($opportunity);
 
         return back()->with('success', 'Diskon disetujui. Sales mendapat notifikasi.');
     }
@@ -313,6 +409,7 @@ class OpportunityController extends Controller
         $opportunity->crm_discount_reviewed_by = auth()->id();
         $opportunity->crm_discount_reviewed_at = now();
         $opportunity->crm_discount_note = $note;
+        $opportunity->syncWonMargin();
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
@@ -323,6 +420,7 @@ class OpportunityController extends Controller
             $note,
             $requestedAmount,
         );
+        app(\App\Services\NotificationService::class)->markDiscountRequestActioned($opportunity);
 
         return back()->with('success', 'Diskon ditolak. Sales mendapat notifikasi nominal yang disetujui.');
     }
@@ -356,6 +454,7 @@ class OpportunityController extends Controller
         $opportunity->crm_discount_reviewed_by = null;
         $opportunity->crm_discount_reviewed_at = null;
         $opportunity->crm_discount_note = $data['note'] ?? null;
+        $opportunity->syncWonMargin();
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
@@ -390,11 +489,17 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $opportunity->syncLinkedQuotationMarginApproval();
 
         app(\App\Services\NotificationService::class)->notifyOpportunityMarginApproved(
             $opportunity,
             $data['note'] ?? null,
         );
+        app(\App\Services\NotificationService::class)->markOpportunityMarginRequestActioned($opportunity);
+        if ($opportunity->quotation) {
+            app(\App\Services\NotificationService::class)
+                ->markQuotationMarginRequestActioned($opportunity->quotation);
+        }
 
         return back()->with('success', 'Margin opportunity disetujui. Sales mendapat notifikasi.');
     }
@@ -421,11 +526,17 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $opportunity->syncLinkedQuotationMarginApproval();
 
         app(\App\Services\NotificationService::class)->notifyOpportunityMarginRejected(
             $opportunity,
             $data['note'] ?? null,
         );
+        app(\App\Services\NotificationService::class)->markOpportunityMarginRequestActioned($opportunity);
+        if ($opportunity->quotation) {
+            app(\App\Services\NotificationService::class)
+                ->markQuotationMarginRequestActioned($opportunity->quotation);
+        }
 
         return back()->with('success', 'Margin opportunity ditolak. Sales mendapat notifikasi.');
     }
@@ -476,13 +587,24 @@ class OpportunityController extends Controller
         $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
         $opportunity->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
         $opportunity->syncWonMargin();
+        $opportunity->loadMissing('quotation');
+        $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
+            || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $opportunity->syncLinkedQuotationMarginApproval();
 
         if ($notifyMargin) {
             app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+        }
+        if ($wasMarginPending && ! $opportunity->marginNeedsApproval()) {
+            app(\App\Services\NotificationService::class)->markOpportunityMarginRequestActioned($opportunity);
+            if ($opportunity->quotation) {
+                app(\App\Services\NotificationService::class)
+                    ->markQuotationMarginRequestActioned($opportunity->quotation);
+            }
         }
 
         return redirect()->route('opportunities.show', $opportunity)
@@ -497,17 +619,43 @@ class OpportunityController extends Controller
             abort(403, 'Anda tidak dapat mengubah stage.');
         }
 
-        $data = $request->validate([
-            'stage' => ['required', 'string', Rule::in(Opportunity::STAGES)],
-        ]);
+        $data = $this->validateStageUpdate($request, $opportunity);
+
+        if ($data['stage'] === Opportunity::WON_STAGE && ! $opportunity->canMoveToClosedWon()) {
+            return back()->with('error', $opportunity->closedWonBlockReason());
+        }
 
         if ($data['stage'] !== $opportunity->stage) {
             $opportunity->stage = $data['stage'];
             $opportunity->probability = Opportunity::defaultProbabilityForStage($data['stage']);
+
+            if ($data['stage'] === Opportunity::LOST_STAGE) {
+                $opportunity->crm_lost_reason = $data['lost_reason'];
+            }
+
             $opportunity->syncWonMargin();
             $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
             $opportunity->modified_by_id = auth()->id();
+
+            if ($opportunity->skipsApproval()
+                && $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
+                $opportunity->crm_discount_status = null;
+            }
+
+            $notifyDiscount = $opportunity->activateDiscountApprovalIfNeeded();
+            $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: true);
             $opportunity->save();
+            $opportunity->syncLinkedQuotationMarginApproval();
+
+            if ($notifyDiscount) {
+                app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
+            }
+            if ($notifyMargin) {
+                app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+            }
+            if (in_array($data['stage'], [Opportunity::WON_STAGE, Opportunity::LOST_STAGE], true)) {
+                app(\App\Services\NotificationService::class)->markOpportunityDeadlineActioned($opportunity);
+            }
         }
 
         return redirect()->route('opportunities.index')
@@ -516,14 +664,14 @@ class OpportunityController extends Controller
 
     public function destroy(Opportunity $opportunity)
     {
-        $this->authorizeAccess($opportunity);
-
-        if (! auth()->user()?->canEditOpportunityFully()) {
-            abort(403, 'Anda tidak dapat menghapus opportunity.');
+        if (! auth()->user()?->canDeleteOpportunity()) {
+            abort(403, 'Hanya Superadmin yang dapat menghapus opportunity.');
         }
 
+        $this->authorizeAccess($opportunity);
+
         if ($opportunity->quotation()->exists()) {
-            return back()->with('error', 'Deal tidak bisa dihapus karena masih terhubung ke penawaran.');
+            return back()->with('error', 'Opportunity tidak bisa dihapus karena masih terhubung ke quotation.');
         }
 
         $opportunity->deleted = 1;
@@ -532,17 +680,19 @@ class OpportunityController extends Controller
         $opportunity->save();
 
         return redirect()->route('opportunities.index')
-            ->with('success', 'Deal duplikat berhasil dihapus.');
+            ->with('success', 'Opportunity berhasil dihapus.');
     }
 
-    protected function validateData(Request $request): array
+    protected function validateData(Request $request, bool $creating = false, ?Opportunity $opportunity = null): array
     {
-        $data = $request->validate([
+        $allowedStages = $creating ? Opportunity::CREATE_STAGES : Opportunity::STAGES;
+
+        $rules = [
             'company' => ['required', 'string', 'max:255'],
             'type' => ['required', 'string', Rule::in(Opportunity::TYPES)],
             'name' => ['required', 'string', 'max:255'],
             'account_id' => ['nullable', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
-            'stage' => ['required', 'string', 'max:255'],
+            'stage' => ['required', 'string', Rule::in($allowedStages)],
             'amount' => ['required', 'numeric', 'min:0'],
             'amount_currency' => ['nullable', 'string', 'max:6'],
             'close_date' => ['required', 'date'],
@@ -566,7 +716,20 @@ class OpportunityController extends Controller
             'discount_amount' => ['nullable', 'numeric', 'min:0'],
             'has_shipping_charge' => ['nullable', 'boolean'],
             'shipping_sell' => ['nullable', 'numeric', 'min:0'],
-        ]);
+        ];
+
+        $stage = (string) $request->input('stage');
+        $currentStage = $opportunity?->stage;
+        if ($stage === Opportunity::LOST_STAGE && $currentStage !== Opportunity::LOST_STAGE) {
+            $rules['lost_reason'] = ['required', 'string', 'min:10', 'max:5000'];
+        }
+
+        $messages = [
+            'lost_reason.required' => 'Catatan kekalahan wajib diisi saat menutup deal sebagai Closed Lost.',
+            'lost_reason.min' => 'Catatan kekalahan minimal 10 karakter.',
+        ];
+
+        $data = $request->validate($rules, $messages);
 
         $data['has_discount'] = $request->boolean('has_discount');
         if (! $data['has_discount']) {
@@ -604,6 +767,28 @@ class OpportunityController extends Controller
         return $data;
     }
 
+    /**
+     * @return array{stage: string, lost_reason?: string}
+     */
+    protected function validateStageUpdate(Request $request, Opportunity $opportunity): array
+    {
+        $rules = [
+            'stage' => ['required', 'string', Rule::in(Opportunity::STAGES)],
+        ];
+
+        $stage = (string) $request->input('stage');
+        if ($stage === Opportunity::LOST_STAGE && $stage !== $opportunity->stage) {
+            $rules['lost_reason'] = ['required', 'string', 'min:10', 'max:5000'];
+        }
+
+        $messages = [
+            'lost_reason.required' => 'Catatan kekalahan wajib diisi saat menutup deal sebagai Closed Lost.',
+            'lost_reason.min' => 'Catatan kekalahan minimal 10 karakter.',
+        ];
+
+        return $request->validate($rules, $messages);
+    }
+
     protected function applyValidatedData(Opportunity $opportunity, array $data, Request $request, bool $isNew = false): void
     {
         $opportunity->fill([
@@ -620,6 +805,10 @@ class OpportunityController extends Controller
             'lead_source' => $data['lead_source'] ?? null,
             'description' => $data['description'] ?? null,
         ]);
+
+        if (! empty($data['lost_reason'] ?? null)) {
+            $opportunity->crm_lost_reason = $data['lost_reason'];
+        }
 
         if ($this->isAdmin()) {
             $opportunity->assigned_user_id = ($data['assigned_user_id'] ?? null) ?: null;
@@ -698,8 +887,22 @@ class OpportunityController extends Controller
         $opportunity->crm_has_discount = true;
         $opportunity->crm_discount_amount = $amount;
 
+        // Prospecting / Qualification: diskon boleh tanpa approval.
+        if ($opportunity->skipsApproval()) {
+            if ($changed || $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING) {
+                $opportunity->crm_discount_status = null;
+                $opportunity->crm_discount_requested_by = auth()->id();
+                $opportunity->crm_discount_requested_at = now();
+                $opportunity->crm_discount_reviewed_by = null;
+                $opportunity->crm_discount_reviewed_at = null;
+                $opportunity->crm_discount_note = null;
+            }
+
+            return;
+        }
+
         if ($changed) {
-            // Setiap diskon > 0 wajib approval Superadmin.
+            // Proposal ke atas: diskon > 0 wajib approval Superadmin.
             $opportunity->crm_discount_status = Opportunity::DISCOUNT_PENDING;
             $opportunity->crm_discount_requested_by = auth()->id();
             $opportunity->crm_discount_requested_at = now();
@@ -774,7 +977,9 @@ class OpportunityController extends Controller
             'selectedTeamIds' => (array) ($selectedTeamIds ?? []),
             'companies' => Opportunity::COMPANIES,
             'leadSources' => Opportunity::LEAD_SOURCES,
-            'stages' => Opportunity::STAGES,
+            'stages' => ($opportunity && $opportunity->exists)
+                ? Opportunity::STAGES
+                : Opportunity::CREATE_STAGES,
             'types' => Opportunity::TYPES,
         ];
     }

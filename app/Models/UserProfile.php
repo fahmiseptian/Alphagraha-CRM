@@ -29,7 +29,9 @@ class UserProfile extends Model
     protected $table = 'crm_user_profiles';
 
     protected $fillable = [
-        'user_id', 'app_role', 'signature_path', 'job_position', 'sales_code',
+        'user_id', 'app_role', 'signature_path',
+        'signature_agc_path', 'signature_eps_path', 'signature_psi_path',
+        'job_position', 'sales_code',
         'sales_target', 'sales_target_period', 'sales_target_deadline',
     ];
 
@@ -177,23 +179,138 @@ class UserProfile extends Model
         return $this->belongsTo(User::class, 'user_id', 'id');
     }
 
-    public function signatureUrl(): ?string
+    /**
+     * Key perusahaan internal: agc | eps | psi.
+     *
+     * @return list<string>
+     */
+    public static function signatureCompanyKeys(): array
     {
-        if (! $this->signature_path) {
-            return null;
-        }
-
-        return Storage::disk('public')->url($this->signature_path);
+        return ['agc', 'eps', 'psi'];
     }
 
-    public function signatureAbsolutePath(): ?string
+    /**
+     * Label tampilan per key perusahaan.
+     *
+     * @return array<string, string>
+     */
+    public static function signatureCompanyLabels(): array
     {
-        if (! $this->signature_path) {
+        return [
+            'agc' => 'Alpha Graha Computindo',
+            'eps' => 'Elite Proxy Sistem',
+            'psi' => 'Power Sistem Integrasi',
+        ];
+    }
+
+    public static function signatureColumn(string $companyKey): string
+    {
+        return match ($companyKey) {
+            'eps' => 'signature_eps_path',
+            'psi' => 'signature_psi_path',
+            default => 'signature_agc_path',
+        };
+    }
+
+    public static function resolveCompanyKey(?string $companyOrCategory): string
+    {
+        $value = trim((string) $companyOrCategory);
+        if ($value === '') {
+            return 'agc';
+        }
+
+        $lower = strtolower($value);
+        if (in_array($lower, self::signatureCompanyKeys(), true)) {
+            return $lower;
+        }
+
+        $map = config('crm.quotation_company_map', []);
+
+        return $map[$value] ?? 'agc';
+    }
+
+    public function signaturePathFor(string $companyKey): ?string
+    {
+        $column = self::signatureColumn(self::resolveCompanyKey($companyKey));
+        $path = $this->{$column} ?: null;
+
+        // Fallback TTD legacy (kolom lama) hanya untuk AGC.
+        if (! $path && $column === 'signature_agc_path') {
+            $path = $this->signature_path ?: null;
+        }
+
+        return $path ?: null;
+    }
+
+    public function setSignaturePathFor(string $companyKey, ?string $path): void
+    {
+        $column = self::signatureColumn(self::resolveCompanyKey($companyKey));
+        $this->{$column} = $path;
+
+        // Sinkronkan kolom legacy agar kode lama tetap aman.
+        if ($column === 'signature_agc_path') {
+            $this->signature_path = $path;
+        }
+    }
+
+    public function signatureUrl(?string $companyKey = null): ?string
+    {
+        $path = $companyKey
+            ? $this->signaturePathFor($companyKey)
+            : ($this->signature_agc_path ?: $this->signature_path);
+
+        if (! $path) {
             return null;
         }
 
-        $path = Storage::disk('public')->path($this->signature_path);
+        return Storage::disk('public')->url($path);
+    }
 
-        return is_file($path) ? $path : null;
+    public function signatureAbsolutePath(?string $companyKey = null): ?string
+    {
+        $path = $companyKey
+            ? $this->signaturePathFor($companyKey)
+            : ($this->signature_agc_path ?: $this->signature_path);
+
+        if (! $path) {
+            return null;
+        }
+
+        $absolute = Storage::disk('public')->path($path);
+
+        return is_file($absolute) ? $absolute : null;
+    }
+
+    public function hasSignatureFor(string $companyKey): bool
+    {
+        return (bool) $this->signatureAbsolutePath($companyKey);
+    }
+
+    public function hasAllCompanySignatures(): bool
+    {
+        foreach (self::signatureCompanyKeys() as $key) {
+            if (! $this->hasSignatureFor($key)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @return list<string> label perusahaan yang belum punya TTD
+     */
+    public function missingSignatureLabels(): array
+    {
+        $labels = self::signatureCompanyLabels();
+        $missing = [];
+
+        foreach (self::signatureCompanyKeys() as $key) {
+            if (! $this->hasSignatureFor($key)) {
+                $missing[] = $labels[$key] ?? $key;
+            }
+        }
+
+        return $missing;
     }
 }

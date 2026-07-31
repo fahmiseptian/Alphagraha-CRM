@@ -446,6 +446,7 @@ class DashboardController extends Controller
     protected function deadlineAlertsForUser($user): Collection
     {
         $until = Carbon::now()->addDays(config('crm.deadline_alert_days', 7));
+        $now = Carbon::now();
 
         $opportunities = $this->scopeAssigned(Opportunity::query())
             ->with('account')
@@ -468,24 +469,24 @@ class DashboardController extends Controller
                 ];
             });
 
+        // Activity hanya muncul jika reminder sudah jatuh tempo.
         $followups = Activity::with('account')
             ->where('assigned_to', $user->id)
-            ->where('type', 'followup')
             ->whereNotIn('status', ['completed', 'cancelled'])
-            ->whereNotNull('due_at')
-            ->where('due_at', '<=', $until)
-            ->orderBy('due_at')
+            ->whereNotNull('reminder_at')
+            ->where('reminder_at', '<=', $now)
+            ->orderBy('reminder_at')
             ->get()
             ->map(function (Activity $activity) {
-                $date = $activity->due_at->copy()->startOfDay();
+                $date = $activity->reminder_at->copy();
 
                 return [
                     'kind' => 'followup',
                     'title' => $activity->subject,
                     'subtitle' => optional($activity->account)->name,
                     'date' => $date,
-                    'date_label' => $this->deadlineLabel($date),
-                    'overdue' => $activity->isOverdue(),
+                    'date_label' => 'Reminder jatuh tempo',
+                    'overdue' => true,
                     'url' => route('activities.edit', $activity),
                 ];
             });

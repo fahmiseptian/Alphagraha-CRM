@@ -63,6 +63,16 @@
                 <a href="{{ route('activities.create', ['account_id' => $account->id]) }}" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-center text-sm font-medium text-slate-600 hover:bg-slate-50">
                     <i class="bi bi-calendar-plus"></i> Activity
                 </a>
+                @if (auth()->user()->canDeleteCustomer())
+                    <form method="POST" action="{{ route('customers.destroy', $account->id) }}"
+                          onsubmit="return confirm('Hapus customer ini? Tindakan tidak bisa dibatalkan.')"
+                          class="w-full">
+                        @csrf @method('DELETE')
+                        <button type="submit" class="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-sm font-medium text-red-700 hover:bg-red-100">
+                            <i class="bi bi-trash"></i> Hapus
+                        </button>
+                    </form>
+                @endif
             </div>
         </x-card>
 

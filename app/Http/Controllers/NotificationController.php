@@ -30,10 +30,19 @@ class NotificationController extends Controller
     public function markRead(CrmNotification $notification)
     {
         abort_unless($notification->user_id === auth()->id(), 403);
-        $notification->markAsRead();
+
+        // Yang butuh aksi: buka link saja, status tetap unread sampai aksi bisnis selesai.
+        if (! $notification->requiresAction()) {
+            $notification->markAsRead();
+        } elseif ($notification->show_popup) {
+            $notification->forceFill(['show_popup' => false])->save();
+        }
 
         if (request()->wantsJson()) {
-            return response()->json(['ok' => true]);
+            return response()->json([
+                'ok' => true,
+                'read' => ! $notification->fresh()->isUnread(),
+            ]);
         }
 
         if ($notification->link) {
@@ -51,12 +60,28 @@ class NotificationController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        return back()->with('success', 'Semua notifikasi ditandai sudah dibaca.');
+        return back()->with('success', 'Notifikasi informatif ditandai sudah dibaca. Yang menunggu aksi tetap aktif.');
+    }
+
+    public function destroySelected(Request $request)
+    {
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer'],
+        ]);
+
+        $deleted = $this->notifications->deleteForUser(auth()->id(), $data['ids']);
+
+        if ($request->wantsJson()) {
+            return response()->json(['ok' => true, 'deleted' => $deleted]);
+        }
+
+        return back()->with('success', $deleted.' notifikasi dihapus.');
     }
 
     public function dismissPopups()
     {
-        $this->notifications->markPopupsRead(auth()->id());
+        $this->notifications->dismissPopups(auth()->id());
 
         return response()->json(['ok' => true]);
     }

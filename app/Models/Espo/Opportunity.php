@@ -27,7 +27,7 @@ class Opportunity extends Model implements HasMedia
 
     protected $fillable = [
         'name', 'account_id', 'company', 'stage', 'type', 'amount', 'amount_currency',
-        'close_date', 'probability', 'lead_source', 'description', 'assigned_user_id',
+        'close_date', 'probability', 'lead_source', 'description', 'crm_lost_reason', 'assigned_user_id',
         'contact_id', 'vendor',
         'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_item_discount',
@@ -82,6 +82,10 @@ class Opportunity extends Model implements HasMedia
     public const MARGIN_REJECTED = 'rejected';
 
     public const OPEN_STAGES = ['Prospecting', 'Qualification', 'Proposal', 'Negotiation'];
+
+    /** Stage awal — belum butuh approval margin / diskon tambahan. */
+    public const NO_APPROVAL_STAGES = ['Prospecting', 'Qualification'];
+
     public const WON_STAGE = 'Closed Won';
     public const LOST_STAGE = 'Closed Lost';
 
@@ -93,6 +97,11 @@ class Opportunity extends Model implements HasMedia
     /** Daftar stage untuk dropdown edit. */
     public const STAGES = [
         'Prospecting', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost',
+    ];
+
+    /** Stage yang boleh dipilih saat create (maksimal Proposal). */
+    public const CREATE_STAGES = [
+        'Prospecting', 'Qualification', 'Proposal',
     ];
 
     /** Probabilitas default per stage saat move over. */
@@ -132,7 +141,46 @@ class Opportunity extends Model implements HasMedia
             return [];
         }
 
-        return [self::WON_STAGE, self::LOST_STAGE];
+        $options = [self::LOST_STAGE];
+        if ($this->canMoveToClosedWon()) {
+            array_unshift($options, self::WON_STAGE);
+        }
+
+        return $options;
+    }
+
+    /**
+     * Masih ada approval margin/diskon yang belum selesai.
+     */
+    public function hasPendingApprovals(): bool
+    {
+        if ($this->skipsApproval()) {
+            return false;
+        }
+
+        return $this->marginNeedsApproval() || $this->discountNeedsAttention();
+    }
+
+    public function canMoveToClosedWon(): bool
+    {
+        return ! $this->hasPendingApprovals();
+    }
+
+    public function closedWonBlockReason(): ?string
+    {
+        if ($this->skipsApproval() || $this->canMoveToClosedWon()) {
+            return null;
+        }
+
+        $reasons = [];
+        if ($this->marginNeedsApproval()) {
+            $reasons[] = 'margin masih menunggu approval Superadmin';
+        }
+        if ($this->discountNeedsAttention()) {
+            $reasons[] = 'diskon tambahan masih menunggu approval Superadmin';
+        }
+
+        return 'Opportunity tidak bisa Closed Won: '.implode(' dan ', $reasons).'.';
     }
 
     /** Jenis pengadaan EspoCRM (kolom type). */
@@ -144,8 +192,8 @@ class Opportunity extends Model implements HasMedia
     /** Perusahaan internal (kolom company). */
     public const COMPANIES = [
         'Alpha Graha Computindo',
-        'Elite Proxy',
-        'Power Sistem',
+        'Elite Proxy Sistem',
+        'Power Sistem Integrasi',
     ];
 
     /** Sumber lead standar EspoCRM. */
@@ -288,6 +336,27 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
+     * Basis margin untuk % diskon tambahan.
+     * Inaproc: margin kotor (sebelum PNBP & PPH 29); lainnya: margin bersih.
+     */
+    public function totalDiscountBasisMargin(): float
+    {
+        return round(
+            $this->products->sum(function (array $row) {
+                $qty = (float) ($row['quantity'] ?? 1);
+                $taxCategory = (string) ($row['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU);
+
+                if ($taxCategory === OpportunityProductPricing::TAX_INAPROC) {
+                    return $qty * (float) ($row['gross_margin'] ?? $row['margin'] ?? 0);
+                }
+
+                return $qty * (float) ($row['margin'] ?? 0);
+            }),
+            2
+        );
+    }
+
+    /**
      * Total jual exclude (qty × effective_sell_exclude).
      */
     public function totalSellExclude(): float
@@ -342,12 +411,26 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
+     * Margin yang masuk ke sales: margin produk − diskon tambahan (min 0).
+     */
+    public function salesMargin(): float
+    {
+        $margin = $this->totalProductsMargin();
+        $discount = $this->hasActiveDiscount()
+            ? (float) $this->crm_discount_amount
+            : 0.0;
+
+        return round(max(0, $margin - $discount), 2);
+    }
+
+    /**
      * Simpan margin ke deal bila Closed Won; kosongkan jika stage berubah.
+     * Sudah dipotong diskon tambahan.
      */
     public function syncWonMargin(): void
     {
         $this->crm_won_margin = $this->stage === self::WON_STAGE
-            ? $this->totalProductsMargin()
+            ? $this->salesMargin()
             : null;
     }
 
@@ -358,7 +441,7 @@ class Opportunity extends Model implements HasMedia
 
     public function discountPercent(): ?float
     {
-        $margin = $this->totalProductsMargin();
+        $margin = $this->totalDiscountBasisMargin();
         $discount = (float) $this->crm_discount_amount;
         if ($margin <= 0 || $discount <= 0) {
             return null;
@@ -379,8 +462,20 @@ class Opportunity extends Model implements HasMedia
 
     public function discountNeedsAttention(): bool
     {
+        if ($this->skipsApproval()) {
+            return false;
+        }
+
         return $this->hasActiveDiscount()
             && $this->crm_discount_status === self::DISCOUNT_PENDING;
+    }
+
+    /**
+     * Prospecting / Qualification: tidak perlu approval margin maupun diskon.
+     */
+    public function skipsApproval(): bool
+    {
+        return in_array((string) $this->stage, self::NO_APPROVAL_STAGES, true);
     }
 
     public function isCustomerFreeShipping(): bool
@@ -400,11 +495,19 @@ class Opportunity extends Model implements HasMedia
 
     public function marginNeedsApproval(): bool
     {
+        if ($this->skipsApproval()) {
+            return false;
+        }
+
         return $this->crm_margin_status === self::MARGIN_PENDING;
     }
 
     public function isMarginLocked(): bool
     {
+        if ($this->skipsApproval()) {
+            return false;
+        }
+
         return in_array($this->crm_margin_status, [self::MARGIN_PENDING, self::MARGIN_REJECTED], true);
     }
 
@@ -436,6 +539,17 @@ class Opportunity extends Model implements HasMedia
         $this->crm_margin_nominal = $marginNominal;
         $this->crm_margin_nominal_threshold = $nominalThreshold;
 
+        // Stage awal: catat metrik saja, tidak pernah minta approval.
+        if ($this->skipsApproval()) {
+            $this->crm_margin_status = null;
+            $this->crm_margin_requested_at = null;
+            $this->crm_margin_reviewed_by = null;
+            $this->crm_margin_reviewed_at = null;
+            $this->crm_margin_note = null;
+
+            return false;
+        }
+
         $belowPct = $pctThreshold !== null && ($marginPct === null || $marginPct < $pctThreshold);
         $belowNominal = $nominalThreshold > 0 && $marginNominal < $nominalThreshold;
         $below = $belowPct || $belowNominal;
@@ -465,6 +579,73 @@ class Opportunity extends Model implements HasMedia
         $this->crm_margin_reviewed_at = null;
 
         return ! $wasPending;
+    }
+
+    /**
+     * Samakan status approval margin Quotation terhubung dengan Opportunity.
+     * Mencegah QO tetap terkunci setelah margin opportunity sudah di atas threshold / di-approve.
+     */
+    public function syncLinkedQuotationMarginApproval(): bool
+    {
+        $quotation = $this->relationLoaded('quotation')
+            ? $this->quotation
+            : $this->quotation()->first();
+
+        if (! $quotation) {
+            return false;
+        }
+
+        $fields = [
+            'crm_margin_percent' => $this->crm_margin_percent,
+            'crm_margin_threshold' => $this->crm_margin_threshold,
+            'crm_margin_nominal' => $this->crm_margin_nominal,
+            'crm_margin_nominal_threshold' => $this->crm_margin_nominal_threshold,
+            'crm_margin_status' => $this->crm_margin_status,
+            'crm_margin_requested_at' => $this->crm_margin_requested_at,
+            'crm_margin_reviewed_by' => $this->crm_margin_reviewed_by,
+            'crm_margin_reviewed_at' => $this->crm_margin_reviewed_at,
+            'crm_margin_note' => $this->crm_margin_note,
+        ];
+
+        foreach ($fields as $key => $value) {
+            $quotation->{$key} = $value;
+        }
+
+        if (! $quotation->isDirty()) {
+            return false;
+        }
+
+        $quotation->save();
+
+        return true;
+    }
+
+    /**
+     * Saat naik dari Prospecting/Qualification: aktifkan approval diskon jika belum disetujui.
+     * Return true jika baru masuk pending (untuk notifikasi).
+     */
+    public function activateDiscountApprovalIfNeeded(): bool
+    {
+        if ($this->skipsApproval() || ! $this->hasActiveDiscount()) {
+            return false;
+        }
+
+        if ($this->crm_discount_status === self::DISCOUNT_APPROVED) {
+            return false;
+        }
+
+        if ($this->crm_discount_status === self::DISCOUNT_PENDING) {
+            return false;
+        }
+
+        $this->crm_discount_status = self::DISCOUNT_PENDING;
+        $this->crm_discount_requested_by = $this->crm_discount_requested_by ?: auth()->id();
+        $this->crm_discount_requested_at = now();
+        $this->crm_discount_reviewed_by = null;
+        $this->crm_discount_reviewed_at = null;
+        $this->crm_discount_note = null;
+
+        return true;
     }
 
     public function stageColor(): string

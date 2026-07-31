@@ -277,6 +277,9 @@ class QuotationController extends Controller
     {
         $this->authorizeAccess($quotation);
 
+        // Self-heal: samakan lock QO dengan status margin opportunity terbaru.
+        $this->syncMarginLockFromOpportunity($quotation);
+
         // Rapikan histori ganda yang sempat terbentuk saat masih draft murni.
         // Jangan jalankan bila sudah pernah Sent / sudah ada R1+ (sent_at atau document_revision).
         if (
@@ -394,15 +397,20 @@ class QuotationController extends Controller
 
     public function destroy(Quotation $quotation)
     {
+        if (! auth()->user()?->canDeleteQuotation()) {
+            abort(403, 'Hanya Superadmin yang dapat menghapus quotation.');
+        }
+
         $this->authorizeAccess($quotation);
         $quotation->delete();
 
-        return redirect()->route('quotations.index')->with('success', 'Quotation deleted.');
+        return redirect()->route('quotations.index')->with('success', 'Quotation berhasil dihapus.');
     }
 
     public function preview(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->syncMarginLockFromOpportunity($quotation);
         $this->ensureMarginUnlocked($quotation);
         $this->ensureCreatorSignature($quotation);
 
@@ -415,6 +423,7 @@ class QuotationController extends Controller
     public function pdf(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->syncMarginLockFromOpportunity($quotation);
         $this->ensureMarginUnlocked($quotation);
         $this->ensureCreatorSignature($quotation);
 
@@ -474,6 +483,7 @@ class QuotationController extends Controller
         $quotation->save();
 
         $this->notifications->notifyMarginApproved($quotation, $data['note'] ?? null);
+        $this->notifications->markQuotationMarginRequestActioned($quotation);
 
         return back()->with('success', 'Margin quotation disetujui.');
     }
@@ -501,6 +511,7 @@ class QuotationController extends Controller
         $quotation->save();
 
         $this->notifications->notifyMarginRejected($quotation, $data['note'] ?? null);
+        $this->notifications->markQuotationMarginRequestActioned($quotation);
 
         return back()->with('success', 'Margin quotation ditolak.');
     }
@@ -908,23 +919,35 @@ class QuotationController extends Controller
     {
         $creator = $quotation->creator;
 
-        if ($creator && $creator->isSales() && ! $creator->hasDigitalSignature()) {
-            $name = $creator->display_name ?: $creator->user_name;
-            $message = 'Sales '.$name.' belum mengunggah tanda tangan digital di Profile. Minta sales mengunggah TTD sebelum preview/PDF.';
+        if (! $creator || ! $creator->isSales()) {
+            return;
+        }
 
-            // Admin yang membantu: jangan redirect ke profile admin sendiri.
-            if ($this->isAdmin() && $creator->id !== auth()->id()) {
-                throw new HttpResponseException(
-                    redirect()->back()->with('error', $message)
-                );
-            }
+        $template = $this->resolveTemplate($quotation);
+        $companyKey = $this->service->companyKeyForTemplate($template);
+        $labels = \App\Models\UserProfile::signatureCompanyLabels();
+        $companyLabel = $labels[$companyKey] ?? strtoupper($companyKey);
 
+        if ($creator->hasDigitalSignatureFor($companyKey)) {
+            return;
+        }
+
+        $name = $creator->display_name ?: $creator->user_name;
+        $message = 'Sales '.$name.' belum mengunggah tanda tangan digital untuk '.$companyLabel
+            .'. Minta sales mengunggah TTD di Profile sebelum preview/PDF.';
+
+        // Admin yang membantu: jangan redirect ke profile admin sendiri.
+        if ($this->isAdmin() && $creator->id !== auth()->id()) {
             throw new HttpResponseException(
-                redirect()
-                    ->route('profile.edit')
-                    ->with('error', $message)
+                redirect()->back()->with('error', $message)
             );
         }
+
+        throw new HttpResponseException(
+            redirect()
+                ->route('profile.edit')
+                ->with('error', $message)
+        );
     }
 
     protected function formData(?string $company = null): array
@@ -1087,6 +1110,24 @@ class QuotationController extends Controller
         $quotation->crm_margin_reviewed_at = null;
 
         return ! $wasPending;
+    }
+
+    /**
+     * Samakan lock margin QO dengan opportunity (self-heal setelah margin naik di atas threshold).
+     */
+    protected function syncMarginLockFromOpportunity(Quotation $quotation): void
+    {
+        $quotation->loadMissing('opportunity');
+        if (! $quotation->opportunity) {
+            return;
+        }
+
+        if ($quotation->opportunity->syncLinkedQuotationMarginApproval()) {
+            $quotation->refresh();
+            if (! $quotation->isMarginLocked()) {
+                $this->notifications->markQuotationMarginRequestActioned($quotation);
+            }
+        }
     }
 
     protected function ensureMarginUnlocked(Quotation $quotation): void

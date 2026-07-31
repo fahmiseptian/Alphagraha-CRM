@@ -49,7 +49,7 @@ return [
             'color' => '#0ea5e9',
         ],
         'psi' => [
-            'legal_name' => 'PT. POWER SISTEM INTEGRASI',
+            'legal_name' => 'PT. Power Sistem Integrasi',
             'address' => 'Ruko Sudirman Park, Kav. A-11, Jl. K.H. Mas Mansyur Kav. 35, Jakarta',
             'phone' => '(021) 5794-8922',
             'email' => 'info@powersistem.co.id',
@@ -61,7 +61,10 @@ return [
         'Alpha Graha' => 'agc',
         'Alpha Graha Computindo' => 'agc',
         'Elite Proxy' => 'eps',
+        'Elite Proxy System' => 'eps',
+        'Elite Proxy Sistem' => 'eps',
         'Power Sistem' => 'psi',
+        'Power Sistem Integrasi' => 'psi',
     ],
 
     /*

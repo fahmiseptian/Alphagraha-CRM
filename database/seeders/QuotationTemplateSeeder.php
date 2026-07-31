@@ -21,7 +21,7 @@ class QuotationTemplateSeeder extends Seeder
             [
                 'code' => 'eps-indo',
                 'name' => 'EPS-indo',
-                'category' => 'Elite Proxy',
+                'category' => 'Elite Proxy Sistem',
                 'description' => 'Template penawaran PT. Elite Proxy Sistem (Bahasa Indonesia).',
                 'is_default' => true,
                 'accent' => '#0ea5e9',
@@ -29,8 +29,8 @@ class QuotationTemplateSeeder extends Seeder
             [
                 'code' => 'psi-indo',
                 'name' => 'PSI-indo',
-                'category' => 'Power Sistem',
-                'description' => 'Template penawaran PT. POWER SISTEM INTEGRASI (Bahasa Indonesia).',
+                'category' => 'Power Sistem Integrasi',
+                'description' => 'Template penawaran PT. Power Sistem Integrasi (Bahasa Indonesia).',
                 'is_default' => true,
                 'accent' => '#16a34a',
             ],
