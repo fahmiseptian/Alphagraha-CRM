@@ -80,6 +80,18 @@
                 @if ($quotation->crm_margin_note)
                     <p class="mt-1 text-xs text-slate-500">Catatan: {{ $quotation->crm_margin_note }}</p>
                 @endif
+                @if (in_array($quotation->crm_margin_status, [\App\Models\Quotation::MARGIN_APPROVED, \App\Models\Quotation::MARGIN_REJECTED], true)
+                    && ($quotation->marginReviewerName() || $quotation->crm_margin_reviewed_at))
+                    <p class="mt-1 text-xs text-slate-500">
+                        {{ $quotation->crm_margin_status === \App\Models\Quotation::MARGIN_APPROVED ? 'Disetujui' : 'Ditolak' }}
+                        @if ($quotation->marginReviewerName())
+                            oleh <strong>{{ $quotation->marginReviewerName() }}</strong>
+                        @endif
+                        @if ($quotation->crm_margin_reviewed_at)
+                            · {{ $quotation->crm_margin_reviewed_at->timezone(config('app.timezone'))->format('d M Y H:i') }}
+                        @endif
+                    </p>
+                @endif
             </div>
             @if ($quotation->marginNeedsApproval() && $canApproveMargin)
                 <div class="flex w-full max-w-md flex-col gap-2 sm:w-auto">

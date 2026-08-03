@@ -206,7 +206,7 @@ class User extends Authenticatable
 
     public function canDeleteOpportunity(): bool
     {
-        return $this->isSuperAdmin();
+        return $this->isSuperAdmin() || $this->isSales();
     }
 
     public function canDeleteQuotation(): bool

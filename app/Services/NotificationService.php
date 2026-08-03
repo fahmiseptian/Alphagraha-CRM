@@ -9,6 +9,7 @@ use App\Models\Quotation;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class NotificationService
 {
@@ -57,6 +58,31 @@ class NotificationService
         ]);
     }
 
+    /**
+     * Nama user untuk log/notifikasi approval (fallback: Superadmin).
+     */
+    protected function actorName(?string $userId = null): string
+    {
+        $userId = $userId ?: auth()->id();
+        if (! $userId) {
+            return 'Superadmin';
+        }
+
+        $user = User::query()->whereKey($userId)->first();
+
+        return $user?->display_name ?: 'Superadmin';
+    }
+
+    protected function actorPayload(?string $userId = null): array
+    {
+        $userId = $userId ?: auth()->id();
+
+        return [
+            'reviewed_by' => $userId,
+            'reviewed_by_name' => $this->actorName($userId),
+        ];
+    }
+
     public function notifyDiscountApproved(Opportunity $opportunity, float $amount, bool $revised = false, ?string $note = null): void
     {
         $userIds = collect([
@@ -68,6 +94,7 @@ class NotificationService
         $formatted = function_exists('money') ? money($amount, $currency) : number_format($amount, 0, ',', '.');
         $pct = $opportunity->discountPercent();
         $pctLabel = $pct !== null ? ' ('.number_format($pct, 2, ',', '.').'% dari margin)' : '';
+        $actor = $this->actorName($opportunity->crm_discount_reviewed_by ?: auth()->id());
 
         $type = $revised
             ? CrmNotification::TYPE_DISCOUNT_REVISED
@@ -78,8 +105,8 @@ class NotificationService
             : 'Diskon disetujui';
 
         $body = $revised
-            ? 'Superadmin menyesuaikan diskon Opportunity "'.$opportunity->name.'" menjadi '.$formatted.$pctLabel.'.'
-            : 'Diskon Opportunity "'.$opportunity->name.'" sebesar '.$formatted.$pctLabel.' telah disetujui.';
+            ? $actor.' menyesuaikan diskon Opportunity "'.$opportunity->name.'" menjadi '.$formatted.$pctLabel.'.'
+            : 'Diskon Opportunity "'.$opportunity->name.'" sebesar '.$formatted.$pctLabel.' telah disetujui oleh '.$actor.'.';
 
         if ($note) {
             $body .= ' Catatan: '.$note;
@@ -96,17 +123,19 @@ class NotificationService
                 $link,
                 showPopup: true,
                 uniqueKey: 'discount:'.$opportunity->id.':'.uniqid('', true),
-                data: [
+                data: array_merge([
                     'opportunity_id' => $opportunity->id,
                     'amount' => $amount,
                     'revised' => $revised,
-                ],
+                ], $this->actorPayload($opportunity->crm_discount_reviewed_by ?: auth()->id())),
             );
         }
     }
 
     /**
      * Popup + bell untuk semua Superadmin saat sales request diskon tambahan.
+     * Satu opportunity = satu notif pending per superadmin.
+     * Edit nominal mengarsipkan request lama (tetap di histori, tanpa wajib aksi) lalu membuat notif baru.
      */
     public function notifyDiscountRequested(Opportunity $opportunity): void
     {
@@ -129,6 +158,7 @@ class NotificationService
         $link = route('opportunities.show', $opportunity);
         $title = 'Request diskon tambahan';
         $body = $requesterName.' mengajukan diskon '.$formatted.$pctLabel.' pada Opportunity "'.$opportunity->name.'".';
+        $uniqueKey = 'discount_request:'.$opportunity->id;
 
         $superAdminIds = User::query()
             ->where('deleted', 0)
@@ -139,6 +169,13 @@ class NotificationService
             ->values();
 
         foreach ($superAdminIds as $userId) {
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_DISCOUNT_REQUESTED,
+                $uniqueKey,
+                opportunityId: $opportunity->id,
+            );
+
             $this->notify(
                 $userId,
                 CrmNotification::TYPE_DISCOUNT_REQUESTED,
@@ -146,11 +183,12 @@ class NotificationService
                 $body,
                 $link,
                 showPopup: true,
-                uniqueKey: 'discount_request:'.$opportunity->id.':'.uniqid('', true),
+                uniqueKey: $uniqueKey,
                 data: [
                     'opportunity_id' => $opportunity->id,
                     'amount' => $amount,
                     'requested_by' => $requesterId,
+                    'sales_user_id' => $requesterId ?: $opportunity->assigned_user_id,
                 ],
             );
         }
@@ -176,10 +214,11 @@ class NotificationService
             : number_format($approvedAmount, 0, ',', '.');
 
         $title = 'Diskon ditolak';
+        $actor = $this->actorName($opportunity->crm_discount_reviewed_by ?: auth()->id());
         if ($approvedAmount > 0) {
-            $body = 'Permintaan diskon Opportunity "'.$opportunity->name.'" ditolak. Nominal yang disetujui: '.$formattedApproved.'.';
+            $body = 'Permintaan diskon Opportunity "'.$opportunity->name.'" ditolak oleh '.$actor.'. Nominal yang disetujui: '.$formattedApproved.'.';
         } else {
-            $body = 'Permintaan diskon Opportunity "'.$opportunity->name.'" ditolak.';
+            $body = 'Permintaan diskon Opportunity "'.$opportunity->name.'" ditolak oleh '.$actor.'.';
         }
 
         if ($requestedAmount !== null && $requestedAmount > 0 && abs($requestedAmount - $approvedAmount) > 0.009) {
@@ -204,11 +243,11 @@ class NotificationService
                 $link,
                 showPopup: true,
                 uniqueKey: 'discount_reject:'.$opportunity->id.':'.uniqid('', true),
-                data: [
+                data: array_merge([
                     'opportunity_id' => $opportunity->id,
                     'approved_amount' => $approvedAmount,
                     'requested_amount' => $requestedAmount,
-                ],
+                ], $this->actorPayload($opportunity->crm_discount_reviewed_by ?: auth()->id())),
             );
         }
     }
@@ -224,7 +263,8 @@ class NotificationService
         ])->filter()->unique()->values();
 
         $title = 'Diskon dikembalikan ke pending';
-        $body = 'Keputusan diskon Opportunity "'.$opportunity->name.'" dikembalikan ke menunggu approval.';
+        $actor = $this->actorName(auth()->id());
+        $body = 'Keputusan diskon Opportunity "'.$opportunity->name.'" dikembalikan ke menunggu approval oleh '.$actor.'.';
         if ($note) {
             $body .= ' Catatan: '.$note;
         }
@@ -240,7 +280,7 @@ class NotificationService
                 $link,
                 showPopup: true,
                 uniqueKey: 'discount_revert:'.$opportunity->id.':'.uniqid('', true),
-                data: ['opportunity_id' => $opportunity->id],
+                data: array_merge(['opportunity_id' => $opportunity->id], $this->actorPayload()),
             );
         }
     }
@@ -277,6 +317,14 @@ class NotificationService
             ->values();
 
         foreach ($superAdminIds as $userId) {
+            $uniqueKey = 'opp_margin_request:'.$opportunity->id;
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_MARGIN_REQUESTED,
+                $uniqueKey,
+                opportunityId: $opportunity->id,
+            );
+
             $this->notify(
                 $userId,
                 CrmNotification::TYPE_MARGIN_REQUESTED,
@@ -284,13 +332,15 @@ class NotificationService
                 $body,
                 $link,
                 showPopup: true,
-                uniqueKey: 'opp_margin_request:'.$opportunity->id.':'.uniqid('', true),
+                uniqueKey: $uniqueKey,
                 data: [
                     'opportunity_id' => $opportunity->id,
                     'margin_percent' => $marginPct,
                     'threshold' => $pctThreshold,
                     'margin_nominal' => $marginNominal,
                     'nominal_threshold' => $nominalThreshold,
+                    'sales_user_id' => $requesterId,
+                    'requested_by' => $requesterId,
                 ],
             );
         }
@@ -303,7 +353,8 @@ class NotificationService
             return;
         }
 
-        $body = 'Margin Opportunity "'.$opportunity->name.'" telah disetujui.';
+        $actor = $this->actorName($opportunity->crm_margin_reviewed_by ?: auth()->id());
+        $body = 'Margin Opportunity "'.$opportunity->name.'" telah disetujui oleh '.$actor.'.';
         if ($note) {
             $body .= ' Catatan: '.$note;
         }
@@ -316,7 +367,10 @@ class NotificationService
             route('opportunities.show', $opportunity),
             showPopup: true,
             uniqueKey: 'opp_margin_approved:'.$opportunity->id.':'.uniqid('', true),
-            data: ['opportunity_id' => $opportunity->id],
+            data: array_merge(
+                ['opportunity_id' => $opportunity->id],
+                $this->actorPayload($opportunity->crm_margin_reviewed_by ?: auth()->id())
+            ),
         );
     }
 
@@ -327,7 +381,8 @@ class NotificationService
             return;
         }
 
-        $body = 'Margin Opportunity "'.$opportunity->name.'" ditolak. Perbaiki harga/margin atau hubungi Superadmin.';
+        $actor = $this->actorName($opportunity->crm_margin_reviewed_by ?: auth()->id());
+        $body = 'Margin Opportunity "'.$opportunity->name.'" ditolak oleh '.$actor.'. Perbaiki harga/margin atau hubungi Superadmin.';
         if ($note) {
             $body .= ' Catatan: '.$note;
         }
@@ -340,7 +395,10 @@ class NotificationService
             route('opportunities.show', $opportunity),
             showPopup: true,
             uniqueKey: 'opp_margin_rejected:'.$opportunity->id.':'.uniqid('', true),
-            data: ['opportunity_id' => $opportunity->id],
+            data: array_merge(
+                ['opportunity_id' => $opportunity->id],
+                $this->actorPayload($opportunity->crm_margin_reviewed_by ?: auth()->id())
+            ),
         );
     }
 
@@ -375,6 +433,14 @@ class NotificationService
             ->values();
 
         foreach ($superAdminIds as $userId) {
+            $uniqueKey = 'margin_request:'.$quotation->id;
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_MARGIN_REQUESTED,
+                $uniqueKey,
+                quotationId: $quotation->id,
+            );
+
             $this->notify(
                 $userId,
                 CrmNotification::TYPE_MARGIN_REQUESTED,
@@ -382,13 +448,15 @@ class NotificationService
                 $body,
                 $link,
                 showPopup: true,
-                uniqueKey: 'margin_request:'.$quotation->id.':'.uniqid('', true),
+                uniqueKey: $uniqueKey,
                 data: [
                     'quotation_id' => $quotation->id,
                     'margin_percent' => $margin,
                     'threshold' => $threshold,
                     'margin_nominal' => $marginNominal,
                     'nominal_threshold' => $nominalThreshold,
+                    'sales_user_id' => $requesterId,
+                    'requested_by' => $requesterId,
                 ],
             );
         }
@@ -401,7 +469,8 @@ class NotificationService
             return;
         }
 
-        $body = 'Margin Quotation "'.$quotation->number.'" telah disetujui. Preview/PDF dapat dilanjutkan.';
+        $actor = $this->actorName($quotation->crm_margin_reviewed_by ?: auth()->id());
+        $body = 'Margin Quotation "'.$quotation->number.'" telah disetujui oleh '.$actor.'. Preview/PDF dapat dilanjutkan.';
         if ($note) {
             $body .= ' Catatan: '.$note;
         }
@@ -414,7 +483,10 @@ class NotificationService
             route('quotations.show', $quotation),
             showPopup: true,
             uniqueKey: 'margin_approved:'.$quotation->id.':'.uniqid('', true),
-            data: ['quotation_id' => $quotation->id],
+            data: array_merge(
+                ['quotation_id' => $quotation->id],
+                $this->actorPayload($quotation->crm_margin_reviewed_by ?: auth()->id())
+            ),
         );
     }
 
@@ -425,7 +497,8 @@ class NotificationService
             return;
         }
 
-        $body = 'Margin Quotation "'.$quotation->number.'" ditolak. Dokumen terkunci hingga margin diperbaiki / di-approve.';
+        $actor = $this->actorName($quotation->crm_margin_reviewed_by ?: auth()->id());
+        $body = 'Margin Quotation "'.$quotation->number.'" ditolak oleh '.$actor.'. Dokumen terkunci hingga margin diperbaiki / di-approve.';
         if ($note) {
             $body .= ' Catatan: '.$note;
         }
@@ -438,7 +511,10 @@ class NotificationService
             route('quotations.show', $quotation),
             showPopup: true,
             uniqueKey: 'margin_rejected:'.$quotation->id.':'.uniqid('', true),
-            data: ['quotation_id' => $quotation->id],
+            data: array_merge(
+                ['quotation_id' => $quotation->id],
+                $this->actorPayload($quotation->crm_margin_reviewed_by ?: auth()->id())
+            ),
         );
     }
 
@@ -451,6 +527,93 @@ class NotificationService
 
         $this->syncOpportunityDeadlines($user, $until);
         $this->syncActivityDeadlines($user, $until);
+        $this->dedupePendingRequestNotifications($user->id);
+    }
+
+    /**
+     * Satukan notif request pending yang terduplikasi (mis. edit diskon sebelum diaksi).
+     * Sisakan yang terbaru sebagai wajib aksi; yang lama tetap di histori tanpa aksi.
+     */
+    protected function dedupePendingRequestNotifications(string $userId): void
+    {
+        $this->dedupePendingByDataKey(
+            $userId,
+            CrmNotification::TYPE_DISCOUNT_REQUESTED,
+            'opportunity_id',
+            'discount_request:'
+        );
+        $this->dedupePendingByDataKey(
+            $userId,
+            CrmNotification::TYPE_MARGIN_REQUESTED,
+            'opportunity_id',
+            'opp_margin_request:'
+        );
+        $this->dedupePendingByDataKey(
+            $userId,
+            CrmNotification::TYPE_MARGIN_REQUESTED,
+            'quotation_id',
+            'margin_request:'
+        );
+    }
+
+    protected function dedupePendingByDataKey(
+        string $userId,
+        string $type,
+        string $dataKey,
+        string $uniqueKeyPrefix,
+    ): void {
+        $items = CrmNotification::query()
+            ->where('user_id', $userId)
+            ->where('type', $type)
+            ->whereNull('read_at')
+            ->whereNotNull("data->{$dataKey}")
+            ->orderByDesc('id')
+            ->get();
+
+        if ($items->count() < 2) {
+            return;
+        }
+
+        $grouped = $items->groupBy(fn (CrmNotification $n) => (string) data_get($n->data, $dataKey));
+
+        foreach ($grouped as $entityId => $rows) {
+            if ($entityId === '' || $rows->count() < 2) {
+                continue;
+            }
+
+            $keep = $rows->first();
+            $olderIds = $rows->slice(1)->pluck('id')->all();
+            if ($olderIds !== []) {
+                CrmNotification::query()
+                    ->whereIn('id', $olderIds)
+                    ->update([
+                        'read_at' => now(),
+                        'show_popup' => false,
+                        'unique_key' => null,
+                    ]);
+            }
+
+            $desiredKey = $uniqueKeyPrefix.$entityId;
+            if ($keep->unique_key === $desiredKey) {
+                continue;
+            }
+
+            $keyTaken = CrmNotification::query()
+                ->where('user_id', $userId)
+                ->where('unique_key', $desiredKey)
+                ->where('id', '!=', $keep->id)
+                ->exists();
+
+            if ($keyTaken) {
+                CrmNotification::query()
+                    ->where('user_id', $userId)
+                    ->where('unique_key', $desiredKey)
+                    ->where('id', '!=', $keep->id)
+                    ->update(['unique_key' => null]);
+            }
+
+            $keep->forceFill(['unique_key' => $desiredKey])->save();
+        }
     }
 
     protected function syncOpportunityDeadlines(User $user, Carbon $until): void
@@ -584,13 +747,39 @@ class NotificationService
 
     public function unreadPopups(string $userId): Collection
     {
-        return CrmNotification::query()
+        // Popup maksimal sekali per hari — notif baru tetap masuk lonceng, tanpa buka modal lagi.
+        if ($this->popupAlreadyShownToday($userId)) {
+            return collect();
+        }
+
+        $items = CrmNotification::query()
             ->where('user_id', $userId)
             ->whereNull('read_at')
             ->where('show_popup', true)
             ->orderByDesc('created_at')
             ->limit(8)
             ->get();
+
+        if ($items->isNotEmpty()) {
+            $this->markPopupShownToday($userId);
+        }
+
+        return $items;
+    }
+
+    public function popupAlreadyShownToday(string $userId): bool
+    {
+        return Cache::has($this->popupDayCacheKey($userId));
+    }
+
+    public function markPopupShownToday(string $userId): void
+    {
+        Cache::put($this->popupDayCacheKey($userId), true, now()->endOfDay());
+    }
+
+    protected function popupDayCacheKey(string $userId): string
+    {
+        return 'crm_notif_popup_day:'.$userId;
     }
 
     public function markAllRead(string $userId): void
@@ -613,9 +802,12 @@ class NotificationService
 
     /**
      * Tutup popup saja — status baca tidak berubah.
+     * Juga kunci agar modal tidak muncul lagi sampai hari berikutnya.
      */
     public function dismissPopups(string $userId): void
     {
+        $this->markPopupShownToday($userId);
+
         CrmNotification::query()
             ->where('user_id', $userId)
             ->whereNull('read_at')
@@ -632,6 +824,40 @@ class NotificationService
             ->where('user_id', $userId)
             ->whereIn('id', $ids)
             ->delete();
+    }
+
+    /**
+     * Arsipkan notifikasi aksi pending sebelumnya (tetap di histori, tidak wajib aksi).
+     * Unique key dibersihkan agar notif aktif baru bisa memakai key stabil yang sama.
+     */
+    protected function replacePendingActionNotifications(
+        string $userId,
+        string $type,
+        string $uniqueKey,
+        ?string $opportunityId = null,
+        int|string|null $quotationId = null,
+    ): void {
+        CrmNotification::query()
+            ->where('user_id', $userId)
+            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId) {
+                $q->where('unique_key', $uniqueKey)
+                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId) {
+                        $q2->where('type', $type)
+                            ->whereNull('read_at');
+
+                        if ($opportunityId) {
+                            $q2->where('data->opportunity_id', $opportunityId);
+                        }
+                        if ($quotationId) {
+                            $q2->where('data->quotation_id', $quotationId);
+                        }
+                    });
+            })
+            ->update([
+                'read_at' => now(),
+                'show_popup' => false,
+                'unique_key' => null,
+            ]);
     }
 
     /**
@@ -663,6 +889,20 @@ class NotificationService
         $this->markActioned(CrmNotification::TYPE_DISCOUNT_REQUESTED, [
             'opportunity_id' => $opportunity->id,
         ]);
+    }
+
+    /**
+     * Tutup semua request approval (diskon + margin) untuk opportunity yang Closed Lost.
+     */
+    public function dismissApprovalRequestsForOpportunity(Opportunity $opportunity): void
+    {
+        $this->markDiscountRequestActioned($opportunity);
+        $this->markOpportunityMarginRequestActioned($opportunity);
+
+        $opportunity->loadMissing('quotation');
+        if ($opportunity->quotation) {
+            $this->markQuotationMarginRequestActioned($opportunity->quotation);
+        }
     }
 
     public function markOpportunityMarginRequestActioned(Opportunity $opportunity): void

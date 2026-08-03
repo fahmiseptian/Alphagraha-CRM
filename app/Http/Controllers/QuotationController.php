@@ -117,7 +117,7 @@ class QuotationController extends Controller
                         ->with('error', $error);
                 }
 
-                if ($error = $this->opportunityMarginBlockMessage($opportunity)) {
+                if ($error = $this->opportunityQuotationBlockMessage($opportunity)) {
                     return redirect()->route('opportunities.show', $opportunity)
                         ->with('error', $error);
                 }
@@ -212,7 +212,7 @@ class QuotationController extends Controller
             return back()->withInput()->with('error', $error);
         }
 
-        if ($error = $this->opportunityMarginBlockForPayload($data)) {
+        if ($error = $this->opportunityQuotationBlockForPayload($data)) {
             return back()->withInput()->with('error', $error);
         }
 
@@ -1008,10 +1008,25 @@ class QuotationController extends Controller
         return 'Opportunity tidak dapat membuat Quotation: '.$opportunity->marginStatusLabel().'.';
     }
 
+    protected function opportunityDiscountBlockMessage(Opportunity $opportunity): ?string
+    {
+        if (! $opportunity->discountNeedsAttention()) {
+            return null;
+        }
+
+        return 'Diskon tambahan menunggu approval Superadmin — tidak dapat membuat Quotation.';
+    }
+
+    protected function opportunityQuotationBlockMessage(Opportunity $opportunity): ?string
+    {
+        return $this->opportunityDiscountBlockMessage($opportunity)
+            ?? $this->opportunityMarginBlockMessage($opportunity);
+    }
+
     /**
      * @param  array<string, mixed>  $data
      */
-    protected function opportunityMarginBlockForPayload(array $data): ?string
+    protected function opportunityQuotationBlockForPayload(array $data): ?string
     {
         if (empty($data['opportunity_id'])) {
             return null;
@@ -1027,7 +1042,15 @@ class QuotationController extends Controller
             return null;
         }
 
-        return $this->opportunityMarginBlockMessage($opportunity);
+        return $this->opportunityQuotationBlockMessage($opportunity);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    protected function opportunityMarginBlockForPayload(array $data): ?string
+    {
+        return $this->opportunityQuotationBlockForPayload($data);
     }
 
     /**

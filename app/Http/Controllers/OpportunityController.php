@@ -8,6 +8,7 @@ use App\Models\Espo\Contact;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
 use App\Models\Espo\Team;
+use App\Support\OpportunityProductBulkExcel;
 use App\Support\OpportunityProductPricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -172,6 +173,15 @@ class OpportunityController extends Controller
         return view('opportunities.create', $this->formData($opportunity) + compact('opportunity'));
     }
 
+    public function downloadProductTemplate()
+    {
+        if (! auth()->user()?->canCreateOpportunity() && ! auth()->user()?->canEditOpportunityFully()) {
+            abort(403, 'Anda tidak memiliki akses untuk mengunduh template produk.');
+        }
+
+        return OpportunityProductBulkExcel::downloadTemplate();
+    }
+
     public function store(Request $request)
     {
         if (! auth()->user()?->canCreateOpportunity()) {
@@ -263,27 +273,33 @@ class OpportunityController extends Controller
         $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
             || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
+        $opportunity->clearPendingApprovalsForLost();
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
         $opportunity->syncLinkedQuotationMarginApproval();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
-        if ($notifyDiscount && $opportunity->discountNeedsAttention()) {
-            app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
-        }
-        if ($notifyMargin) {
-            app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
-        }
-        if ($wasMarginPending && ! $opportunity->marginNeedsApproval()) {
-            app(\App\Services\NotificationService::class)->markOpportunityMarginRequestActioned($opportunity);
-            if ($opportunity->quotation) {
-                app(\App\Services\NotificationService::class)
-                    ->markQuotationMarginRequestActioned($opportunity->quotation);
+        $notifications = app(\App\Services\NotificationService::class);
+
+        if ($opportunity->stage === Opportunity::LOST_STAGE) {
+            $notifications->dismissApprovalRequestsForOpportunity($opportunity);
+        } else {
+            if ($notifyDiscount && $opportunity->discountNeedsAttention()) {
+                $notifications->notifyDiscountRequested($opportunity);
+            }
+            if ($notifyMargin) {
+                $notifications->notifyOpportunityMarginRequested($opportunity);
+            }
+            if ($wasMarginPending && ! $opportunity->marginNeedsApproval()) {
+                $notifications->markOpportunityMarginRequestActioned($opportunity);
+                if ($opportunity->quotation) {
+                    $notifications->markQuotationMarginRequestActioned($opportunity->quotation);
+                }
             }
         }
         if (in_array($opportunity->stage, [Opportunity::WON_STAGE, Opportunity::LOST_STAGE], true)) {
-            app(\App\Services\NotificationService::class)->markOpportunityDeadlineActioned($opportunity);
+            $notifications->markOpportunityDeadlineActioned($opportunity);
         }
 
         $message = 'Opportunity updated successfully.';
@@ -644,17 +660,24 @@ class OpportunityController extends Controller
 
             $notifyDiscount = $opportunity->activateDiscountApprovalIfNeeded();
             $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: true);
+            $opportunity->clearPendingApprovalsForLost();
             $opportunity->save();
             $opportunity->syncLinkedQuotationMarginApproval();
 
-            if ($notifyDiscount) {
-                app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
-            }
-            if ($notifyMargin) {
-                app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+            $notifications = app(\App\Services\NotificationService::class);
+
+            if ($data['stage'] === Opportunity::LOST_STAGE) {
+                $notifications->dismissApprovalRequestsForOpportunity($opportunity);
+            } else {
+                if ($notifyDiscount) {
+                    $notifications->notifyDiscountRequested($opportunity);
+                }
+                if ($notifyMargin) {
+                    $notifications->notifyOpportunityMarginRequested($opportunity);
+                }
             }
             if (in_array($data['stage'], [Opportunity::WON_STAGE, Opportunity::LOST_STAGE], true)) {
-                app(\App\Services\NotificationService::class)->markOpportunityDeadlineActioned($opportunity);
+                $notifications->markOpportunityDeadlineActioned($opportunity);
             }
         }
 
@@ -665,7 +688,7 @@ class OpportunityController extends Controller
     public function destroy(Opportunity $opportunity)
     {
         if (! auth()->user()?->canDeleteOpportunity()) {
-            abort(403, 'Hanya Superadmin yang dapat menghapus opportunity.');
+            abort(403, 'Anda tidak memiliki izin menghapus opportunity.');
         }
 
         $this->authorizeAccess($opportunity);

@@ -97,6 +97,22 @@ class Quotation extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function marginReviewedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'crm_margin_reviewed_by');
+    }
+
+    public function marginReviewerName(): ?string
+    {
+        if (! $this->crm_margin_reviewed_by) {
+            return null;
+        }
+
+        $this->loadMissing('marginReviewedByUser');
+
+        return $this->marginReviewedByUser?->display_name;
+    }
+
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'account_id');

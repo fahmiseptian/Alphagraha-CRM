@@ -217,6 +217,54 @@ class Opportunity extends Model implements HasMedia
         return $this->belongsTo(EspoUser::class, 'assigned_user_id');
     }
 
+    public function discountRequestedByUser(): BelongsTo
+    {
+        return $this->belongsTo(EspoUser::class, 'crm_discount_requested_by');
+    }
+
+    public function discountReviewedByUser(): BelongsTo
+    {
+        return $this->belongsTo(EspoUser::class, 'crm_discount_reviewed_by');
+    }
+
+    public function marginReviewedByUser(): BelongsTo
+    {
+        return $this->belongsTo(EspoUser::class, 'crm_margin_reviewed_by');
+    }
+
+    public function discountRequesterName(): ?string
+    {
+        if (! $this->crm_discount_requested_by) {
+            return null;
+        }
+
+        $this->loadMissing('discountRequestedByUser');
+
+        return $this->discountRequestedByUser?->display_name;
+    }
+
+    public function discountReviewerName(): ?string
+    {
+        if (! $this->crm_discount_reviewed_by) {
+            return null;
+        }
+
+        $this->loadMissing('discountReviewedByUser');
+
+        return $this->discountReviewedByUser?->display_name;
+    }
+
+    public function marginReviewerName(): ?string
+    {
+        if (! $this->crm_margin_reviewed_by) {
+            return null;
+        }
+
+        $this->loadMissing('marginReviewedByUser');
+
+        return $this->marginReviewedByUser?->display_name;
+    }
+
     public function contact(): BelongsTo
     {
         return $this->belongsTo(Contact::class, 'contact_id');
@@ -550,6 +598,19 @@ class Opportunity extends Model implements HasMedia
             return false;
         }
 
+        // Closed Lost: batalkan pending — deal sudah ditutup, tidak perlu approval.
+        if ($this->stage === self::LOST_STAGE) {
+            if ($this->crm_margin_status === self::MARGIN_PENDING) {
+                $this->crm_margin_status = null;
+                $this->crm_margin_requested_at = null;
+                $this->crm_margin_reviewed_by = null;
+                $this->crm_margin_reviewed_at = null;
+                $this->crm_margin_note = null;
+            }
+
+            return false;
+        }
+
         $belowPct = $pctThreshold !== null && ($marginPct === null || $marginPct < $pctThreshold);
         $belowNominal = $nominalThreshold > 0 && $marginNominal < $nominalThreshold;
         $below = $belowPct || $belowNominal;
@@ -630,6 +691,10 @@ class Opportunity extends Model implements HasMedia
             return false;
         }
 
+        if ($this->stage === self::LOST_STAGE) {
+            return false;
+        }
+
         if ($this->crm_discount_status === self::DISCOUNT_APPROVED) {
             return false;
         }
@@ -646,6 +711,28 @@ class Opportunity extends Model implements HasMedia
         $this->crm_discount_note = null;
 
         return true;
+    }
+
+    /**
+     * Batalkan status pending diskon/margin saat deal Closed Lost.
+     */
+    public function clearPendingApprovalsForLost(): void
+    {
+        if ($this->stage !== self::LOST_STAGE) {
+            return;
+        }
+
+        if ($this->crm_discount_status === self::DISCOUNT_PENDING) {
+            $this->crm_discount_status = null;
+        }
+
+        if ($this->crm_margin_status === self::MARGIN_PENDING) {
+            $this->crm_margin_status = null;
+            $this->crm_margin_requested_at = null;
+            $this->crm_margin_reviewed_by = null;
+            $this->crm_margin_reviewed_at = null;
+            $this->crm_margin_note = null;
+        }
     }
 
     public function stageColor(): string

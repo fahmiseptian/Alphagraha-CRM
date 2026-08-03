@@ -48,6 +48,7 @@
           'marginNominalUmum' => (float) ($marginNominalUmum ?? 0),
           'marginNominalOngkirPribadi' => (float) ($marginNominalOngkirPribadi ?? 0),
           'purchasingMode' => $purchasingMode,
+          'productTemplateUrl' => route('opportunities.products.template'),
           'stage' => old('stage', $opportunity->stage ?: 'Prospecting'),
           'initialStage' => $opportunity->stage ?: 'Prospecting',
           'noApprovalStages' => \App\Models\Espo\Opportunity::NO_APPROVAL_STAGES,
@@ -248,7 +249,7 @@
                             <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
                         </div>
                         @if (auth()->user()?->isSuperAdmin())
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude &amp; % margin (putih) bisa diubah; Include / potongan / nilai margin (kuning) otomatis.</p>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude atau Include bisa diisi (saling hitung via PPN); % margin (putih) bisa diubah; potongan pajak &amp; nilai margin (kuning) otomatis.</p>
                         @endif
                     </div>
 
@@ -315,8 +316,14 @@
                                                 <input type="hidden" :name="`products[${i}][sell_exclude]`" :value="p.sell_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(sellInclude(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" inputmode="decimal"
+                                                       x-effect="if (editingField !== `sell-inc-${i}`) $el.value = formatId(sellInclude(p))"
+                                                       @focus="editingField = `sell-inc-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(sellInclude(p))"
+                                                       @input="onSellIncludeChange(p, parseId($event.target.value))"
+                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       :readonly="purchasingMode"
+                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
                                             </td>
                                         </tr>
                                         <tr>
@@ -334,8 +341,14 @@
                                                 <input type="hidden" :name="`products[${i}][discount_exclude]`" :value="p.discount_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(discountInclude(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" inputmode="decimal" placeholder="0"
+                                                       x-effect="if (editingField !== `disc-inc-${i}`) $el.value = formatId(discountInclude(p))"
+                                                       @focus="editingField = `disc-inc-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(discountInclude(p))"
+                                                       @input="onDiscountIncludeChange(p, parseId($event.target.value))"
+                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       :readonly="purchasingMode"
+                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
                                             </td>
                                         </tr>
                                         <tr>
@@ -350,8 +363,13 @@
                                                 <input type="hidden" :name="`products[${i}][cost_exclude]`" :value="p.cost_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(costInclude(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" inputmode="decimal"
+                                                       x-effect="if (editingField !== `cost-inc-${i}`) $el.value = formatId(costInclude(p))"
+                                                       @focus="editingField = `cost-inc-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(costInclude(p))"
+                                                       @input="onCostIncludeChange(p, parseId($event.target.value))"
+                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
@@ -405,10 +423,17 @@
                                 </div>
                             </div>
                         </template>
-                        <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">Belum ada item. Klik tombol + di bawah untuk menambahkan.</p>
+                        <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">Belum ada item. Klik Add Item atau Import Excel.</p>
                     </div>
-                    <div class="mt-3 flex items-center justify-between">
-                        <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()" x-show="!purchasingMode">Add Item</x-btn>
+                    <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                        <div class="flex flex-wrap items-center gap-2" x-show="!purchasingMode">
+                            <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()">Add Item</x-btn>
+                            <x-btn variant="secondary" icon="bi-download" :href="route('opportunities.products.template')">Download Template</x-btn>
+                            <x-btn type="button" variant="secondary" icon="bi-file-earmark-excel" @click="$refs.productImportInput.click()" x-bind:disabled="!selectedTaxCategory">Import Excel</x-btn>
+                            <input type="file" x-ref="productImportInput" class="hidden"
+                                   accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                                   @change="importProductsFromFile($event)">
+                        </div>
                         <div class="text-sm" :class="purchasingMode ? 'ml-auto' : ''">
                             <span class="text-slate-500">Total (Include):&nbsp;</span>
                             <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
@@ -417,6 +442,9 @@
                             <span class="font-semibold text-green-700" x-text="formatMoney(productsMarginTotal)"></span>
                         </div>
                     </div>
+                    <p class="mt-2 text-xs text-slate-400" x-show="!purchasingMode">
+                        Bulk import: unduh template, isi baris produk, lalu Import Excel (.xlsx / .csv). Kategori pajak mengikuti pilihan di atas.
+                    </p>
                 </div>
             </x-card>
 
@@ -677,6 +705,8 @@
             marginNominalUmum: Number(config.marginNominalUmum) || 0,
             marginNominalOngkirPribadi: Number(config.marginNominalOngkirPribadi) || 0,
             purchasingMode: !!config.purchasingMode,
+            productTemplateUrl: config.productTemplateUrl || '',
+            productImportBusy: false,
             stage: config.stage || 'Prospecting',
             initialStage: config.initialStage || config.stage || 'Prospecting',
             noApprovalStages: config.noApprovalStages || ['Prospecting', 'Qualification'],
@@ -777,7 +807,7 @@
                 this.discountPercent = pct;
                 const margin = this.discountBasisMarginTotal;
                 if (margin > 0) {
-                    this.discountAmount = this.round(margin * pct / 100);
+                    this.discountAmount = this.floorThousand(margin * pct / 100);
                 }
             },
             onDiscountAmountChange() {
@@ -789,7 +819,7 @@
                 if (this._lockDiscountPercent && (Number(this.discountPercent) || 0) > 0) {
                     const margin = this.discountBasisMarginTotal;
                     if (margin > 0) {
-                        this.discountAmount = this.round(margin * (Number(this.discountPercent) || 0) / 100);
+                        this.discountAmount = this.floorThousand(margin * (Number(this.discountPercent) || 0) / 100);
                     }
                 } else {
                     this.syncDiscountPercentFromAmount();
@@ -806,6 +836,34 @@
             },
             costInclude(p) {
                 return this.round((Number(p.cost_exclude) || 0) * TAX_MULTIPLIER);
+            },
+            excludeFromInclude(include) {
+                if (TAX_MULTIPLIER <= 0) return 0;
+                return this.round((Number(include) || 0) / TAX_MULTIPLIER);
+            },
+            /** Pembulatan ke atas per seribu (540541 → 541000). */
+            ceilThousand(value) {
+                const n = Number(value) || 0;
+                if (n <= 0) return 0;
+                return Math.ceil(n / 1000) * 1000;
+            },
+            /** Pembulatan ke bawah per seribu (706036 → 706000). */
+            floorThousand(value) {
+                const n = Number(value) || 0;
+                if (n <= 0) return 0;
+                return Math.floor(n / 1000) * 1000;
+            },
+            onSellIncludeChange(p, includeValue) {
+                p.sell_exclude = this.ceilThousand(this.excludeFromInclude(includeValue));
+                this.onSellChange(p);
+            },
+            onDiscountIncludeChange(p, includeValue) {
+                p.discount_exclude = this.excludeFromInclude(includeValue);
+                this.onDiscountItemChange(p);
+            },
+            onCostIncludeChange(p, includeValue) {
+                p.cost_exclude = this.excludeFromInclude(includeValue);
+                this.onCostChange(p);
             },
             /** Basis harga net: diskon item bila > 0, selain itu harga jual. */
             effectiveSellExclude(p) {
@@ -937,7 +995,7 @@
                 if ((Number(p.discount_exclude) || 0) > 0) {
                     p.discount_exclude = next;
                 } else {
-                    p.sell_exclude = next;
+                    p.sell_exclude = this.ceilThousand(next);
                 }
             },
             onSellChange(p) {
@@ -1071,6 +1129,161 @@
             removeProduct(i) {
                 this.products.splice(i, 1);
                 this.refreshDiscountFromMargin();
+            },
+            async importProductsFromFile(event) {
+                const input = event.target;
+                const file = input?.files?.[0];
+                input.value = '';
+                if (!file) return;
+
+                if (!this.selectedTaxCategory) {
+                    alert('Pilih kategori pajak dulu sebelum import.');
+                    return;
+                }
+                if (this.purchasingMode || this.productImportBusy) return;
+
+                this.productImportBusy = true;
+                try {
+                    const rows = await this.parseProductSpreadsheet(file);
+                    const imported = [];
+                    for (const row of rows) {
+                        const mapped = this.mapImportedProductRow(row);
+                        if (!mapped) continue;
+                        imported.push(mapped);
+                    }
+
+                    if (imported.length === 0) {
+                        alert('Tidak ada baris produk valid di file. Pastikan kolom "nama" terisi (hapus baris contoh template).');
+                        return;
+                    }
+
+                    const append = this.products.length === 0
+                        || confirm(`Ditemukan ${imported.length} produk. OK = tambahkan ke daftar, Cancel = ganti semua item.`);
+
+                    if (!append) {
+                        this.products = [];
+                    }
+
+                    imported.forEach((p) => {
+                        p.tax_category = this.selectedTaxCategory;
+                        p.margin_percent = this.calcMarginPercent(p);
+                        p._lockMarginPercent = false;
+                        this.products.push(p);
+                    });
+                    this.refreshDiscountFromMargin();
+                    alert(`${imported.length} produk berhasil diimpor.`);
+                } catch (err) {
+                    console.error(err);
+                    alert(err?.message || 'Gagal membaca file Excel.');
+                } finally {
+                    this.productImportBusy = false;
+                }
+            },
+            async parseProductSpreadsheet(file) {
+                const name = (file.name || '').toLowerCase();
+                if (name.endsWith('.csv')) {
+                    const text = await file.text();
+                    return this.parseCsvToObjects(text);
+                }
+
+                const XLSX = await this.loadSheetJs();
+                const buffer = await file.arrayBuffer();
+                const workbook = XLSX.read(buffer, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                if (!sheetName) return [];
+                const sheet = workbook.Sheets[sheetName];
+                return XLSX.utils.sheet_to_json(sheet, { defval: '' });
+            },
+            loadSheetJs() {
+                if (window.XLSX) return Promise.resolve(window.XLSX);
+                return new Promise((resolve, reject) => {
+                    const existing = document.querySelector('script[data-crm-xlsx]');
+                    if (existing) {
+                        existing.addEventListener('load', () => resolve(window.XLSX));
+                        existing.addEventListener('error', () => reject(new Error('Gagal memuat parser Excel.')));
+                        return;
+                    }
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+                    script.async = true;
+                    script.dataset.crmXlsx = '1';
+                    script.onload = () => resolve(window.XLSX);
+                    script.onerror = () => reject(new Error('Gagal memuat parser Excel.'));
+                    document.head.appendChild(script);
+                });
+            },
+            parseCsvToObjects(text) {
+                const lines = text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/).filter(l => l.trim() !== '');
+                if (lines.length < 2) return [];
+                const headers = this.splitCsvLine(lines[0]).map(h => String(h).trim());
+                return lines.slice(1).map((line) => {
+                    const cols = this.splitCsvLine(line);
+                    const obj = {};
+                    headers.forEach((h, i) => { obj[h] = cols[i] ?? ''; });
+                    return obj;
+                });
+            },
+            splitCsvLine(line) {
+                const result = [];
+                let cur = '';
+                let inQuotes = false;
+                for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (ch === '"') {
+                        if (inQuotes && line[i + 1] === '"') {
+                            cur += '"';
+                            i++;
+                        } else {
+                            inQuotes = !inQuotes;
+                        }
+                    } else if (ch === ',' && !inQuotes) {
+                        result.push(cur);
+                        cur = '';
+                    } else {
+                        cur += ch;
+                    }
+                }
+                result.push(cur);
+                return result;
+            },
+            normalizeImportHeader(header) {
+                let h = String(header || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+                const aliases = {
+                    barang_jasa: 'jenis', tipe: 'jenis', kind: 'jenis',
+                    item: 'nama', product: 'nama', produk: 'nama', nama_item: 'nama', nama_produk: 'nama', name: 'nama',
+                    quantity: 'qty', jumlah: 'qty',
+                    harga_jual: 'harga_jual_exclude', sell: 'harga_jual_exclude', sell_exclude: 'harga_jual_exclude',
+                    diskon: 'diskon_exclude', discount: 'diskon_exclude', discount_exclude: 'diskon_exclude',
+                    harga_beli: 'harga_beli_exclude', modal: 'harga_beli_exclude', cost: 'harga_beli_exclude', cost_exclude: 'harga_beli_exclude',
+                };
+                return aliases[h] || h;
+            },
+            mapImportedProductRow(row) {
+                const map = {};
+                Object.keys(row || {}).forEach((key) => {
+                    map[this.normalizeImportHeader(key)] = row[key];
+                });
+
+                const name = String(map.nama ?? '').trim();
+                if (!name) return null;
+                const lower = name.toLowerCase();
+                if (lower === 'contoh item a' || lower === 'contoh jasa b') return null;
+
+                const kindRaw = String(map.jenis ?? map.item_kind ?? 'barang').trim().toLowerCase();
+                const itemKind = kindRaw.includes('jasa') ? 'jasa' : 'barang';
+
+                return {
+                    name,
+                    quantity: this.parseId(map.qty ?? map.quantity ?? 1) || 1,
+                    vendor: String(map.vendor ?? '').trim(),
+                    sell_exclude: this.parseId(map.harga_jual_exclude ?? 0),
+                    discount_exclude: this.parseId(map.diskon_exclude ?? 0),
+                    cost_exclude: this.parseId(map.harga_beli_exclude ?? 0),
+                    tax_category: this.selectedTaxCategory,
+                    item_kind: itemKind,
+                    margin_percent: 0,
+                    _lockMarginPercent: false,
+                };
             },
             init() {
                 this.$watch('products', () => { if (this.products.length > 0) this.amount = this.productsTotal; }, { deep: true });

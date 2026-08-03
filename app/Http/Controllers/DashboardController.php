@@ -339,19 +339,21 @@ class DashboardController extends Controller
             $salesTarget = $profile?->resolvedSalesTarget()
                 ?? UserProfile::DEFAULT_SALES_TARGET;
             $wonTotal = (float) ($won->won_total ?? 0);
-            $targetWonTotal = $profile
-                ? $this->wonTotalForTargetPeriod($userId, $profile)
-                : $wonTotal;
+            $wonMargin = (float) ($won->won_margin ?? 0);
+            // Target sales diukur dari margin Closed Won (bukan amount).
+            $targetWonMargin = $profile
+                ? $this->wonMarginForTargetPeriod($userId, $profile)
+                : $wonMargin;
             $deadline = $profile?->resolvedSalesTargetDeadline();
-            $targetRemaining = max(0, $salesTarget - $targetWonTotal);
-            $targetMet = $targetWonTotal >= $salesTarget && $salesTarget > 0;
+            $targetRemaining = max(0, $salesTarget - $targetWonMargin);
+            $targetMet = $targetWonMargin >= $salesTarget && $salesTarget > 0;
 
             return [
                 'user_id' => $userId,
                 'name' => $user?->display_name ?? 'Unknown',
                 'won_count' => (int) ($won->won_count ?? 0),
                 'won_total' => $wonTotal,
-                'won_margin' => (float) ($won->won_margin ?? 0),
+                'won_margin' => $wonMargin,
                 'open_count' => (int) ($open->open_count ?? 0),
                 'open_total' => (float) ($open->open_total ?? 0),
                 'sales_target' => $salesTarget,
@@ -360,11 +362,11 @@ class DashboardController extends Controller
                     ?? UserProfile::TARGET_PERIODS[UserProfile::TARGET_PERIOD_1_YEAR],
                 'target_deadline' => $deadline,
                 'target_deadline_label' => $deadline?->format('d M Y'),
-                'target_won_total' => $targetWonTotal,
+                'target_won_total' => $targetWonMargin,
                 'target_remaining' => $targetRemaining,
                 'target_met' => $targetMet,
                 'target_progress' => $salesTarget > 0
-                    ? round(($targetWonTotal / $salesTarget) * 100, 1)
+                    ? round(($targetWonMargin / $salesTarget) * 100, 1)
                     : 0,
             ];
         });
@@ -388,7 +390,7 @@ class DashboardController extends Controller
         ]));
     }
 
-    protected function wonTotalForTargetPeriod(string $userId, UserProfile $profile): float
+    protected function wonMarginForTargetPeriod(string $userId, UserProfile $profile): float
     {
         [$start, $end] = $profile->salesTargetDateRange();
 
@@ -396,7 +398,7 @@ class DashboardController extends Controller
             ->where('stage', Opportunity::WON_STAGE)
             ->where('assigned_user_id', $userId)
             ->whereBetween('close_date', [$start->toDateString(), $end->toDateString()])
-            ->sum('amount');
+            ->sum('crm_won_margin');
     }
 
     protected function applyLeaderboardPeriodToCloseDate($query, string $period): void

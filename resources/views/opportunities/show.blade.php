@@ -101,6 +101,28 @@
                     @if ($opportunity->crm_discount_note)
                         <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_discount_note }}</p>
                     @endif
+                    @if ($opportunity->discountRequesterName() || $opportunity->crm_discount_requested_at)
+                        <p class="mt-1 text-xs opacity-80">
+                            Diajukan
+                            @if ($opportunity->discountRequesterName())
+                                oleh <strong>{{ $opportunity->discountRequesterName() }}</strong>
+                            @endif
+                            @if ($opportunity->crm_discount_requested_at)
+                                · {{ $opportunity->crm_discount_requested_at->timezone(config('app.timezone'))->format('d M Y H:i') }}
+                            @endif
+                        </p>
+                    @endif
+                    @if (($isApproved || $isRejected) && ($opportunity->discountReviewerName() || $opportunity->crm_discount_reviewed_at))
+                        <p class="mt-1 text-xs opacity-80">
+                            {{ $isApproved ? 'Disetujui' : 'Ditolak' }}
+                            @if ($opportunity->discountReviewerName())
+                                oleh <strong>{{ $opportunity->discountReviewerName() }}</strong>
+                            @endif
+                            @if ($opportunity->crm_discount_reviewed_at)
+                                · {{ $opportunity->crm_discount_reviewed_at->timezone(config('app.timezone'))->format('d M Y H:i') }}
+                            @endif
+                        </p>
+                    @endif
                 </div>
 
                 @if ($isPending && auth()->user()->canApproveDiscount())
@@ -384,6 +406,17 @@
                 @endif
                 @if ($opportunity->crm_margin_note)
                     <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_margin_note }}</p>
+                @endif
+                @if (($isMarginApproved || $isMarginRejected) && ($opportunity->marginReviewerName() || $opportunity->crm_margin_reviewed_at))
+                    <p class="mt-1 text-xs opacity-80">
+                        {{ $isMarginApproved ? 'Disetujui' : 'Ditolak' }}
+                        @if ($opportunity->marginReviewerName())
+                            oleh <strong>{{ $opportunity->marginReviewerName() }}</strong>
+                        @endif
+                        @if ($opportunity->crm_margin_reviewed_at)
+                            · {{ $opportunity->crm_margin_reviewed_at->timezone(config('app.timezone'))->format('d M Y H:i') }}
+                        @endif
+                    </p>
                 @endif
                 @if ($isMarginPending || $isMarginRejected)
                     <p class="mt-2 text-xs font-medium opacity-90">
@@ -820,11 +853,13 @@
                         @endif
                     </div>
                 </div>
-            @elseif ($opportunity->isMarginLocked())
+            @elseif ($opportunity->isMarginLocked() || $opportunity->discountNeedsAttention())
                 <div class="flex flex-col items-center justify-center gap-3 py-4 text-center">
                     <span class="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600"><i class="bi bi-lock text-2xl"></i></span>
                     <p class="text-sm text-slate-600">
-                        @if ($opportunity->crm_margin_status === \App\Models\Espo\Opportunity::MARGIN_PENDING)
+                        @if ($opportunity->discountNeedsAttention())
+                            Diskon tambahan menunggu approval Superadmin — Quotation belum bisa dibuat.
+                        @elseif ($opportunity->crm_margin_status === \App\Models\Espo\Opportunity::MARGIN_PENDING)
                             Margin menunggu approval Superadmin — Quotation belum bisa dibuat.
                         @else
                             Margin ditolak — Quotation belum bisa dibuat. Perbarui opportunity atau minta approval ulang.

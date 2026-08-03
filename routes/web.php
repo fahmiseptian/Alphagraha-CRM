@@ -80,6 +80,7 @@ Route::middleware('auth')->group(function () {
     // Opportunity / Deal (EspoCRM, dapat diedit)
     Route::get('/opportunities', [OpportunityController::class, 'index'])->name('opportunities.index');
     Route::get('/opportunities/create', [OpportunityController::class, 'create'])->name('opportunities.create');
+    Route::get('/opportunities/products/template', [OpportunityController::class, 'downloadProductTemplate'])->name('opportunities.products.template');
     Route::post('/opportunities', [OpportunityController::class, 'store'])->name('opportunities.store');
     Route::get('/opportunities/{opportunity}', [OpportunityController::class, 'show'])->name('opportunities.show');
     Route::get('/opportunities/{opportunity}/edit', [OpportunityController::class, 'edit'])->name('opportunities.edit');

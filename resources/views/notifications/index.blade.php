@@ -15,6 +15,74 @@
     $pageIds = $notifications->pluck('id')->map(fn ($id) => (string) $id)->values()->all();
 @endphp
 
+{{-- Filter --}}
+<x-card class="mb-4" :padding="false">
+    <form method="GET" action="{{ route('notifications.index') }}" class="crm-opp-filters">
+        <div @class([
+            'crm-opp-filters__grid',
+            'crm-opp-filters__grid--admin' => $canFilterSales,
+        ])>
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Cari</label>
+                <div class="crm-search">
+                    <i class="bi bi-search"></i>
+                    <input type="text" name="q" value="{{ $search }}" placeholder="Judul atau isi notifikasi..."
+                           class="crm-field" autocomplete="off">
+                </div>
+            </div>
+
+            @if ($canFilterSales)
+                <div class="crm-opp-filters__field">
+                    <label class="crm-label">Sales</label>
+                    <select name="sales_id" class="select2 select2-search w-full" data-placeholder="Semua sales">
+                        <option value="">Semua sales</option>
+                        @foreach ($salesUsers as $su)
+                            <option value="{{ $su->id }}" @selected($salesId === $su->id)>{{ $su->display_name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+            @endif
+
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Dari tanggal</label>
+                <input type="date" name="date_from" value="{{ $dateFrom }}" class="crm-field">
+            </div>
+
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Sampai tanggal</label>
+                <input type="date" name="date_to" value="{{ $dateTo }}" class="crm-field">
+            </div>
+
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Status</label>
+                <select name="status" class="select2 select2-compact w-full" data-placeholder="Semua status">
+                    <option value="all" @selected($status === 'all')>Semua</option>
+                    <option value="unread" @selected($status === 'unread')>Belum dibaca</option>
+                    <option value="read" @selected($status === 'read')>Sudah dibaca</option>
+                    <option value="action" @selected($status === 'action')>Perlu aksi</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="crm-opp-filters__actions">
+            <div class="crm-opp-filters__buttons">
+                <x-btn type="submit" icon="bi-funnel">Filter</x-btn>
+                @if ($hasFilters)
+                    <a href="{{ route('notifications.index') }}" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                        Reset
+                    </a>
+                @endif
+            </div>
+            <p class="crm-opp-filters__total">
+                <strong>{{ $notifications->total() }}</strong> notifikasi
+                @if ($hasFilters)
+                    <span>· terfilter</span>
+                @endif
+            </p>
+        </div>
+    </form>
+</x-card>
+
 <x-card :padding="false">
     @if ($notifications->count())
         <div
@@ -130,6 +198,8 @@
                                         ])>{{ $n->body }}</p>
                                     @endif
                                     <p class="mt-1.5 text-xs font-medium {{ $unread ? 'text-slate-500' : 'text-slate-400' }}">
+                                        {{ $n->created_at?->translatedFormat('d M Y H:i') }}
+                                        <span class="text-slate-300">·</span>
                                         {{ $n->created_at?->diffForHumans() }}
                                     </p>
                                 </div>
@@ -147,7 +217,14 @@
             </ul>
         </div>
     @else
-        <div class="px-5 py-16 text-center text-slate-400">Belum ada notifikasi.</div>
+        <div class="px-5 py-16 text-center text-slate-400">
+            @if ($hasFilters)
+                Tidak ada notifikasi sesuai filter.
+                <a href="{{ route('notifications.index') }}" class="ml-1 text-brand-600 hover:underline">Reset filter</a>
+            @else
+                Belum ada notifikasi.
+            @endif
+        </div>
     @endif
 
     <div class="crm-table-footer">{{ $notifications->links() }}</div>
