@@ -145,19 +145,7 @@ class QuotationController extends Controller
                 // Unit price di QO = harga jual EXCLUDE (PPN dihitung terpisah di ringkasan).
                 $products = $opportunity->products;
                 if ($products->isNotEmpty()) {
-                    $seedItems = $products->map(fn ($p) => [
-                        'name' => $p['name'],
-                        'description' => '',
-                        'quantity' => $p['quantity'] ?: 1,
-                        'unit' => '',
-                        'unit_price' => (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude']),
-                        'tax_category' => $p['tax_category'],
-                        'item_kind' => $p['item_kind'],
-                        'sell_exclude' => (float) $p['sell_exclude'],
-                        'discount_exclude' => (float) ($p['discount_exclude'] ?? 0),
-                        'cost_exclude' => (float) $p['cost_exclude'],
-                        'vendor' => $p['vendor'],
-                    ])->all();
+                    $seedItems = Quotation::itemsPayloadFromOpportunityProducts($products);
                 } elseif ((float) $opportunity->amount > 0) {
                     $seedItems = [[
                         'name' => $opportunity->name,
@@ -217,7 +205,8 @@ class QuotationController extends Controller
         }
 
         try {
-            $quotation = DB::transaction(function () use ($data) {
+            $oppSyncedOnCreate = false;
+            $quotation = DB::transaction(function () use ($data, &$oppSyncedOnCreate) {
                 $salesContext = $this->service->resolveSalesCodeContext(
                     $data['opportunity_id'] ?? null,
                     auth()->user()
@@ -252,10 +241,16 @@ class QuotationController extends Controller
                 $quotation->recalculateTotals();
                 $quotation->save();
 
+                $oppSync = $quotation->syncItemsToLinkedOpportunity();
+                $oppSyncedOnCreate = $oppSync['synced'];
+
                 $this->snapshotRevision($quotation, 'Quotation created');
 
                 if ($becamePending) {
                     $this->notifications->notifyMarginRequested($quotation);
+                }
+                if ($oppSync['notify_margin'] && $quotation->opportunity) {
+                    $this->notifications->notifyOpportunityMarginRequested($quotation->opportunity);
                 }
 
                 return $quotation;
@@ -265,6 +260,9 @@ class QuotationController extends Controller
         }
 
         $msg = 'Quotation ' . $quotation->number . ' created successfully.';
+        if ($oppSyncedOnCreate) {
+            $msg .= ' Product List Opportunity disinkronkan.';
+        }
         if ($quotation->marginNeedsApproval()) {
             $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
@@ -315,9 +313,11 @@ class QuotationController extends Controller
 
         $becamePending = false;
         $becameRevision = false;
+        $syncedOpportunity = false;
+        $notifyOppMargin = false;
 
         try {
-            $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision) {
+            $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision, &$syncedOpportunity, &$notifyOppMargin) {
                 $before = $this->contentFingerprint($quotation);
                 $everSent = $quotation->hasBeenSent();
                 // Naik R hanya jika status SAAT INI Sent. Draft setelah R1 tidak boleh jadi R2.
@@ -344,6 +344,10 @@ class QuotationController extends Controller
                 $quotation->recalculateTotals();
                 $quotation->save();
 
+                $oppSync = $quotation->syncItemsToLinkedOpportunity();
+                $syncedOpportunity = $oppSync['synced'];
+                $notifyOppMargin = $oppSync['notify_margin'];
+
                 $after = $this->contentFingerprint($quotation->fresh(['items']));
                 $contentChanged = $before !== $after;
 
@@ -369,7 +373,7 @@ class QuotationController extends Controller
                     $this->refreshLatestRevisionSnapshot($quotation);
                 }
 
-                return $quotation->fresh(['items']);
+                return $quotation->fresh(['items', 'opportunity']);
             });
         } catch (\Throwable $e) {
             report($e);
@@ -383,10 +387,16 @@ class QuotationController extends Controller
         if ($becamePending) {
             $this->notifications->notifyMarginRequested($result);
         }
+        if ($notifyOppMargin && $result->opportunity) {
+            $this->notifications->notifyOpportunityMarginRequested($result->opportunity);
+        }
 
         $msg = 'Quotation updated successfully.';
         if ($becameRevision) {
             $msg = 'Quotation diperbarui sebagai revisi dokumen R'.$result->document_revision.' ('.$result->number.'). Status dikembalikan ke Draft — kirim ulang setelah dicek.';
+        }
+        if ($syncedOpportunity) {
+            $msg .= ' Product List Opportunity disinkronkan.';
         }
         if ($result->marginNeedsApproval()) {
             $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';

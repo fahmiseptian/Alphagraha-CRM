@@ -22,9 +22,9 @@ class NotificationController extends Controller
         $user = $request->user();
         $this->notifications->syncUpcomingForUser($user);
 
-        $status = (string) $request->get('status', 'all');
+        $status = (string) $request->get('status', 'action');
         if (! in_array($status, ['all', 'unread', 'read', 'action'], true)) {
-            $status = 'all';
+            $status = 'action';
         }
 
         $dateFrom = $this->parseDate($request->get('date_from'));
@@ -86,7 +86,7 @@ class NotificationController extends Controller
 
         $items = $query->orderByDesc('created_at')->paginate(30)->withQueryString();
 
-        $hasFilters = $status !== 'all' || $dateFrom || $dateTo || $salesId !== '' || $search !== '';
+        $hasFilters = $status !== 'action' || $dateFrom || $dateTo || $salesId !== '' || $search !== '';
 
         return view('notifications.index', [
             'notifications' => $items,

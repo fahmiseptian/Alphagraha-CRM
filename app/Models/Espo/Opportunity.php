@@ -643,6 +643,142 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
+     * Timpa Product List dari Quotation Items (1:1).
+     * Return false jika isi produk sudah sama (tidak perlu tulis ulang).
+     *
+     * @param  \Illuminate\Support\Collection|array  $items
+     */
+    public function replaceProductsFromQuotationItems($items): bool
+    {
+        $rows = collect($items)->values()
+            ->filter(function ($item) {
+                $name = is_object($item) ? ($item->name ?? null) : ($item['name'] ?? null);
+
+                return filled($name);
+            })
+            ->map(function ($item) {
+                $get = function (string $key, $default = null) use ($item) {
+                    if (is_object($item)) {
+                        return $item->{$key} ?? $default;
+                    }
+
+                    return $item[$key] ?? $default;
+                };
+
+                $list = (float) ($get('sell_exclude', 0) ?: 0);
+                $discount = (float) ($get('discount_exclude', 0) ?: 0);
+                $unitPrice = (float) ($get('unit_price', 0) ?: 0);
+
+                // Item baru di form QO sering hanya isi unit_price.
+                if ($list <= 0) {
+                    $list = $unitPrice;
+                }
+                if ($discount <= 0 && $unitPrice > 0 && abs($unitPrice - $list) > 0.009) {
+                    $discount = $unitPrice;
+                    if ($list < $discount) {
+                        $list = $discount;
+                    }
+                }
+
+                $tax = (string) ($get('tax_category', '') ?? '');
+                $kind = (string) ($get('item_kind', '') ?? '');
+
+                return OpportunityProductPricing::enrichRow([
+                    'name' => (string) $get('name', ''),
+                    'quantity' => (float) ($get('quantity', 1) ?: 1),
+                    'vendor' => (string) ($get('vendor', '') ?? ''),
+                    'tax_category' => $tax !== '' ? $tax : OpportunityProductPricing::TAX_NON_WAPU,
+                    'item_kind' => $kind !== '' ? $kind : OpportunityProductPricing::KIND_BARANG,
+                    'sell_exclude' => $list,
+                    'cost_exclude' => (float) ($get('cost_exclude', 0) ?: 0),
+                    'discount_exclude' => $discount,
+                ]);
+            })
+            ->values();
+
+        $desiredFp = Quotation::itemsSyncFingerprint(
+            Quotation::itemsPayloadFromOpportunityProducts($rows)
+        );
+        $currentFp = Quotation::itemsSyncFingerprint(
+            Quotation::itemsPayloadFromOpportunityProducts($this->products)
+        );
+
+        if ($desiredFp === $currentFp) {
+            return false;
+        }
+
+        $this->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
+        $this->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
+        $this->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
+        $this->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
+        $this->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
+        $this->crm_tax_category = $rows->pluck('tax_category')->all();
+        $this->crm_item_kind = $rows->pluck('item_kind')->all();
+        $this->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
+        $this->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
+        $this->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
+
+        $this->amount = $rows->isNotEmpty()
+            ? $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0))
+            : $this->amount;
+
+        $this->syncWonMargin();
+
+        return true;
+    }
+
+    /**
+     * Sinkronkan Product List → Quotation Items (1:1).
+     * Bila isi berubah: status QO jadi draft; jika sebelumnya Sent, naikkan revisi dokumen.
+     */
+    public function syncProductsToLinkedQuotation(): bool
+    {
+        $quotation = $this->relationLoaded('quotation')
+            ? $this->quotation
+            : $this->quotation()->with('items')->first();
+
+        if (! $quotation) {
+            return false;
+        }
+
+        $quotation->loadMissing('items');
+
+        $desiredPayload = \App\Models\Quotation::itemsPayloadFromOpportunityProducts(
+            $this->products,
+            $quotation->items
+        );
+        $desiredFp = \App\Models\Quotation::itemsSyncFingerprint($desiredPayload);
+        $currentFp = $quotation->currentItemsSyncFingerprint();
+
+        if ($desiredFp === $currentFp) {
+            return false;
+        }
+
+        $wasSent = $quotation->status === 'sent';
+
+        $quotation->syncItemsFromOpportunityProducts($this);
+        $quotation->load('items');
+        $quotation->recalculateTotals();
+
+        if ($wasSent) {
+            $service = app(\App\Services\QuotationService::class);
+            $quotation->document_revision = (int) $quotation->document_revision + 1;
+            $base = $quotation->base_number ?: $service->stripDocumentRevision($quotation->number);
+            $quotation->base_number = $base;
+            $quotation->number = $service->withDocumentRevision($base, (int) $quotation->document_revision);
+            $quotation->revision = (int) $quotation->revision + 1;
+            if (! $quotation->sent_at) {
+                $quotation->sent_at = now();
+            }
+        }
+
+        $quotation->status = 'draft';
+        $quotation->save();
+
+        return true;
+    }
+
+    /**
      * Samakan status approval margin Quotation terhubung dengan Opportunity.
      * Mencegah QO tetap terkunci setelah margin opportunity sudah di atas threshold / di-approve.
      */

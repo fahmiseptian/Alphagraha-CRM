@@ -4,7 +4,7 @@
 @section('content')
 <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <div>
-        <a href="{{ route('opportunities.index') }}" class="crm-back"><i class="bi bi-arrow-left"></i> Back to list</a>
+        <a href="{{ $indexUrl ?? route('opportunities.index') }}" class="crm-back"><i class="bi bi-arrow-left"></i> Back to list</a>
         <h2 class="crm-page-title">{{ $opportunity->name }}</h2>
         <p class="crm-page-desc">{{ optional($opportunity->account)->name ?: $opportunity->company ?: 'Opportunity' }}</p>
     </div>

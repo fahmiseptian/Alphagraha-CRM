@@ -44,6 +44,8 @@ class OpportunityController extends Controller
             $companyFilter = '';
         }
 
+        $this->rememberOpportunitiesIndexQuery($request);
+
         $query = Opportunity::query()->with(['account', 'assignedUser']);
         $user = $this->currentUser();
 
@@ -147,7 +149,14 @@ class OpportunityController extends Controller
         $closingStages = $opportunity->closingStageOptions();
         $duplicates = $opportunity->potentialDuplicates();
 
-        return view('opportunities.show', compact('opportunity', 'mediaDocuments', 'nextStage', 'closingStages', 'duplicates'));
+        return view('opportunities.show', [
+            'opportunity' => $opportunity,
+            'mediaDocuments' => $mediaDocuments,
+            'nextStage' => $nextStage,
+            'closingStages' => $closingStages,
+            'duplicates' => $duplicates,
+            'indexUrl' => $this->opportunitiesIndexUrl(),
+        ]);
     }
 
     public function create(Request $request)
@@ -170,7 +179,10 @@ class OpportunityController extends Controller
             'account_id' => $accountId,
         ]);
 
-        return view('opportunities.create', $this->formData($opportunity) + compact('opportunity'));
+        return view('opportunities.create', $this->formData($opportunity) + [
+            'opportunity' => $opportunity,
+            'indexUrl' => $this->opportunitiesIndexUrl(),
+        ]);
     }
 
     public function downloadProductTemplate()
@@ -277,6 +289,7 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $syncedQuotationItems = $opportunity->syncProductsToLinkedQuotation();
         $opportunity->syncLinkedQuotationMarginApproval();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
@@ -303,6 +316,9 @@ class OpportunityController extends Controller
         }
 
         $message = 'Opportunity updated successfully.';
+        if ($syncedQuotationItems) {
+            $message .= ' Item Quotation disinkronkan; status QO menjadi Draft.';
+        }
         if ($opportunity->discountNeedsAttention()) {
             $message .= ' Diskon menunggu approval Superadmin.';
         }
@@ -610,6 +626,7 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $syncedQuotationItems = $opportunity->syncProductsToLinkedQuotation();
         $opportunity->syncLinkedQuotationMarginApproval();
 
         if ($notifyMargin) {
@@ -623,8 +640,13 @@ class OpportunityController extends Controller
             }
         }
 
+        $message = 'Harga modal & vendor berhasil diperbarui.';
+        if ($syncedQuotationItems) {
+            $message .= ' Item Quotation disinkronkan; status QO menjadi Draft.';
+        }
+
         return redirect()->route('opportunities.show', $opportunity)
-            ->with('success', 'Harga modal & vendor berhasil diperbarui.');
+            ->with('success', $message);
     }
 
     public function updateStage(Request $request, Opportunity $opportunity)
@@ -681,7 +703,7 @@ class OpportunityController extends Controller
             }
         }
 
-        return redirect()->route('opportunities.index')
+        return redirect()->to($this->opportunitiesIndexUrl())
             ->with('success', 'Stage dipindahkan ke '.$data['stage'].'.');
     }
 
@@ -702,8 +724,32 @@ class OpportunityController extends Controller
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
 
-        return redirect()->route('opportunities.index')
+        return redirect()->to($this->opportunitiesIndexUrl())
             ->with('success', 'Opportunity berhasil dihapus.');
+    }
+
+    /**
+     * Simpan query filter index opportunity agar Back to list tetap mempertahankan filter.
+     */
+    protected function rememberOpportunitiesIndexQuery(Request $request): void
+    {
+        $query = array_filter(
+            $request->only(['view', 'q', 'stage', 'company', 'assigned_user_id', 'period', 'page']),
+            fn ($value) => $value !== null && $value !== ''
+        );
+
+        session(['opportunities.index_query' => $query]);
+    }
+
+    protected function opportunitiesIndexUrl(): string
+    {
+        $query = session('opportunities.index_query', []);
+
+        if (! is_array($query)) {
+            $query = [];
+        }
+
+        return route('opportunities.index', $query);
     }
 
     protected function validateData(Request $request, bool $creating = false, ?Opportunity $opportunity = null): array
