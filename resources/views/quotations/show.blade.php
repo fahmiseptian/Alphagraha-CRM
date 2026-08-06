@@ -137,7 +137,11 @@
                             <tr>
                                 <td class="px-5 py-3">
                                     <p class="font-medium text-slate-800">{{ $item->name }}</p>
-                                    @if ($item->description)<p class="text-xs text-slate-400">{{ $item->description }}</p>@endif
+                                    @if ($item->description)
+                                        <div class="quotation-item-spec mt-1 text-xs text-slate-500">
+                                            {!! strip_tags($item->description, '<p><br><b><strong><i><em><u><ul><ol><li><a><span><div>') !!}
+                                        </div>
+                                    @endif
                                 </td>
                                 <td class="px-5 py-3 text-center text-slate-600">{{ rtrim(rtrim(number_format($item->quantity, 2), '0'), '.') }} {{ $item->unit }}</td>
                                 <td class="px-5 py-3 text-right text-slate-600">{{ money($item->unit_price, $quotation->currency) }}</td>
@@ -255,3 +259,24 @@
     </div>
 </div>
 @endsection
+
+@push('styles')
+<style>
+    .quotation-item-spec ul {
+        list-style-type: disc !important;
+        list-style-position: outside !important;
+        padding-left: 1.25rem !important;
+        margin: 0.25rem 0 !important;
+    }
+    .quotation-item-spec ol {
+        list-style-type: decimal !important;
+        list-style-position: outside !important;
+        padding-left: 1.25rem !important;
+        margin: 0.25rem 0 !important;
+    }
+    .quotation-item-spec li {
+        display: list-item !important;
+        margin: 0.1rem 0;
+    }
+</style>
+@endpush

@@ -585,6 +585,13 @@ class OpportunityController extends Controller
             'products.*.quantity' => ['nullable', 'numeric', 'min:0'],
             'products.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.cost_in_usd' => ['nullable'],
+            'products.*.cost_foreign' => ['nullable'],
+            'products.*.cost_fx_code' => ['nullable', 'string', 'max:10'],
+            'products.*.cost_usd' => ['nullable', 'numeric', 'min:0'],
+            'products.*.cost_fx' => ['nullable', 'numeric', 'min:0'],
+            'products.*.usd_rate' => ['nullable', 'numeric', 'min:0'],
+            'products.*.fx_rate' => ['nullable', 'numeric', 'min:0'],
             'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
@@ -594,30 +601,36 @@ class OpportunityController extends Controller
         $existing = $opportunity->products->values();
         $rows = collect($data['products'] ?? [])->values()->map(function ($p, $i) use ($existing) {
             $prev = $existing->get($i, []);
+            $normalized = Opportunity::normalizeProductInput(array_merge($prev, [
+                'vendor' => $p['vendor'] ?? ($prev['vendor'] ?? ''),
+                'cost_exclude' => $p['cost_exclude'] ?? ($prev['cost_exclude'] ?? 0),
+                'cost_foreign' => $p['cost_foreign'] ?? $p['cost_in_usd'] ?? ($prev['cost_foreign'] ?? $prev['cost_in_usd'] ?? false),
+                'cost_fx_code' => $p['cost_fx_code'] ?? ($prev['cost_fx_code'] ?? ''),
+                'cost_fx' => $p['cost_fx'] ?? $p['cost_usd'] ?? ($prev['cost_fx'] ?? $prev['cost_usd'] ?? 0),
+                'fx_rate' => $p['fx_rate'] ?? $p['usd_rate'] ?? ($prev['fx_rate'] ?? $prev['usd_rate'] ?? 0),
+            ]));
 
             return OpportunityProductPricing::enrichRow([
                 'name' => $prev['name'] ?? ($p['name'] ?? ''),
                 'quantity' => $prev['quantity'] ?? ($p['quantity'] ?? 1),
-                'vendor' => $p['vendor'] ?? ($prev['vendor'] ?? ''),
+                'vendor' => $normalized['vendor'] ?? '',
                 'tax_category' => $prev['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $prev['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
                 // Harga jual & diskon item dikunci; purchasing hanya ubah modal & vendor.
                 'sell_exclude' => $prev['sell_exclude'] ?? ($p['sell_exclude'] ?? 0),
-                'cost_exclude' => $p['cost_exclude'] ?? ($prev['cost_exclude'] ?? 0),
+                'cost_exclude' => $normalized['cost_exclude'],
                 'discount_exclude' => $prev['discount_exclude'] ?? ($p['discount_exclude'] ?? 0),
+                'cost_foreign' => $normalized['cost_foreign'],
+                'cost_in_usd' => $normalized['cost_foreign'],
+                'cost_fx_code' => $normalized['cost_fx_code'],
+                'cost_fx' => $normalized['cost_fx'],
+                'cost_usd' => $normalized['cost_fx'],
+                'fx_rate' => $normalized['fx_rate'],
+                'usd_rate' => $normalized['fx_rate'],
             ]);
         })->filter(fn ($p) => filled($p['name'] ?? null))->values();
 
-        $opportunity->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
-        $opportunity->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
-        $opportunity->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
-        $opportunity->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
-        $opportunity->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
-        $opportunity->crm_tax_category = $rows->pluck('tax_category')->all();
-        $opportunity->crm_item_kind = $rows->pluck('item_kind')->all();
-        $opportunity->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
-        $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
-        $opportunity->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
+        $opportunity->applyProductRows($rows);
         $opportunity->syncWonMargin();
         $opportunity->loadMissing('quotation');
         $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
@@ -777,6 +790,13 @@ class OpportunityController extends Controller
             'products.*.quantity' => ['nullable', 'numeric', 'min:0'],
             'products.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
+            'products.*.cost_in_usd' => ['nullable'],
+            'products.*.cost_foreign' => ['nullable'],
+            'products.*.cost_fx_code' => ['nullable', 'string', 'max:10'],
+            'products.*.cost_usd' => ['nullable', 'numeric', 'min:0'],
+            'products.*.cost_fx' => ['nullable', 'numeric', 'min:0'],
+            'products.*.usd_rate' => ['nullable', 'numeric', 'min:0'],
+            'products.*.fx_rate' => ['nullable', 'numeric', 'min:0'],
             'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
@@ -888,28 +908,30 @@ class OpportunityController extends Controller
         if ($request->has('products')) {
             $rows = collect($data['products'] ?? [])
                 ->filter(fn ($p) => filled($p['name'] ?? null))
-                ->map(fn ($p) => OpportunityProductPricing::enrichRow([
-                    'name' => $p['name'] ?? '',
-                    'quantity' => $p['quantity'] ?? 1,
-                    'vendor' => $p['vendor'] ?? '',
-                    'tax_category' => $p['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
-                    'item_kind' => $p['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
-                    'sell_exclude' => $p['sell_exclude'] ?? 0,
-                    'cost_exclude' => $p['cost_exclude'] ?? 0,
-                    'discount_exclude' => $p['discount_exclude'] ?? 0,
-                ]))
+                ->map(function ($p) {
+                    $normalized = Opportunity::normalizeProductInput($p);
+
+                    return OpportunityProductPricing::enrichRow([
+                        'name' => $normalized['name'] ?? '',
+                        'quantity' => $normalized['quantity'] ?? 1,
+                        'vendor' => $normalized['vendor'] ?? '',
+                        'tax_category' => $normalized['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
+                        'item_kind' => $normalized['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                        'sell_exclude' => $normalized['sell_exclude'] ?? 0,
+                        'cost_exclude' => $normalized['cost_exclude'],
+                        'discount_exclude' => $normalized['discount_exclude'] ?? 0,
+                        'cost_foreign' => $normalized['cost_foreign'],
+                        'cost_in_usd' => $normalized['cost_foreign'],
+                        'cost_fx_code' => $normalized['cost_fx_code'],
+                        'cost_fx' => $normalized['cost_fx'],
+                        'cost_usd' => $normalized['cost_fx'],
+                        'fx_rate' => $normalized['fx_rate'],
+                        'usd_rate' => $normalized['fx_rate'],
+                    ]);
+                })
                 ->values();
 
-            $opportunity->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
-            $opportunity->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
-            $opportunity->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
-            $opportunity->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
-            $opportunity->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
-            $opportunity->crm_tax_category = $rows->pluck('tax_category')->all();
-            $opportunity->crm_item_kind = $rows->pluck('item_kind')->all();
-            $opportunity->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
-            $opportunity->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
-            $opportunity->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
+            $opportunity->applyProductRows($rows);
 
             if ($rows->isNotEmpty()) {
                 $opportunity->amount = $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0));

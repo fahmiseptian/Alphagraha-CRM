@@ -30,6 +30,7 @@ class Opportunity extends Model implements HasMedia
         'close_date', 'probability', 'lead_source', 'description', 'crm_lost_reason', 'assigned_user_id',
         'contact_id', 'vendor',
         'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
+        'crm_cost_in_usd', 'crm_cost_fx_code', 'crm_cost_usd', 'crm_cost_usd_rate',
         'crm_item_discount',
         'crm_won_margin',
         'crm_shipping_cost',
@@ -52,6 +53,10 @@ class Opportunity extends Model implements HasMedia
         'crm_item_kind' => 'array',
         'crm_sell_exclude' => 'array',
         'crm_cost_exclude' => 'array',
+        'crm_cost_in_usd' => 'array',
+        'crm_cost_fx_code' => 'array',
+        'crm_cost_usd' => 'array',
+        'crm_cost_usd_rate' => 'array',
         'crm_item_discount' => 'array',
         'crm_won_margin' => 'float',
         'crm_shipping_cost' => 'float',
@@ -329,12 +334,16 @@ class Opportunity extends Model implements HasMedia
         $itemKinds = array_values((array) ($this->crm_item_kind ?? []));
         $sellExcludes = array_values((array) ($this->crm_sell_exclude ?? []));
         $costExcludes = array_values((array) ($this->crm_cost_exclude ?? []));
+        $costInUsdFlags = array_values((array) ($this->crm_cost_in_usd ?? []));
+        $costFxCodes = array_values((array) ($this->crm_cost_fx_code ?? []));
+        $costUsds = array_values((array) ($this->crm_cost_usd ?? []));
+        $costUsdRates = array_values((array) ($this->crm_cost_usd_rate ?? []));
         $itemDiscounts = array_values((array) ($this->crm_item_discount ?? []));
 
         $count = max(
             count($names), count($qtys), count($prices), count($costs), count($vendors),
             count($taxCategories), count($itemKinds), count($sellExcludes), count($costExcludes),
-            count($itemDiscounts)
+            count($itemDiscounts), count($costInUsdFlags), count($costFxCodes), count($costUsds), count($costUsdRates)
         );
 
         if ($count === 0) {
@@ -342,7 +351,10 @@ class Opportunity extends Model implements HasMedia
         }
 
         return collect(range(0, $count - 1))
-            ->map(function ($i) use ($names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds, $sellExcludes, $costExcludes, $itemDiscounts) {
+            ->map(function ($i) use (
+                $names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds,
+                $sellExcludes, $costExcludes, $itemDiscounts, $costInUsdFlags, $costFxCodes, $costUsds, $costUsdRates
+            ) {
                 $priceInclude = (float) ($prices[$i] ?? 0);
                 $costInclude = (float) ($costs[$i] ?? 0);
                 $sellExclude = isset($sellExcludes[$i]) && $sellExcludes[$i] !== ''
@@ -356,6 +368,13 @@ class Opportunity extends Model implements HasMedia
                     : 0;
                 $taxCategory = (string) ($taxCategories[$i] ?? OpportunityProductPricing::TAX_NON_WAPU);
                 $itemKind = (string) ($itemKinds[$i] ?? OpportunityProductPricing::KIND_BARANG);
+                $costForeign = in_array((string) ($costInUsdFlags[$i] ?? '0'), ['1', 'true', 'yes'], true);
+                $fxCode = strtoupper(trim((string) ($costFxCodes[$i] ?? '')));
+                if ($costForeign && $fxCode === '') {
+                    $fxCode = 'USD';
+                }
+                $costFx = isset($costUsds[$i]) && $costUsds[$i] !== '' ? (float) $costUsds[$i] : 0.0;
+                $fxRate = isset($costUsdRates[$i]) && $costUsdRates[$i] !== '' ? (float) $costUsdRates[$i] : 0.0;
 
                 return OpportunityProductPricing::enrichRow([
                     'name' => (string) ($names[$i] ?? ''),
@@ -366,10 +385,89 @@ class Opportunity extends Model implements HasMedia
                     'sell_exclude' => $sellExclude,
                     'cost_exclude' => $costExclude,
                     'discount_exclude' => $itemDiscount,
+                    'cost_foreign' => $costForeign,
+                    'cost_in_usd' => $costForeign, // alias legacy
+                    'cost_fx_code' => $fxCode,
+                    'cost_fx' => $costFx,
+                    'cost_usd' => $costFx, // alias legacy
+                    'fx_rate' => $fxRate,
+                    'usd_rate' => $fxRate, // alias legacy
                 ]);
             })
             ->filter(fn ($row) => $row['name'] !== '' || $row['sell_exclude'] > 0 || $row['price'] > 0)
             ->values();
+    }
+
+    /**
+     * Tulis ulang kolom paralel Product List dari kumpulan row yang sudah di-enrich.
+     *
+     * @param  \Illuminate\Support\Collection|array  $rows
+     */
+    public function applyProductRows($rows): void
+    {
+        $rows = collect($rows)->values();
+
+        $this->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
+        $this->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
+        $this->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
+        $this->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
+        $this->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
+        $this->crm_tax_category = $rows->pluck('tax_category')->all();
+        $this->crm_item_kind = $rows->pluck('item_kind')->all();
+        $this->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
+        $this->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
+        $this->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
+        $this->crm_cost_in_usd = $rows->map(fn ($p) => (! empty($p['cost_foreign']) || ! empty($p['cost_in_usd'])) ? '1' : '0')->all();
+        $this->crm_cost_fx_code = $rows->map(function ($p) {
+            $foreign = ! empty($p['cost_foreign']) || ! empty($p['cost_in_usd']);
+            $code = strtoupper(trim((string) ($p['cost_fx_code'] ?? '')));
+
+            return $foreign ? ($code !== '' ? $code : 'USD') : '';
+        })->all();
+        $this->crm_cost_usd = $rows->map(fn ($p) => (string) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0))->all();
+        $this->crm_cost_usd_rate = $rows->map(fn ($p) => (string) ($p['fx_rate'] ?? $p['usd_rate'] ?? 0))->all();
+    }
+
+    /**
+     * Normalisasi input produk form: bila mode asing, cost_exclude = harga_asing × rate.
+     *
+     * @param  array<string, mixed>  $p
+     * @return array<string, mixed>
+     */
+    public static function normalizeProductInput(array $p): array
+    {
+        $costForeign = in_array(
+            strtolower((string) ($p['cost_foreign'] ?? $p['cost_in_usd'] ?? '0')),
+            ['1', 'true', 'yes', 'on'],
+            true
+        );
+        $fxCode = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) ($p['cost_fx_code'] ?? '')) ?? '');
+        $costFx = (float) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0);
+        $fxRate = (float) ($p['fx_rate'] ?? $p['usd_rate'] ?? 0);
+        $costExclude = (float) ($p['cost_exclude'] ?? 0);
+
+        if ($costForeign && $costFx > 0 && $fxRate > 0) {
+            $costExclude = round($costFx * $fxRate, 2);
+            if ($fxCode === '') {
+                $fxCode = 'USD';
+            }
+        } else {
+            $costForeign = false;
+            $fxCode = '';
+            $costFx = 0.0;
+            $fxRate = 0.0;
+        }
+
+        $p['cost_foreign'] = $costForeign;
+        $p['cost_in_usd'] = $costForeign;
+        $p['cost_fx_code'] = $fxCode;
+        $p['cost_fx'] = $costFx;
+        $p['cost_usd'] = $costFx;
+        $p['fx_rate'] = $fxRate;
+        $p['usd_rate'] = $fxRate;
+        $p['cost_exclude'] = $costExclude;
+
+        return $p;
     }
 
     /**
@@ -707,16 +805,22 @@ class Opportunity extends Model implements HasMedia
             return false;
         }
 
-        $this->item = $rows->pluck('name')->map(fn ($v) => (string) $v)->all();
-        $this->quantity = $rows->map(fn ($p) => (string) ($p['quantity'] ?? 1))->all();
-        $this->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
-        $this->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
-        $this->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
-        $this->crm_tax_category = $rows->pluck('tax_category')->all();
-        $this->crm_item_kind = $rows->pluck('item_kind')->all();
-        $this->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
-        $this->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
-        $this->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
+        // Pertahankan meta modal USD per index (QO tidak punya field ini).
+        $existing = $this->products->values();
+        $rows = $rows->map(function ($row, $i) use ($existing) {
+            $prev = $existing->get($i, []);
+            $row['cost_foreign'] = ! empty($prev['cost_foreign']) || ! empty($prev['cost_in_usd']);
+            $row['cost_in_usd'] = $row['cost_foreign'];
+            $row['cost_fx_code'] = (string) ($prev['cost_fx_code'] ?? '');
+            $row['cost_fx'] = (float) ($prev['cost_fx'] ?? $prev['cost_usd'] ?? 0);
+            $row['cost_usd'] = $row['cost_fx'];
+            $row['fx_rate'] = (float) ($prev['fx_rate'] ?? $prev['usd_rate'] ?? 0);
+            $row['usd_rate'] = $row['fx_rate'];
+
+            return $row;
+        });
+
+        $this->applyProductRows($rows);
 
         $this->amount = $rows->isNotEmpty()
             ? $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0))

@@ -9,6 +9,10 @@
             'vendor' => $p['vendor'],
             'tax_category' => $p['tax_category'],
             'item_kind' => $p['item_kind'],
+            'cost_foreign' => ! empty($p['cost_foreign']) || ! empty($p['cost_in_usd']),
+            'cost_fx_code' => $p['cost_fx_code'] ?? (($p['cost_in_usd'] ?? false) ? 'USD' : ''),
+            'cost_fx' => $p['cost_fx'] ?? $p['cost_usd'] ?? 0,
+            'fx_rate' => $p['fx_rate'] ?? $p['usd_rate'] ?? 0,
           ])->values()->all()
         : []);
     $contactOptions = $contacts->map(fn ($c) => [
@@ -352,15 +356,80 @@
                                             </td>
                                         </tr>
                                         <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">Harga Beli / Modal</td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                <div class="flex flex-col gap-1.5">
+                                                    <span>Harga Beli / Modal</span>
+                                                    <div class="inline-flex w-fit rounded-md border border-slate-200 bg-slate-50 p-0.5">
+                                                        <button type="button"
+                                                                @click="setCostMode(p, false)"
+                                                                :class="!p.cost_foreign
+                                                                    ? 'rounded bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-800 shadow-sm'
+                                                                    : 'rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 transition hover:text-slate-700'">
+                                                            Rupiah
+                                                        </button>
+                                                        <button type="button"
+                                                                @click="setCostMode(p, true)"
+                                                                :class="p.cost_foreign
+                                                                    ? 'rounded bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-800 shadow-sm'
+                                                                    : 'rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 transition hover:text-slate-700'">
+                                                            Asing
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal"
-                                                       x-effect="if (editingField !== `cost-${i}`) $el.value = formatId(p.cost_exclude)"
-                                                       @focus="editingField = `cost-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(p.cost_exclude)"
-                                                       @input="p.cost_exclude = parseId($event.target.value); onCostChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums">
+                                                <div x-show="!p.cost_foreign">
+                                                    <input type="text" inputmode="decimal"
+                                                           x-effect="if (editingField !== `cost-${i}`) $el.value = formatId(p.cost_exclude)"
+                                                           @focus="editingField = `cost-${i}`"
+                                                           @blur="editingField = null; $el.value = formatId(p.cost_exclude)"
+                                                           @input="p.cost_exclude = parseId($event.target.value); onCostChange(p)"
+                                                           class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums">
+                                                </div>
+                                                <div x-show="p.cost_foreign" class="space-y-1.5" x-cloak>
+                                                    <div class="flex items-center gap-1.5">
+                                                        <span class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500">Mata uang</span>
+                                                        <input type="text"
+                                                               x-model="p.cost_fx_code"
+                                                               @input="p.cost_fx_code = String($event.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6)"
+                                                               placeholder="USD / SGD"
+                                                               maxlength="6"
+                                                               class="crm-field w-full min-w-[6rem] bg-white uppercase tracking-wide"
+                                                               title="Kode mata uang asing, mis. USD, SGD, EUR">
+                                                    </div>
+                                                    <div class="flex items-center gap-1.5">
+                                                        <span class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500" x-text="p.cost_fx_code || 'FX'"></span>
+                                                        <input type="text" inputmode="decimal" placeholder="0"
+                                                               x-effect="if (editingField !== `cost-fx-${i}`) $el.value = formatId(p.cost_fx, 4)"
+                                                               @focus="editingField = `cost-fx-${i}`"
+                                                               @blur="editingField = null; $el.value = formatId(p.cost_fx, 4)"
+                                                               @input="p.cost_fx = parseId($event.target.value); recalcCostFromFx(p)"
+                                                               class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                               title="Harga modal dalam mata uang asing">
+                                                    </div>
+                                                    <div class="flex items-center gap-1.5">
+                                                        <span class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500">Rate</span>
+                                                        <input type="text" inputmode="decimal" placeholder="0"
+                                                               x-effect="if (editingField !== `fx-rate-${i}`) $el.value = formatId(p.fx_rate)"
+                                                               @focus="editingField = `fx-rate-${i}`"
+                                                               @blur="editingField = null; $el.value = formatId(p.fx_rate)"
+                                                               @input="p.fx_rate = parseId($event.target.value); recalcCostFromFx(p)"
+                                                               class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                               title="Kurs Rp per 1 unit mata uang asing (diisi sales)">
+                                                    </div>
+                                                    <p class="text-[11px] text-slate-500">
+                                                        = <span class="font-semibold tabular-nums text-slate-700" x-text="formatMoney(p.cost_exclude)"></span>
+                                                        <span class="text-slate-400"> exclude</span>
+                                                    </p>
+                                                </div>
                                                 <input type="hidden" :name="`products[${i}][cost_exclude]`" :value="p.cost_exclude">
+                                                <input type="hidden" :name="`products[${i}][cost_foreign]`" :value="p.cost_foreign ? 1 : 0">
+                                                <input type="hidden" :name="`products[${i}][cost_in_usd]`" :value="p.cost_foreign ? 1 : 0">
+                                                <input type="hidden" :name="`products[${i}][cost_fx_code]`" :value="p.cost_fx_code">
+                                                <input type="hidden" :name="`products[${i}][cost_fx]`" :value="p.cost_fx">
+                                                <input type="hidden" :name="`products[${i}][cost_usd]`" :value="p.cost_fx">
+                                                <input type="hidden" :name="`products[${i}][fx_rate]`" :value="p.fx_rate">
+                                                <input type="hidden" :name="`products[${i}][usd_rate]`" :value="p.fx_rate">
                                             </td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" inputmode="decimal"
@@ -369,7 +438,8 @@
                                                        @blur="editingField = null; $el.value = formatId(costInclude(p))"
                                                        @input="onCostIncludeChange(p, parseId($event.target.value))"
                                                        class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
-                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                                       :readonly="p.cost_foreign"
+                                                       :title="p.cost_foreign ? 'Dihitung dari modal asing × rate' : 'Isi Include → Exclude dihitung otomatis (÷ PPN)'">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
@@ -676,6 +746,10 @@
                 item_kind: itemKind,
                 margin_percent: marginPercent,
                 _lockMarginPercent: false,
+                cost_foreign: !!(p.cost_foreign || p.cost_in_usd),
+                cost_fx_code: p.cost_fx_code || ((p.cost_foreign || p.cost_in_usd) ? 'USD' : ''),
+                cost_fx: Number(p.cost_fx ?? p.cost_usd) || 0,
+                fx_rate: Number(p.fx_rate ?? p.usd_rate) || 0,
             };
         });
 
@@ -862,7 +936,26 @@
                 this.onDiscountItemChange(p);
             },
             onCostIncludeChange(p, includeValue) {
+                if (p.cost_foreign) return;
                 p.cost_exclude = this.excludeFromInclude(includeValue);
+                this.onCostChange(p);
+            },
+            setCostMode(p, useForeign) {
+                p.cost_foreign = !!useForeign;
+                if (p.cost_foreign) {
+                    if (!p.cost_fx_code) p.cost_fx_code = 'USD';
+                    this.recalcCostFromFx(p);
+                } else {
+                    p.cost_fx_code = '';
+                    p.cost_fx = 0;
+                    p.fx_rate = 0;
+                    this.onCostChange(p);
+                }
+            },
+            recalcCostFromFx(p) {
+                const fx = Number(p.cost_fx) || 0;
+                const rate = Number(p.fx_rate) || 0;
+                p.cost_exclude = this.round(fx * rate);
                 this.onCostChange(p);
             },
             /** Basis harga net: diskon item bila > 0, selain itu harga jual. */
@@ -1009,6 +1102,17 @@
                 this.refreshDiscountFromMargin();
             },
             onCostChange(p) {
+                if (p.cost_foreign) {
+                    const fx = Number(p.cost_fx) || 0;
+                    const rate = Number(p.fx_rate) || 0;
+                    if (fx > 0 && rate > 0) {
+                        p.cost_exclude = this.round(fx * rate);
+                    }
+                } else {
+                    p.cost_fx_code = '';
+                    p.cost_fx = 0;
+                    p.fx_rate = 0;
+                }
                 if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0) {
                     this.applyMarginPercentToPrice(p);
                 } else {
@@ -1124,6 +1228,10 @@
                     item_kind: 'barang',
                     margin_percent: 0,
                     _lockMarginPercent: false,
+                    cost_foreign: false,
+                    cost_fx_code: '',
+                    cost_fx: 0,
+                    fx_rate: 0,
                 });
             },
             removeProduct(i) {
@@ -1283,6 +1391,10 @@
                     item_kind: itemKind,
                     margin_percent: 0,
                     _lockMarginPercent: false,
+                    cost_foreign: false,
+                    cost_fx_code: '',
+                    cost_fx: 0,
+                    fx_rate: 0,
                 };
             },
             init() {

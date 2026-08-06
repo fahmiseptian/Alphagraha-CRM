@@ -128,10 +128,11 @@
                  :sub="money($summary['total_value']) . ' total value'" />
     <x-stat-card title="Open Pipeline" :value="money($summary['open_value'])" icon="bi-graph-up-arrow" color="amber"
                  :sub="$summary['open_count'] . ' active deals'" />
-    <x-stat-card title="Closed Won" :value="money($summary['won_value'])" icon="bi-trophy" color="green"
-                 :sub="$summary['won_count'] . ' deals won'" />
-    <x-stat-card title="Win Rate" :value="$summary['win_rate'] !== null ? $summary['win_rate'] . '%' : '—'" icon="bi-percent" color="purple"
-                 :sub="$summary['lost_count'] . ' lost · ' . money($summary['lost_value'])" />
+    <x-stat-card title="Closed Won" :value="money($summary['won_value'])" color="green"
+                 :sub="$summary['won_count'] . ' deals won'"
+                 :icon-text="$summary['win_rate'] !== null ? $summary['win_rate'].'%' : '—'" />
+    <x-stat-card title="Closed Lost" :value="money($summary['lost_value'])" icon="bi-x-circle" color="rose"
+                 :sub="$summary['lost_count'] . ' deals lost'" />
 </div>
 
 {{-- Stage summary bar --}}

@@ -315,7 +315,16 @@
                                     <td class="px-3 py-2">
                                         {{ $p['tax_category_label'] ?? \App\Support\OpportunityProductPricing::taxCategoryLabel($taxCat) }}
                                     </td>
-                                    <td class="px-3 py-2 text-right tabular-nums">{{ money($lineCostExcl, $currency) }}</td>
+                                    <td class="px-3 py-2 text-right tabular-nums">
+                                        {{ money($lineCostExcl, $currency) }}
+                                        @if ((! empty($p['cost_foreign']) || ! empty($p['cost_in_usd'])) && (float) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0) > 0)
+                                            <span class="mt-0.5 block text-[10px] font-normal text-slate-400">
+                                                {{ strtoupper((string) ($p['cost_fx_code'] ?: 'USD')) }}
+                                                {{ rtrim(rtrim(number_format((float) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0), 4, ',', '.'), '0'), ',') }}
+                                                × {{ number_format((float) ($p['fx_rate'] ?? $p['usd_rate'] ?? 0), 0, ',', '.') }}
+                                            </span>
+                                        @endif
+                                    </td>
                                     <td class="px-3 py-2 text-right tabular-nums">{{ money($lineCostIncl, $currency) }}</td>
                                     <td class="px-3 py-2 text-right tabular-nums">{{ money($lineSellExcl, $currency) }}</td>
                                     <td class="px-3 py-2 text-right tabular-nums">
@@ -581,7 +590,16 @@
                                         @endif
                                     </td>
                                     <td class="text-right text-slate-600">{{ money($p['effective_sell_include'] ?? $p['sell_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
-                                    <td class="text-right text-slate-400">{{ money($p['cost_exclude'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-400">
+                                        {{ money($p['cost_exclude'], $opportunity->amount_currency ?: 'IDR') }}
+                                        @if ((! empty($p['cost_foreign']) || ! empty($p['cost_in_usd'])) && (float) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0) > 0)
+                                            <span class="mt-0.5 block text-[10px] text-slate-400">
+                                                {{ strtoupper((string) ($p['cost_fx_code'] ?: 'USD')) }}
+                                                {{ rtrim(rtrim(number_format((float) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0), 4, ',', '.'), '0'), ',') }}
+                                                × {{ number_format((float) ($p['fx_rate'] ?? $p['usd_rate'] ?? 0), 0, ',', '.') }}
+                                            </span>
+                                        @endif
+                                    </td>
                                     <td class="text-right text-slate-400">{{ money($p['cost_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                     <td class="text-right text-slate-600">
                                         @if (($p['pph_applicable'] ?? false) || ($p['pnbp_applicable'] ?? false) || ($p['pph29_applicable'] ?? false))

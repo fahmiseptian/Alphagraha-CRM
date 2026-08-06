@@ -5,6 +5,7 @@
     'color' => 'brand',
     'sub' => null,
     'href' => null,
+    'iconText' => null,
 ])
 
 @php
@@ -28,16 +29,20 @@
 @else
     <div class="{{ $classes }}">
 @endif
-    <div class="flex items-start justify-between">
-        <div>
+    <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
             <p class="text-sm font-medium text-slate-500">{{ $title }}</p>
             <p class="mt-2 text-2xl font-bold text-slate-800">{{ $value }}</p>
             @if ($sub)
                 <p class="mt-1 text-xs text-slate-400">{{ $sub }}</p>
             @endif
         </div>
-        <span class="flex h-11 w-11 items-center justify-center rounded-lg {{ $palette }}">
-            <i class="bi {{ $icon }} text-xl"></i>
+        <span class="flex h-11 min-w-[2.75rem] items-center justify-center rounded-lg px-1.5 {{ $palette }}">
+            @if ($iconText !== null && $iconText !== '')
+                <span class="text-sm font-bold tabular-nums leading-none">{{ $iconText }}</span>
+            @else
+                <i class="bi {{ $icon }} text-xl"></i>
+            @endif
         </span>
     </div>
 @if ($href)

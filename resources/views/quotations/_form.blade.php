@@ -106,7 +106,7 @@
                 </x-slot:action>
 
                 <div class="space-y-3">
-                    <template x-for="(item, index) in items" :key="index">
+                    <template x-for="(item, index) in items" :key="item._uid">
                         <div class="rounded-lg border border-slate-200 p-3">
                             <input type="hidden" :name="`items[${index}][sell_exclude]`" x-model.number="item.sell_exclude">
                             <input type="hidden" :name="`items[${index}][discount_exclude]`" x-model.number="item.discount_exclude">
@@ -149,8 +149,13 @@
                                     <button type="button" @click="removeItem(index)" class="rounded-lg p-2 text-red-500 hover:bg-red-50"><i class="bi bi-trash"></i></button>
                                 </div>
                                 <div class="col-span-12">
-                                    <input type="text" :name="`items[${index}][description]`" x-model="item.description" placeholder="Specification (optional)"
-                                           class="w-full rounded-lg border border-slate-200 py-1.5 px-3 text-xs text-slate-500 focus:border-brand-500 focus:ring-1 focus:ring-brand-200">
+                                    <label class="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-400">Specification</label>
+                                    <textarea
+                                        class="item-spec-editor w-full"
+                                        :data-uid="item._uid"
+                                        x-init="$nextTick(() => initItemSpec($el, item))"
+                                    ></textarea>
+                                    <input type="hidden" :name="`items[${index}][description]`" :value="item.description">
                                     <p class="mt-1 text-[11px] text-amber-700" x-show="(Number(item.discount_exclude) || 0) > 0">
                                         Diskon item: list <span x-text="formatMoney(item.sell_exclude)"></span>
                                         → setelah diskon <span x-text="formatMoney(item.unit_price)"></span>
@@ -313,7 +318,9 @@
 
 <script>
     function quotationForm(config) {
+        const makeUid = () => 'qi-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
         const items = (config.items || []).map(item => ({
+            _uid: item._uid || makeUid(),
             name: item.name ?? '',
             description: item.description ?? '',
             quantity: Number(item.quantity) || 0,
@@ -357,14 +364,62 @@
             get total() {
                 return Math.max(this.subtotal - (Number(this.discount) || 0), 0) + this.taxAmount;
             },
+            initItemSpec(el, item) {
+                const tryInit = (attempt = 0) => {
+                    if (!window.jQuery || !jQuery.fn.summernote) {
+                        if (attempt < 40) setTimeout(() => tryInit(attempt + 1), 50);
+                        return;
+                    }
+                    const $el = jQuery(el);
+                    if ($el.next('.note-editor').length) return;
+
+                    $el.val(item.description || '');
+                    $el.summernote({
+                        height: 110,
+                        lang: 'en-US',
+                        placeholder: 'Specification (optional)',
+                        toolbar: [
+                            ['font', ['bold', 'italic', 'underline', 'clear']],
+                            ['para', ['ul', 'ol']],
+                            ['insert', ['link']],
+                            ['view', ['codeview']],
+                        ],
+                        callbacks: {
+                            onChange: function (contents) {
+                                item.description = contents;
+                            },
+                            onBlur: function () {
+                                item.description = $el.summernote('code');
+                            },
+                        },
+                    });
+
+                    if (item.description) {
+                        $el.summernote('code', item.description);
+                    }
+                };
+                tryInit();
+            },
+            destroyItemSpec(item) {
+                if (!window.jQuery || !item?._uid) return;
+                const el = document.querySelector('.item-spec-editor[data-uid="' + item._uid + '"]');
+                if (!el) return;
+                const $el = jQuery(el);
+                if ($el.next('.note-editor').length) {
+                    $el.summernote('destroy');
+                }
+            },
             addItem() {
                 this.items.push({
+                    _uid: makeUid(),
                     name: '', description: '', quantity: 1, unit: '', unit_price: 0,
                     sell_exclude: 0, discount_exclude: 0, cost_exclude: 0,
                     tax_category: '', item_kind: '', vendor: '',
                 });
             },
             removeItem(index) {
+                const item = this.items[index];
+                this.destroyItemSpec(item);
                 this.items.splice(index, 1);
                 if (this.items.length === 0) this.addItem();
             },
@@ -437,8 +492,38 @@
         line-height: 1.6;
         background: #fff;
     }
+    /* Tailwind Preflight mereset list — kembalikan agar bullet/number Summernote terlihat */
+    .note-editable ul {
+        list-style-type: disc !important;
+        list-style-position: outside !important;
+        padding-left: 1.5rem !important;
+        margin: 0.35rem 0 0.5rem !important;
+    }
+    .note-editable ol {
+        list-style-type: decimal !important;
+        list-style-position: outside !important;
+        padding-left: 1.5rem !important;
+        margin: 0.35rem 0 0.5rem !important;
+    }
+    .note-editable li {
+        display: list-item !important;
+        margin: 0.15rem 0;
+    }
+    .note-editable ul ul { list-style-type: circle !important; }
+    .note-editable ol ol { list-style-type: lower-alpha !important; }
     .note-statusbar { display: none; }
     .note-btn { border-radius: 0.375rem; }
+    .item-spec-editor + .note-editor.note-frame {
+        border-color: #e2e8f0;
+    }
+    .item-spec-editor + .note-editor .note-editable {
+        min-height: 90px;
+        font-size: 12px;
+        color: #475569;
+    }
+    .item-spec-editor + .note-editor .note-toolbar {
+        padding: 4px 6px;
+    }
 </style>
 @endpush
 
@@ -461,6 +546,18 @@
 
         $('#quotation-form').on('submit', function () {
             $('#quotation_terms').val($('#quotation_terms').summernote('code'));
+
+            $('.item-spec-editor').each(function () {
+                const $el = $(this);
+                if ($el.next('.note-editor').length) {
+                    $el.val($el.summernote('code'));
+                    const uid = $el.attr('data-uid');
+                    const hidden = $el.siblings('input[type="hidden"][name*="[description]"]').first();
+                    if (hidden.length) {
+                        hidden.val($el.summernote('code'));
+                    }
+                }
+            });
         });
     });
 </script>

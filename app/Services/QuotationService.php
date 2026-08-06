@@ -450,6 +450,39 @@ class QuotationService
         return $base.$alignStyle.($header ? 'font-weight:700;background:#ffffff;' : '');
     }
 
+    /**
+     * Spec item boleh HTML dari Summernote; plain text lama tetap aman via escape + nl2br.
+     */
+    protected function formatItemDescription(?string $description): string
+    {
+        $description = trim((string) $description);
+        if ($description === '' || $description === '<p><br></p>' || $description === '<br>') {
+            return '';
+        }
+
+        if (strip_tags($description) !== $description) {
+            $clean = strip_tags(
+                $description,
+                '<p><br><br/><b><strong><i><em><u><ul><ol><li><a><span><div>'
+            );
+
+            // DomPDF / email: pastikan bullet & number tetap terlihat.
+            $clean = str_replace(
+                ['<ul>', '<ol>', '<li>'],
+                [
+                    '<ul style="margin:4px 0 6px 18px;padding-left:14px;list-style-type:disc;">',
+                    '<ol style="margin:4px 0 6px 18px;padding-left:14px;list-style-type:decimal;">',
+                    '<li style="margin:2px 0;display:list-item;">',
+                ],
+                $clean
+            );
+
+            return $clean;
+        }
+
+        return nl2br(e($description));
+    }
+
     protected function renderItemsRows(Quotation $quotation): string
     {
         $rows = '';
@@ -457,11 +490,12 @@ class QuotationService
 
         foreach ($quotation->items as $item) {
             $unitLabel = trim((string) $item->unit) ?: 'unit';
+            $specHtml = $this->formatItemDescription($item->description);
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
                 .'<td style="'.$this->cellStyle().'">'.e($item->name)
-                .($item->description ? '<br><small ">'.nl2br(e($item->description)).'</small>' : '')
+                .($specHtml !== '' ? '<br><small>'.$specHtml.'</small>' : '')
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -499,11 +533,12 @@ class QuotationService
 
         foreach ($quotation->items as $item) {
             $unitLabel = trim((string) $item->unit) ?: 'Unit';
+            $specHtml = $this->formatItemDescription($item->description);
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
                 .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
-                .($item->description ? '<span style="display:block; height:4px;"></span><small">'.nl2br(e($item->description)).'</small>' : '')
+                .($specHtml !== '' ? '<span style="display:block; height:4px;"></span><small>'.$specHtml.'</small>' : '')
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -616,11 +651,12 @@ class QuotationService
             }
 
             $total = round($qty * $hargaSetelahDiskon, 2);
+            $specHtml = $this->formatItemDescription($item->description);
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
                 .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
-                .($item->description ? '<span style="display:block; height:4px;"></span><small>'.nl2br(e($item->description)).'</small>' : '')
+                .($specHtml !== '' ? '<span style="display:block; height:4px;"></span><small>'.$specHtml.'</small>' : '')
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format($qty, 2), '0'), '.').' '.e($unitLabel).'</td>'
