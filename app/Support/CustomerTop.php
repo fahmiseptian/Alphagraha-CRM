@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\CrmSetting;
+
 /**
  * Terms of Payment (TOP) customer.
  */
@@ -39,6 +41,21 @@ class CustomerTop
         self::DAYS_60 => 'TOP 60 hari',
     ];
 
+    /** Default minimal margin (%) per jenis TOP. */
+    public const DEFAULT_MARGINS = [
+        self::CASH => 0.0,
+        self::DAYS_7 => 5.0,
+        self::DAYS_14 => 5.0,
+        self::DAYS_30 => 5.0,
+        self::DAYS_45 => 7.0,
+        self::DAYS_60 => 10.0,
+    ];
+
+    public static function settingKey(string $top): string
+    {
+        return 'customer_top.margin_'.$top;
+    }
+
     public static function isValid(?string $value): bool
     {
         return in_array((string) $value, self::OPTIONS, true);
@@ -64,5 +81,29 @@ class CustomerTop
         $key = self::normalize($value);
 
         return $key === self::CASH ? 0 : (int) $key;
+    }
+
+    /**
+     * Minimal margin (%) berdasarkan jenis TOP customer.
+     */
+    public static function minMarginPercent(?string $top): float
+    {
+        $key = self::normalize($top);
+        $default = self::DEFAULT_MARGINS[$key] ?? 0.0;
+
+        return CrmSetting::getFloat(self::settingKey($key), $default);
+    }
+
+    /**
+     * @return array<string, float>
+     */
+    public static function allMinMargins(): array
+    {
+        $result = [];
+        foreach (self::OPTIONS as $option) {
+            $result[$option] = self::minMarginPercent($option);
+        }
+
+        return $result;
     }
 }

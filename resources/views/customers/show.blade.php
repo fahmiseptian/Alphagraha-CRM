@@ -41,7 +41,7 @@
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-person mr-1"></i>Sales</dt><dd class="text-slate-700">{{ optional($account->assignedUser)->display_name ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-cash-coin mr-1"></i>Level</dt><dd class="text-slate-700">{{ $account->paymentLevelLabel() }}@if ($account->minMarginPercent() !== null) <span class="text-xs text-slate-400">(min margin {{ number_format($account->minMarginPercent(), 0) }}%)</span>@endif</dd></div>
-                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-calendar2-check mr-1"></i>TOP</dt><dd class="text-slate-700">{{ $account->topLabel() }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-calendar2-check mr-1"></i>TOP</dt><dd class="text-slate-700">{{ $account->topLabel() }} <span class="text-xs text-slate-400">(min {{ number_format($account->topMinMarginPercent(), 0) }}%)</span></dd></div>
             </dl>
 
             <div class="mt-5 flex flex-wrap gap-2">
@@ -109,6 +109,15 @@
                                 <input type="hidden" name="editing_contact_id" value="{{ $contact->id }}">
                                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                     <div>
+                                        <label class="crm-label">Title</label>
+                                        <select name="salutation_name" class="crm-field">
+                                            <option value="">— Pilih —</option>
+                                            @foreach (\App\Models\Espo\Contact::TITLES as $title)
+                                                <option value="{{ $title }}" @selected((old('editing_contact_id') === $contact->id ? old('salutation_name', $contact->salutation_name) : $contact->salutation_name) === $title)>{{ $title }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div>
                                         <label class="crm-label">First Name <span class="text-red-500">*</span></label>
                                         <input type="text" name="first_name"
                                                value="{{ old('editing_contact_id') === $contact->id ? old('first_name', $contact->first_name) : $contact->first_name }}"
@@ -120,7 +129,7 @@
                                                value="{{ old('editing_contact_id') === $contact->id ? old('last_name', $contact->last_name) : $contact->last_name }}"
                                                class="crm-field">
                                     </div>
-                                    <div class="sm:col-span-2">
+                                    <div>
                                         <label class="crm-label">Job Role</label>
                                         <input type="text" name="job_role"
                                                value="{{ old('editing_contact_id') === $contact->id ? old('job_role', $contact->job_role) : $contact->job_role }}"
@@ -161,6 +170,15 @@
                     @csrf
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
+                            <label class="crm-label">Title</label>
+                            <select name="salutation_name" class="crm-field">
+                                <option value="">— Pilih —</option>
+                                @foreach (\App\Models\Espo\Contact::TITLES as $title)
+                                    <option value="{{ $title }}" @selected(! old('editing_contact_id') && old('salutation_name') === $title)>{{ $title }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
                             <label class="crm-label">First Name <span class="text-red-500">*</span></label>
                             <input type="text" name="first_name" value="{{ old('editing_contact_id') ? '' : old('first_name') }}" required class="crm-field">
                         </div>
@@ -168,7 +186,7 @@
                             <label class="crm-label">Last Name</label>
                             <input type="text" name="last_name" value="{{ old('editing_contact_id') ? '' : old('last_name') }}" class="crm-field">
                         </div>
-                        <div class="sm:col-span-2">
+                        <div>
                             <label class="crm-label">Job Role</label>
                             <input type="text" name="job_role" value="{{ old('editing_contact_id') ? '' : old('job_role') }}" placeholder="Contoh: Purchasing, IT Manager" class="crm-field">
                         </div>

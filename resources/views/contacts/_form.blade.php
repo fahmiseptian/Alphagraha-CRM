@@ -25,6 +25,20 @@
 
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
+                <label class="crm-label">Title</label>
+                <select name="salutation_name" class="select2 w-full" data-placeholder="— Pilih —">
+                    <option value="">— Pilih —</option>
+                    @foreach (\App\Models\Espo\Contact::TITLES as $title)
+                        <option value="{{ $title }}" @selected(old('salutation_name', $contact->salutation_name ?? '') === $title)>{{ $title }}</option>
+                    @endforeach
+                    @php $currentTitle = old('salutation_name', $contact->salutation_name ?? ''); @endphp
+                    @if ($currentTitle && ! in_array($currentTitle, \App\Models\Espo\Contact::TITLES, true))
+                        <option value="{{ $currentTitle }}" selected>{{ $currentTitle }}</option>
+                    @endif
+                </select>
+                <p class="mt-1 text-xs text-slate-400">Contoh: Mr., Ms., Bapak, Ibu.</p>
+            </div>
+            <div>
                 <label class="crm-label">First Name <span class="text-red-500">*</span></label>
                 <input type="text" name="first_name" value="{{ old('first_name', $contact->first_name ?? '') }}" required class="crm-field">
             </div>
@@ -32,7 +46,7 @@
                 <label class="crm-label">Last Name</label>
                 <input type="text" name="last_name" value="{{ old('last_name', $contact->last_name ?? '') }}" class="crm-field">
             </div>
-            <div class="sm:col-span-2">
+            <div>
                 <label class="crm-label">Job Role</label>
                 <input type="text" name="job_role" value="{{ old('job_role', $contact->job_role ?? '') }}" placeholder="Contoh: Purchasing, IT Manager" class="crm-field">
             </div>

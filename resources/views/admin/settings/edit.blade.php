@@ -8,6 +8,7 @@
     $pphWBarang = (float) old('pph_wapu_barang', $pphWapuBarang);
     $pphWJasa = (float) old('pph_wapu_jasa', $pphWapuJasa);
     $pph29 = (float) old('pph29_percent', $pph29Percent);
+    $royalty = (float) old('royalty_percent', $royaltyPercent ?? 20);
     $tiersOld = old('pnbp_tiers');
     $tiers = collect(is_array($tiersOld) ? $tiersOld : ($pnbpTiers ?? []))->map(fn ($t) => [
         'max' => $t['max'] ?? null,
@@ -17,11 +18,21 @@
     if ($tiers === []) {
         $tiers = \App\Support\OpportunityProductPricing::defaultPnbpTiers();
     }
+    $zinitOld = old('zinit_tiers');
+    $zinitTiersForm = collect(is_array($zinitOld) ? $zinitOld : ($zinitTiers ?? []))->map(fn ($t) => [
+        'max' => $t['max'] ?? null,
+        'platform_fee' => (float) ($t['platform_fee'] ?? 0),
+        'rate_percent' => (float) ($t['rate_percent'] ?? 0),
+        'cap' => $t['cap'] ?? null,
+    ])->values()->all();
+    if ($zinitTiersForm === []) {
+        $zinitTiersForm = \App\Support\OpportunityProductPricing::defaultZinitTiers();
+    }
 @endphp
 
 <div class="mb-4">
     <h2 class="text-lg font-semibold text-slate-800">Pengaturan Pajak</h2>
-    <p class="text-sm text-slate-500">PPN, PPH per kategori (Non Wapu / Wapu / Inaproc), PNBP berjenjang, dan PPH Pasal 29.</p>
+    <p class="text-sm text-slate-500">PPN, PPH per kategori, PNBP, PPH 29, Rate Scale Zinit, dan Royalti (opsional per item).</p>
 </div>
 
 <div class="grid max-w-6xl gap-5 lg:grid-cols-5"
@@ -31,7 +42,9 @@
          pphWapuBarang: {{ $pphWBarang }},
          pphWapuJasa: {{ $pphWJasa }},
          pph29Percent: {{ $pph29 }},
+         royaltyPercent: {{ $royalty }},
          pnbpTiers: {{ \Illuminate\Support\Js::from($tiers) }},
+         zinitTiers: {{ \Illuminate\Support\Js::from($zinitTiersForm) }},
      })">
     <form method="POST" action="{{ route('settings.update') }}" class="space-y-5 lg:col-span-3">
         @csrf
@@ -180,6 +193,99 @@
             </div>
         </x-card>
 
+        <x-card title="Royalti">
+            <p class="mb-3 text-xs text-slate-500">
+                Pajak tambahan opsional via checkbox per item — berlaku di <strong>semua kategori</strong> (Non Wapu / Wapu / Inaproc / Zinit).
+                Rumus: <code class="rounded bg-slate-100 px-1">modal excl × rate%</code>.
+            </p>
+            <div class="max-w-xs">
+                <label class="mb-1.5 block text-sm font-medium text-slate-700">Royalti (%) <span class="text-red-500">*</span></label>
+                <input type="text" inputmode="decimal" required
+                       x-effect="if (editingField !== 'royalty') $el.value = formatId(royaltyPercent, 2)"
+                       @focus="editingField = 'royalty'"
+                       @blur="editingField = null; $el.value = formatId(royaltyPercent, 2)"
+                       @input="royaltyPercent = parseId($event.target.value)"
+                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                <input type="hidden" name="royalty_percent" :value="royaltyPercent">
+                <p class="mt-1 text-xs text-slate-400">Default 20%.</p>
+            </div>
+        </x-card>
+
+        <x-card title="Zinit — Rate Scale">
+            <p class="mb-3 text-xs text-slate-500">
+                Basis tier &amp; service fee: <strong>harga jual include</strong>.
+                Fee Zinit = Platform Fee + <code class="rounded bg-slate-100 px-1">MIN(jual_include × rate%, cap)</code>.
+                Margin = jual excl − Fee Zinit − modal excl.
+                Batas kosong = di atas semua batas sebelumnya.
+            </p>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+                            <th class="py-2 pr-2 font-medium">Batas jual include (≤)</th>
+                            <th class="py-2 pr-2 font-medium">Platform Fee</th>
+                            <th class="py-2 pr-2 font-medium">Rate %</th>
+                            <th class="py-2 pr-2 font-medium">Cap Service Fee</th>
+                            <th class="py-2 w-10"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(tier, i) in zinitTiers" :key="i">
+                            <tr class="border-b border-slate-100">
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" placeholder="(di atas)"
+                                           x-effect="if (editingField !== `zmax-${i}`) $el.value = (tier.max === '' || tier.max === null) ? '' : formatId(tier.max)"
+                                           @focus="editingField = `zmax-${i}`"
+                                           @blur="editingField = null; $el.value = (tier.max === '' || tier.max === null) ? '' : formatId(tier.max)"
+                                           @input="tier.max = $event.target.value.trim() === '' ? '' : parseId($event.target.value)"
+                                           class="w-full min-w-[9rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`zinit_tiers[${i}][max]`" :value="tier.max === '' || tier.max === null ? '' : tier.max">
+                                </td>
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" required
+                                           x-effect="if (editingField !== `zplat-${i}`) $el.value = formatId(tier.platform_fee)"
+                                           @focus="editingField = `zplat-${i}`"
+                                           @blur="editingField = null; $el.value = formatId(tier.platform_fee)"
+                                           @input="tier.platform_fee = parseId($event.target.value)"
+                                           class="w-full min-w-[8rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`zinit_tiers[${i}][platform_fee]`" :value="tier.platform_fee">
+                                </td>
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" required
+                                           x-effect="if (editingField !== `zrate-${i}`) $el.value = formatId(tier.rate_percent, 4)"
+                                           @focus="editingField = `zrate-${i}`"
+                                           @blur="editingField = null; $el.value = formatId(tier.rate_percent, 4)"
+                                           @input="tier.rate_percent = parseId($event.target.value)"
+                                           class="w-full min-w-[5rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`zinit_tiers[${i}][rate_percent]`" :value="tier.rate_percent">
+                                </td>
+                                <td class="py-2 pr-2">
+                                    <input type="text" inputmode="decimal" placeholder="(tanpa cap)"
+                                           x-effect="if (editingField !== `zcap-${i}`) $el.value = (tier.cap === '' || tier.cap === null) ? '' : formatId(tier.cap)"
+                                           @focus="editingField = `zcap-${i}`"
+                                           @blur="editingField = null; $el.value = (tier.cap === '' || tier.cap === null) ? '' : formatId(tier.cap)"
+                                           @input="tier.cap = $event.target.value.trim() === '' ? '' : parseId($event.target.value)"
+                                           class="w-full min-w-[8rem] rounded-lg border border-slate-300 py-1.5 px-2 text-right text-sm tabular-nums">
+                                    <input type="hidden" :name="`zinit_tiers[${i}][cap]`" :value="tier.cap === '' || tier.cap === null ? '' : tier.cap">
+                                </td>
+                                <td class="py-2 text-right">
+                                    <button type="button" @click="removeZinitTier(i)"
+                                            class="rounded p-1 text-red-500 hover:bg-red-50" title="Hapus"
+                                            :disabled="zinitTiers.length <= 1">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <button type="button" @click="addZinitTier()"
+                    class="mt-3 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <i class="bi bi-plus-lg"></i> Tambah jenjang
+            </button>
+        </x-card>
+
         <div class="flex items-center gap-2">
             <button class="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700">Save</button>
         </div>
@@ -196,6 +302,7 @@
                         <option value="non_wapu">Non Wapu</option>
                         <option value="wapu">Wapu</option>
                         <option value="inaproc">Inaproc</option>
+                        <option value="zinit">Zinit</option>
                     </select>
                 </div>
                 <div>
@@ -223,11 +330,15 @@
                            @input="costExclude = parseId($event.target.value)"
                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm text-right tabular-nums">
                 </div>
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" x-model="hasRoyalty" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                    <span>Royalti <span class="text-slate-400" x-text="'(' + royaltyPercent + '%)'"></span></span>
+                </label>
             </div>
 
             <p class="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" x-text="ruleSummary"></p>
 
-            <dl class="mt-4 space-y-2 text-sm">
+            <dl class="mt-4 space-y-2 text-sm" x-show="taxCategory !== 'zinit'">
                 <div class="flex justify-between gap-3 border-b border-slate-100 pb-2">
                     <dt class="text-slate-500">Include (PPN <span x-text="ppn"></span>%)</dt>
                     <dd class="font-medium text-slate-800" x-text="format(sellInclude)"></dd>
@@ -251,6 +362,10 @@
                     <dt class="text-slate-500">PPH 29 <span x-text="pph29Percent"></span>% <span class="text-xs text-slate-400">(jual − modal) exclude</span></dt>
                     <dd class="font-medium text-slate-800" x-text="format(pph29)"></dd>
                 </div>
+                <div class="flex justify-between gap-3" x-show="hasRoyalty">
+                    <dt class="text-slate-500">Royalti <span x-text="royaltyPercent"></span>%</dt>
+                    <dd class="font-medium text-slate-800" x-text="format(royalty)"></dd>
+                </div>
                 <div class="flex justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2">
                     <dt class="font-semibold text-emerald-800">Margin bersih</dt>
                     <dd class="font-bold text-emerald-800" x-text="format(netMargin)"></dd>
@@ -258,6 +373,51 @@
                 <div class="flex justify-between gap-3">
                     <dt class="text-slate-500">Margin %</dt>
                     <dd class="font-medium text-slate-800" x-text="marginPercentLabel"></dd>
+                </div>
+            </dl>
+
+            <dl class="mt-4 space-y-2 text-sm" x-show="taxCategory === 'zinit'" x-cloak>
+                <div class="flex justify-between gap-3 border-b border-slate-100 pb-2">
+                    <dt class="text-slate-500">Include (PPN <span x-text="ppn"></span>%)</dt>
+                    <dd class="font-medium text-slate-800" x-text="format(sellInclude)"></dd>
+                </div>
+                <div class="flex justify-between gap-3" x-show="pph > 0">
+                    <dt class="text-slate-500">PPH <span x-text="pphPct"></span>%</dt>
+                    <dd class="font-medium text-slate-800" x-text="format(pph)"></dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">
+                        Platform Fee
+                        <span class="text-xs text-slate-400" x-text="matchedZinitTier.max === null ? '· di atas' : ('· ≤ ' + format(matchedZinitTier.max))"></span>
+                    </dt>
+                    <dd class="font-medium text-slate-800" x-text="format(zinitPlatformFee)"></dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">
+                        Service Fee
+                        <span class="text-xs text-slate-400" x-text="'· include × ' + matchedZinitTier.rate_percent + '%' + (matchedZinitTier.cap ? (' cap ' + format(matchedZinitTier.cap)) : '')"></span>
+                    </dt>
+                    <dd class="font-medium text-slate-800" x-text="format(zinitServiceFee)"></dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Fee Zinit</dt>
+                    <dd class="font-medium text-slate-800" x-text="format(zinitSuccessFee)"></dd>
+                </div>
+                <div class="flex justify-between gap-3 border-b border-slate-100 pb-2">
+                    <dt class="text-slate-500">Modal Pot Fee Zinit</dt>
+                    <dd class="font-medium text-slate-800" x-text="format(zinitPotFee)"></dd>
+                </div>
+                <div class="flex justify-between gap-3" x-show="hasRoyalty">
+                    <dt class="text-slate-500">Royalti <span x-text="royaltyPercent"></span>%</dt>
+                    <dd class="font-medium text-slate-800" x-text="format(royalty)"></dd>
+                </div>
+                <div class="flex justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2">
+                    <dt class="font-semibold text-emerald-800" x-text="zinitMarginLabel"></dt>
+                    <dd class="font-bold text-emerald-800" x-text="format(zinitMargin)"></dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Margin %</dt>
+                    <dd class="font-medium text-slate-800" x-text="zinitMarginPercentLabel"></dd>
                 </div>
             </dl>
         </x-card>
@@ -272,14 +432,22 @@
             pphWapuBarang: Number(initial.pphWapuBarang) || 1.5,
             pphWapuJasa: Number(initial.pphWapuJasa) || 2,
             pph29Percent: Number(initial.pph29Percent) || 22,
+            royaltyPercent: Number(initial.royaltyPercent) || 20,
             pnbpTiers: (initial.pnbpTiers || []).map(t => ({
                 max: t.max === null || t.max === undefined || t.max === '' ? '' : Number(t.max),
                 rate_percent: Number(t.rate_percent) || 0,
                 cap: Number(t.cap) || 0,
             })),
+            zinitTiers: (initial.zinitTiers || []).map(t => ({
+                max: t.max === null || t.max === undefined || t.max === '' ? '' : Number(t.max),
+                platform_fee: Number(t.platform_fee) || 0,
+                rate_percent: Number(t.rate_percent) || 0,
+                cap: t.cap === null || t.cap === undefined || t.cap === '' ? '' : Number(t.cap),
+            })),
             editingField: null,
             taxCategory: 'non_wapu',
             itemKind: 'barang',
+            hasRoyalty: false,
             sellExclude: 1000000,
             costExclude: 800000,
             round(v) { return Math.round((Number(v) || 0) * 100) / 100; },
@@ -301,11 +469,31 @@
                 if (this.pnbpTiers.length <= 1) return;
                 this.pnbpTiers.splice(i, 1);
             },
+            addZinitTier() {
+                this.zinitTiers.push({ max: '', platform_fee: 0, rate_percent: 0.1, cap: '' });
+            },
+            removeZinitTier(i) {
+                if (this.zinitTiers.length <= 1) return;
+                this.zinitTiers.splice(i, 1);
+            },
             sortedPnbpTiers() {
                 return [...this.pnbpTiers].map(t => ({
                     max: t.max === '' || t.max === null || t.max === undefined ? null : Number(t.max),
                     rate_percent: Number(t.rate_percent) || 0,
                     cap: Number(t.cap) || 0,
+                })).sort((a, b) => {
+                    if (a.max === null && b.max === null) return 0;
+                    if (a.max === null) return 1;
+                    if (b.max === null) return -1;
+                    return a.max - b.max;
+                });
+            },
+            sortedZinitTiers() {
+                return [...this.zinitTiers].map(t => ({
+                    max: t.max === '' || t.max === null || t.max === undefined ? null : Number(t.max),
+                    platform_fee: Number(t.platform_fee) || 0,
+                    rate_percent: Number(t.rate_percent) || 0,
+                    cap: t.cap === '' || t.cap === null || t.cap === undefined ? null : Number(t.cap),
                 })).sort((a, b) => {
                     if (a.max === null && b.max === null) return 0;
                     if (a.max === null) return 1;
@@ -323,13 +511,40 @@
                 }
                 return fallback;
             },
+            get matchedZinitTier() {
+                const volume = this.sellInclude;
+                const tiers = this.sortedZinitTiers();
+                let fallback = tiers[tiers.length - 1] || { max: null, platform_fee: 0, rate_percent: 0, cap: null };
+                for (const tier of tiers) {
+                    if (tier.max === null) return tier;
+                    if (volume <= tier.max) return tier;
+                }
+                return fallback;
+            },
             get pphPct() {
+                if (this.taxCategory === 'zinit' && this.itemKind === 'jasa') return Number(this.pphNonWapuJasa) || 0;
+                if (this.taxCategory === 'zinit') return 0;
                 if (this.taxCategory === 'non_wapu' && this.itemKind === 'barang') return 0;
                 if (this.taxCategory === 'non_wapu' && this.itemKind === 'jasa') return Number(this.pphNonWapuJasa) || 0;
                 if (this.itemKind === 'barang') return Number(this.pphWapuBarang) || 0;
                 return Number(this.pphWapuJasa) || 0;
             },
             get ruleSummary() {
+                if (this.taxCategory === 'zinit') {
+                    const t = this.matchedZinitTier;
+                    let s = 'Zinit · ' + (this.itemKind === 'barang' ? 'Barang' : 'Jasa')
+                        + ': Platform Fee ' + this.format(t.platform_fee)
+                        + ' + Service Fee (include × ' + t.rate_percent + '%';
+                    if (t.cap) s += ', cap ' + this.format(t.cap);
+                    s += ') = Fee Zinit';
+                    if (this.itemKind === 'jasa') {
+                        s += ' + PPH ' + this.pphPct + '%';
+                    }
+                    s += '; Margin = jual excl'
+                        + (this.itemKind === 'jasa' ? ' − PPH' : '')
+                        + ' − fee − modal';
+                    return s;
+                }
                 const ppn = this.ppn;
                 if (this.taxCategory === 'non_wapu' && this.itemKind === 'barang') {
                     return 'Non Wapu · Barang: PPN ' + ppn + '%';
@@ -364,6 +579,48 @@
                 if (cap > 0) amount = Math.min(amount, cap);
                 return this.round(amount);
             },
+            get zinitPlatformFee() {
+                if (this.taxCategory !== 'zinit') return 0;
+                if ((Number(this.sellExclude) || 0) <= 0) return 0;
+                return this.round(this.matchedZinitTier.platform_fee);
+            },
+            get zinitServiceFee() {
+                if (this.taxCategory !== 'zinit') return 0;
+                const include = this.sellInclude;
+                if (include <= 0) return 0;
+                const t = this.matchedZinitTier;
+                let service = include * ((Number(t.rate_percent) || 0) / 100);
+                if (t.cap !== null && t.cap > 0) service = Math.min(service, t.cap);
+                return this.round(service);
+            },
+            get zinitSuccessFee() {
+                return this.round(this.zinitPlatformFee + this.zinitServiceFee);
+            },
+            get zinitPotFee() {
+                return this.round((Number(this.sellExclude) || 0) - this.zinitSuccessFee);
+            },
+            get royalty() {
+                if (!this.hasRoyalty) return 0;
+                return this.round((Number(this.costExclude) || 0) * ((Number(this.royaltyPercent) || 0) / 100));
+            },
+            get zinitMarginLabel() {
+                let s = 'Margin (Pot Fee';
+                if (this.itemKind === 'jasa') s += ' − PPH';
+                if (this.hasRoyalty) s += ' − Royalti';
+                s += ' − Modal)';
+                return s;
+            },
+            get zinitMargin() {
+                return this.round(this.zinitPotFee - this.pph - this.royalty - (Number(this.costExclude) || 0));
+            },
+            get zinitMarginPercentLabel() {
+                const base = this.zinitPotFee;
+                if (base <= 0) return '—';
+                return this.round((this.zinitMargin / base) * 100).toLocaleString('id-ID', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                }) + '%';
+            },
             get grossMargin() {
                 const sell = Number(this.sellExclude) || 0;
                 const cost = Number(this.costExclude) || 0;
@@ -380,7 +637,7 @@
                 return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
             get netMargin() {
-                return this.round(this.grossMargin - this.pnbp - this.pph29);
+                return this.round(this.grossMargin - this.pnbp - this.pph29 - this.royalty);
             },
             get marginPercentLabel() {
                 const base = Number(this.sellExclude) || 0;

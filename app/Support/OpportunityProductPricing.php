@@ -12,6 +12,8 @@ class OpportunityProductPricing
 
     public const TAX_INAPROC = 'inaproc';
 
+    public const TAX_ZINIT = 'zinit';
+
     public const KIND_BARANG = 'barang';
 
     public const KIND_JASA = 'jasa';
@@ -21,7 +23,7 @@ class OpportunityProductPricing
      */
     public static function taxCategories(): array
     {
-        return [self::TAX_NON_WAPU, self::TAX_WAPU, self::TAX_INAPROC];
+        return [self::TAX_NON_WAPU, self::TAX_WAPU, self::TAX_INAPROC, self::TAX_ZINIT];
     }
 
     public static function taxCategoryLabel(string $taxCategory): string
@@ -29,6 +31,7 @@ class OpportunityProductPricing
         return match ($taxCategory) {
             self::TAX_WAPU => 'Wapu',
             self::TAX_INAPROC => 'Inaproc',
+            self::TAX_ZINIT => 'Zinit',
             default => 'Non Wapu',
         };
     }
@@ -57,6 +60,11 @@ class OpportunityProductPricing
                 'label' => 'Inaproc',
                 'barang' => "PPN {$ppn}% + PPH {$pphBarang}% + PNBP {$pnbp} + PPH 29 {$pph29}%",
                 'jasa' => "PPN {$ppn}% + PPH {$pphJasa}% + PNBP {$pnbp} + PPH 29 {$pph29}%",
+            ],
+            self::TAX_ZINIT => [
+                'label' => 'Zinit',
+                'barang' => 'Fee Zinit (Platform + Service% × jual include); margin = jual − fee − modal',
+                'jasa' => 'Fee Zinit + PPH ' . self::formatPercentLabel(self::pphNonWapuJasaPercent()) . '%; margin = jual − PPH − fee − modal',
             ],
             default => [
                 'label' => 'Non Wapu',
@@ -261,6 +269,233 @@ class OpportunityProductPricing
         return CrmSetting::getFloat('tax.pph29_percent', 22.0);
     }
 
+    /**
+     * Persentase Royalti (default 20). Dipakai bila checkbox Royalti dicentang.
+     */
+    public static function royaltyPercent(): float
+    {
+        return CrmSetting::getFloat('tax.royalty_percent', 20.0);
+    }
+
+    public static function hasRoyaltyFlag(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on'], true);
+    }
+
+    /**
+     * Royalti per unit dari harga modal exclude.
+     */
+    public static function royalty(float $costExclude, bool $hasRoyalty): float
+    {
+        if (! $hasRoyalty) {
+            return 0.0;
+        }
+
+        $rate = self::royaltyPercent() / 100;
+        if ($rate <= 0) {
+            return 0.0;
+        }
+
+        return round(max(0.0, $costExclude) * $rate, 2);
+    }
+
+    /**
+     * Default rate scale Zinit (basis: PO Dealing / RFP volume).
+     *
+     * @return list<array{max: ?float, platform_fee: float, rate_percent: float, cap: ?float}>
+     */
+    public static function defaultZinitTiers(): array
+    {
+        return [
+            ['max' => 20_000_000.0, 'platform_fee' => 100_000.0, 'rate_percent' => 1.0, 'cap' => null],
+            ['max' => 200_000_000.0, 'platform_fee' => 300_000.0, 'rate_percent' => 0.8, 'cap' => null],
+            ['max' => 500_000_000.0, 'platform_fee' => 1_000_000.0, 'rate_percent' => 0.6, 'cap' => null],
+            ['max' => 1_600_000_000.0, 'platform_fee' => 2_000_000.0, 'rate_percent' => 0.4, 'cap' => null],
+            ['max' => 5_000_000_000.0, 'platform_fee' => 3_000_000.0, 'rate_percent' => 0.3, 'cap' => null],
+            ['max' => 16_000_000_000.0, 'platform_fee' => 5_000_000.0, 'rate_percent' => 0.2, 'cap' => null],
+            ['max' => null, 'platform_fee' => 10_000_000.0, 'rate_percent' => 0.1, 'cap' => 80_000_000.0],
+        ];
+    }
+
+    /**
+     * @return list<array{max: ?float, platform_fee: float, rate_percent: float, cap: ?float}>
+     */
+    public static function zinitTiers(): array
+    {
+        $stored = CrmSetting::get('tax.zinit_tiers', null);
+        if (is_array($stored) && $stored !== []) {
+            return self::normalizeZinitTiers($stored);
+        }
+
+        return self::defaultZinitTiers();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>|array<int, mixed>  $tiers
+     * @return list<array{max: ?float, platform_fee: float, rate_percent: float, cap: ?float}>
+     */
+    public static function normalizeZinitTiers(array $tiers): array
+    {
+        $normalized = [];
+
+        foreach ($tiers as $tier) {
+            if (! is_array($tier)) {
+                continue;
+            }
+
+            $maxRaw = $tier['max'] ?? null;
+            $max = ($maxRaw === null || $maxRaw === '' || (float) $maxRaw <= 0)
+                ? null
+                : round((float) $maxRaw, 2);
+            $platform = round((float) ($tier['platform_fee'] ?? 0), 2);
+            $rate = round((float) ($tier['rate_percent'] ?? 0), 4);
+            $capRaw = $tier['cap'] ?? null;
+            $cap = ($capRaw === null || $capRaw === '' || (float) $capRaw <= 0)
+                ? null
+                : round((float) $capRaw, 2);
+
+            if ($platform < 0) {
+                $platform = 0.0;
+            }
+            if ($rate < 0) {
+                $rate = 0.0;
+            }
+
+            $normalized[] = [
+                'max' => $max,
+                'platform_fee' => $platform,
+                'rate_percent' => $rate,
+                'cap' => $cap,
+            ];
+        }
+
+        if ($normalized === []) {
+            return self::defaultZinitTiers();
+        }
+
+        usort($normalized, function (array $a, array $b) {
+            if ($a['max'] === null && $b['max'] === null) {
+                return 0;
+            }
+            if ($a['max'] === null) {
+                return 1;
+            }
+            if ($b['max'] === null) {
+                return -1;
+            }
+
+            return $a['max'] <=> $b['max'];
+        });
+
+        return array_values($normalized);
+    }
+
+    /**
+     * @return array{max: ?float, platform_fee: float, rate_percent: float, cap: ?float}
+     */
+    public static function matchZinitTier(float $volume): array
+    {
+        $tiers = self::zinitTiers();
+        $fallback = end($tiers) ?: [
+            'max' => null,
+            'platform_fee' => 0.0,
+            'rate_percent' => 0.0,
+            'cap' => null,
+        ];
+
+        foreach ($tiers as $tier) {
+            if ($tier['max'] === null) {
+                return $tier;
+            }
+            if ($volume <= (float) $tier['max']) {
+                return $tier;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Hitung Fee Zinit dari volume jual include (total baris).
+     * Service fee = volume_include × rate% (cap bila ada); Fee = Platform + Service.
+     *
+     * @return array{
+     *     volume: float,
+     *     platform_fee: float,
+     *     service_fee: float,
+     *     success_fee: float,
+     *     rate_percent: float,
+     *     cap: ?float,
+     *     tier_max: ?float
+     * }
+     */
+    public static function zinitFeesFromVolume(float $volume): array
+    {
+        $volume = max(0.0, round($volume, 2));
+        if ($volume <= 0) {
+            return [
+                'volume' => 0.0,
+                'platform_fee' => 0.0,
+                'service_fee' => 0.0,
+                'success_fee' => 0.0,
+                'rate_percent' => 0.0,
+                'cap' => null,
+                'tier_max' => null,
+            ];
+        }
+
+        $tier = self::matchZinitTier($volume);
+        $platform = round((float) $tier['platform_fee'], 2);
+        $rate = (float) $tier['rate_percent'];
+        $service = round($volume * ($rate / 100), 2);
+        $cap = $tier['cap'];
+        if ($cap !== null && $cap > 0) {
+            $service = min($service, (float) $cap);
+        }
+        $success = round($platform + $service, 2);
+
+        return [
+            'volume' => $volume,
+            'platform_fee' => $platform,
+            'service_fee' => $service,
+            'success_fee' => $success,
+            'rate_percent' => $rate,
+            'cap' => $cap,
+            'tier_max' => $tier['max'],
+        ];
+    }
+
+    /**
+     * Fee Zinit dari harga jual exclude (standar) × qty.
+     * Rate scale & service % memakai basis jual include.
+     *
+     * @return array{
+     *     volume: float,
+     *     platform_fee: float,
+     *     service_fee: float,
+     *     success_fee: float,
+     *     rate_percent: float,
+     *     cap: ?float,
+     *     tier_max: ?float
+     * }
+     */
+    public static function zinitFeesFromSellExclude(float $sellExclude, float $quantity = 1): array
+    {
+        $qty = $quantity > 0 ? $quantity : 1;
+        $includeVolume = round(self::includeFromExclude($sellExclude) * $qty, 2);
+
+        return self::zinitFeesFromVolume($includeVolume);
+    }
+
+    public static function appliesZinit(string $taxCategory): bool
+    {
+        return $taxCategory === self::TAX_ZINIT;
+    }
+
     public static function appliesPnbp(string $taxCategory): bool
     {
         return $taxCategory === self::TAX_INAPROC;
@@ -292,6 +527,14 @@ class OpportunityProductPricing
 
         if (in_array($taxCategory, [self::TAX_WAPU, self::TAX_INAPROC], true) && $itemKind === self::KIND_JASA) {
             return self::pphWapuJasaPercent();
+        }
+
+        if ($taxCategory === self::TAX_ZINIT && $itemKind === self::KIND_JASA) {
+            return self::pphNonWapuJasaPercent();
+        }
+
+        if ($taxCategory === self::TAX_ZINIT) {
+            return 0.0;
         }
 
         return self::pphPercent();
@@ -370,9 +613,10 @@ class OpportunityProductPricing
     }
 
     /**
-     * Margin kotor setelah PPH, sebelum PNBP / PPH 29.
+     * Margin kotor setelah PPH, sebelum PNBP / PPH 29 / Fee Zinit.
      *
      * Wapu & Inaproc: (harga jual − PPH) − modal include
+     * Zinit: jual excl − PPH (jika jasa) − Fee Zinit/qty − modal exclude
      * Non Wapu: basis − PPH − modal exclude
      */
     public static function grossMargin(
@@ -380,8 +624,19 @@ class OpportunityProductPricing
         float $costExclude,
         string $taxCategory,
         string $itemKind,
-        float $itemDiscount = 0
+        float $itemDiscount = 0,
+        float $quantity = 1
     ): float {
+        if ($taxCategory === self::TAX_ZINIT) {
+            $qty = $quantity > 0 ? $quantity : 1;
+            $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+            $pph = self::pph($base, $taxCategory, $itemKind);
+            $fees = self::zinitFeesFromSellExclude($base, $qty);
+            $feePerUnit = round($fees['success_fee'] / $qty, 2);
+
+            return round($base - $pph - $feePerUnit - $costExclude, 2);
+        }
+
         $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
         $pph = self::pph($base, $taxCategory, $itemKind);
 
@@ -436,22 +691,32 @@ class OpportunityProductPricing
      * Margin bersih.
      * Wapu: (jual − PPH) − modal include
      * Inaproc: (jual − PPH − modal include) − PNBP − PPH 29
-     *   PPH 29 = (jual exclude − modal exclude) × rate
+     * Zinit: jual excl − PPH (jasa) − Fee Zinit − modal excl
      * Non Wapu: basis − PPH − modal exclude
+     * + Royalti (opsional, semua kategori): − modal excl × royalty%
      */
     public static function margin(
         float $sellExclude,
         float $costExclude,
         string $taxCategory,
         string $itemKind,
-        float $itemDiscount = 0
+        float $itemDiscount = 0,
+        float $quantity = 1,
+        bool $hasRoyalty = false
     ): float {
-        $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
-        $gross = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $pnbp = self::pnbp($base, $taxCategory);
-        $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
+        if ($taxCategory === self::TAX_ZINIT) {
+            $baseMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $quantity);
+        } else {
+            $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+            $gross = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
+            $pnbp = self::pnbp($base, $taxCategory);
+            $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
+            $baseMargin = round($gross - $pnbp - $pph29, 2);
+        }
 
-        return round($gross - $pnbp - $pph29, 2);
+        $royalty = self::royalty($costExclude, $hasRoyalty);
+
+        return round($baseMargin - $royalty, 2);
     }
 
     public static function marginPercent(
@@ -460,7 +725,19 @@ class OpportunityProductPricing
         string $taxCategory,
         string $itemKind,
         float $itemDiscount = 0,
+        float $quantity = 1,
     ): ?float {
+        if ($taxCategory === self::TAX_ZINIT) {
+            $qty = $quantity > 0 ? $quantity : 1;
+            $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
+            $fees = self::zinitFeesFromSellExclude($base, $qty);
+            $feePerUnit = $fees['success_fee'] / $qty;
+            // GP% terhadap Pot Fee (jual excl − Fee Zinit), sama seperti Excel.
+            $denom = $base - $feePerUnit;
+
+            return $denom > 0 ? round(($margin / $denom) * 100, 2) : null;
+        }
+
         $effectiveSell = self::effectiveSellExclude($sellExclude, $itemDiscount);
 
         // Wapu & Inaproc: % terhadap harga setelah PPH (jual exclude − PPH).
@@ -485,6 +762,10 @@ class OpportunityProductPricing
         $sellExclude = (float) ($row['sell_exclude'] ?? 0);
         $costExclude = (float) ($row['cost_exclude'] ?? 0);
         $itemDiscount = (float) ($row['discount_exclude'] ?? $row['item_discount'] ?? 0);
+        $qty = (float) ($row['quantity'] ?? 1);
+        if ($qty <= 0) {
+            $qty = 1;
+        }
         $effectiveSell = self::effectiveSellExclude($sellExclude, $itemDiscount);
         $sellInclude = self::includeFromExclude($sellExclude);
         $costInclude = self::includeFromExclude($costExclude);
@@ -496,11 +777,23 @@ class OpportunityProductPricing
         $pnbpTier = self::appliesPnbp($taxCategory)
             ? self::matchPnbpTier($effectiveInclude)
             : null;
-        $grossMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
+        $zinitFees = self::appliesZinit($taxCategory)
+            ? self::zinitFeesFromSellExclude($effectiveSell, $qty)
+            : null;
+        $hasRoyalty = self::hasRoyaltyFlag($row['has_royalty'] ?? false);
+        $royaltyPercent = $hasRoyalty ? self::royaltyPercent() : 0.0;
+        $royalty = self::royalty($costExclude, $hasRoyalty);
+        $grossMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
         $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $marginPercent = self::marginPercent($margin, $sellExclude, $taxCategory, $itemKind, $itemDiscount);
-        $qty = (float) ($row['quantity'] ?? 1);
+        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty, $hasRoyalty);
+        $marginPercent = self::marginPercent($margin, $sellExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
+
+        $subtotal = round($qty * $effectiveInclude, 2);
+        $price = $effectiveInclude;
+        $zinitFeeTotal = (float) ($zinitFees['success_fee'] ?? 0);
+        $zinitPotFee = self::appliesZinit($taxCategory)
+            ? round(($effectiveSell * $qty) - $zinitFeeTotal, 2)
+            : null;
 
         return array_merge($row, [
             'tax_category' => $taxCategory,
@@ -511,7 +804,7 @@ class OpportunityProductPricing
             'discount_exclude' => $itemDiscount,
             'item_discount' => $itemDiscount,
             'effective_sell_exclude' => $effectiveSell,
-            'price' => $effectiveInclude,
+            'price' => $price,
             'cost' => $costInclude,
             'sell_include' => $sellInclude,
             'effective_sell_include' => $effectiveInclude,
@@ -524,13 +817,24 @@ class OpportunityProductPricing
             'pnbp_percent' => $pnbpTier ? (float) $pnbpTier['rate_percent'] : 0.0,
             'pnbp_cap' => $pnbpTier ? (float) $pnbpTier['cap'] : null,
             'pnbp_applicable' => self::appliesPnbp($taxCategory),
+            'zinit_applicable' => self::appliesZinit($taxCategory),
+            'zinit_volume' => $zinitFees['volume'] ?? 0.0,
+            'zinit_platform_fee' => $zinitFees['platform_fee'] ?? 0.0,
+            'zinit_service_fee' => $zinitFees['service_fee'] ?? 0.0,
+            'zinit_success_fee' => $zinitFeeTotal,
+            'zinit_rate_percent' => $zinitFees['rate_percent'] ?? 0.0,
+            'zinit_pot_fee' => $zinitPotFee,
+            'has_royalty' => $hasRoyalty,
+            'royalty' => $royalty,
+            'royalty_percent' => $royaltyPercent,
+            'royalty_applicable' => $hasRoyalty && $royalty > 0,
             'gross_margin' => $grossMargin,
             'pph29' => $pph29,
             'pph29_percent' => self::appliesPph29($taxCategory) ? self::pph29Percent() : 0.0,
             'pph29_applicable' => self::appliesPph29($taxCategory),
             'margin' => $margin,
             'margin_percent' => $marginPercent,
-            'subtotal' => round($qty * $effectiveInclude, 2),
+            'subtotal' => $subtotal,
         ]);
     }
 

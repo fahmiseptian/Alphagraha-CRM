@@ -58,6 +58,7 @@ class CustomerContactController extends Controller
         return $request->validate([
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['nullable', 'string', 'max:100'],
+            'salutation_name' => ['nullable', 'string', 'max:50'],
             'job_role' => ['nullable', 'string', 'max:100'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],

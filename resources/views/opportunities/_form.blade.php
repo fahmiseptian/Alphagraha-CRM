@@ -9,6 +9,7 @@
             'vendor' => $p['vendor'],
             'tax_category' => $p['tax_category'],
             'item_kind' => $p['item_kind'],
+            'has_royalty' => ! empty($p['has_royalty']),
             'cost_foreign' => ! empty($p['cost_foreign']) || ! empty($p['cost_in_usd']),
             'cost_fx_code' => $p['cost_fx_code'] ?? (($p['cost_in_usd'] ?? false) ? 'USD' : ''),
             'cost_fx' => $p['cost_fx'] ?? $p['cost_usd'] ?? 0,
@@ -27,6 +28,8 @@
     $pnbpPercent = \App\Support\OpportunityProductPricing::pnbpPercent();
     $pnbpTiers = \App\Support\OpportunityProductPricing::pnbpTiers();
     $pph29Percent = \App\Support\OpportunityProductPricing::pph29Percent();
+    $zinitTiers = \App\Support\OpportunityProductPricing::zinitTiers();
+    $royaltyPercent = \App\Support\OpportunityProductPricing::royaltyPercent();
     $purchasingMode = $purchasingMode ?? false;
 @endphp
 <form method="POST" action="{{ $action }}"
@@ -44,6 +47,8 @@
           'pnbpPercent' => $pnbpPercent,
           'pnbpTiers' => $pnbpTiers,
           'pph29Percent' => $pph29Percent,
+          'zinitTiers' => $zinitTiers,
+          'royaltyPercent' => $royaltyPercent,
           'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
           'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
           'hasShippingCharge' => (bool) old('has_shipping_charge', $opportunity->crm_has_shipping_charge),
@@ -51,6 +56,7 @@
           'accountMarginMeta' => $accountMarginMeta ?? [],
           'marginNominalUmum' => (float) ($marginNominalUmum ?? 0),
           'marginNominalOngkirPribadi' => (float) ($marginNominalOngkirPribadi ?? 0),
+          'marginMaxPercent' => (float) ($marginMaxPercent ?? \App\Support\PaymentLevel::maxMarginPercent()),
           'purchasingMode' => $purchasingMode,
           'productTemplateUrl' => route('opportunities.products.template'),
           'stage' => old('stage', $opportunity->stage ?: 'Prospecting'),
@@ -207,7 +213,7 @@
                 {{-- Langkah 1: pilih kategori saja --}}
                 <div x-show="!selectedTaxCategory && !purchasingMode" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
                     <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori pajak terlebih dahulu</p>
-                    <div class="mx-auto grid max-w-3xl gap-3 sm:grid-cols-3">
+                    <div class="mx-auto grid max-w-4xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         <button type="button" @click="selectTaxCategory('non_wapu')"
                                 class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
                             <span class="block text-sm font-semibold text-slate-800">Non Wapu</span>
@@ -229,11 +235,37 @@
                             <span class="mt-1 block text-xs text-slate-500">Seperti Wapu + PNBP berjenjang + PPH 29</span>
                             @endif
                         </button>
+                        <button type="button" @click="selectTaxCategory('zinit')"
+                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                            <span class="block text-sm font-semibold text-slate-800">Zinit</span>
+                            @if (auth()->user()?->isSuperAdmin())
+                            <span class="mt-1 block text-xs text-slate-500">Fee Zinit + PPH 2% jika Jasa</span>
+                            @endif
+                        </button>
                     </div>
                 </div>
 
                 {{-- Langkah 2: form item setelah kategori dipilih --}}
-                <div x-show="selectedTaxCategory || purchasingMode" x-cloak>
+                <div x-show="selectedTaxCategory || purchasingMode" x-cloak class="relative">
+                    {{-- Overlay loading import Excel --}}
+                    <div x-show="productImportBusy" x-cloak
+                         x-transition:enter="transition ease-out duration-150"
+                         x-transition:enter-start="opacity-0"
+                         x-transition:enter-end="opacity-100"
+                         x-transition:leave="transition ease-in duration-100"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0"
+                         class="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-[1px]">
+                        <div class="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
+                            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
+                                <i class="bi bi-arrow-repeat animate-spin text-2xl"></i>
+                            </span>
+                            <div class="text-center">
+                                <p class="text-sm font-semibold text-slate-800">Mengimpor produk…</p>
+                                <p class="mt-0.5 text-xs text-slate-500">Membaca &amp; memproses file Excel</p>
+                            </div>
+                        </div>
+                    </div>
                     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="text-sm text-slate-500">Kategori:</span>
@@ -248,6 +280,9 @@
                                     <button type="button" @click="changeTaxCategory('inaproc')"
                                             :class="selectedTaxCategory === 'inaproc' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                                             class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Inaproc</button>
+                                    <button type="button" @click="changeTaxCategory('zinit')"
+                                            :class="selectedTaxCategory === 'zinit' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Zinit</button>
                                 </div>
                             </template>
                             <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
@@ -275,11 +310,20 @@
                                             <option value="jasa">Jasa</option>
                                         </select>
                                     </div>
-                                    <div class="sm:col-span-4">
+                                    <div class="sm:col-span-2">
+                                        <label class="crm-label text-xs">Royalti</label>
+                                        <label class="mt-1.5 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700">
+                                            <input type="checkbox" value="1" x-model="p.has_royalty" @change="onRoyaltyChange(p)"
+                                                   class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" :disabled="purchasingMode">
+                                            <span x-text="royaltyPercent + '%'"></span>
+                                        </label>
+                                        <input type="hidden" :name="`products[${i}][has_royalty]`" :value="p.has_royalty ? 1 : 0">
+                                    </div>
+                                    <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Item</label>
                                         <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
-                                    <div class="sm:col-span-3">
+                                    <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Qty</label>
                                         <input type="text" inputmode="decimal"
                                                x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(p.quantity, 2)"
@@ -466,6 +510,46 @@
                                                        class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
                                             </td>
                                         </tr>
+                                        <tr x-show="appliesRoyalty(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'Royalti ' + royaltyPercent + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">Modal excl × rate</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatId(royaltyAmount(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesZinit(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600">Service Fee</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="zinitServiceFeeLabel(p)"></td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatId(zinitServiceFee(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesZinit(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600">Platform Fee</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">Flat dari rate scale</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatId(zinitPlatformFee(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesZinit(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600">Fee Zinit</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">Service + Platform</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatId(zinitSuccessFee(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                            </td>
+                                        </tr>
+                                        <tr x-show="appliesZinit(p)">
+                                            <td class="py-2 pr-3 font-medium text-slate-600"> Modal Pot Fee Zinit</td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400">Jual excl − Fee</td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly :value="formatId(zinitPotFee(p))"
+                                                       class="crm-field w-full min-w-[8rem] cursor-default border-green-200 bg-green-50 text-right tabular-nums font-semibold text-green-800">
+                                            </td>
+                                        </tr>
                                         <tr>
                                             <td class="py-2 pr-3 font-medium text-slate-600">Margin</td>
                                             <td class="py-2 pr-3 text-xs text-slate-400" x-text="marginLabel(p)"></td>
@@ -481,7 +565,7 @@
                                                                @input="p.margin_percent = parseId($event.target.value); onMarginPercentChange(p)"
                                                                class="crm-field w-24 bg-white text-right text-sm tabular-nums"
                                                                title="Ubah % margin untuk hitung ulang harga jual / diskon"
-                                                               :readonly="purchasingMode">
+                                                               :readonly="purchasingMode || appliesZinit(p)">
                                                         <span class="text-xs font-semibold text-slate-600">%</span>
                                                     </div>
                                                 </div>
@@ -497,9 +581,15 @@
                     </div>
                     <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
                         <div class="flex flex-wrap items-center gap-2" x-show="!purchasingMode">
-                            <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()">Add Item</x-btn>
-                            <x-btn variant="secondary" icon="bi-download" :href="route('opportunities.products.template')">Download Template</x-btn>
-                            <x-btn type="button" variant="secondary" icon="bi-file-earmark-excel" @click="$refs.productImportInput.click()" x-bind:disabled="!selectedTaxCategory">Import Excel</x-btn>
+                            <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()" x-bind:disabled="productImportBusy">Add Item</x-btn>
+                            <x-btn variant="secondary" icon="bi-download" :href="route('opportunities.products.template')" x-bind:class="productImportBusy ? 'pointer-events-none opacity-50' : ''">Download Template</x-btn>
+                            <button type="button"
+                                    @click="$refs.productImportInput.click()"
+                                    x-bind:disabled="!selectedTaxCategory || productImportBusy"
+                                    class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                                <i class="bi" :class="productImportBusy ? 'bi-arrow-repeat animate-spin' : 'bi-file-earmark-excel'"></i>
+                                <span x-text="productImportBusy ? 'Mengimpor…' : 'Import Excel'"></span>
+                            </button>
                             <input type="file" x-ref="productImportInput" class="hidden"
                                    accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
                                    @change="importProductsFromFile($event)">
@@ -607,14 +697,19 @@
 
             <div x-show="marginNeedsApprovalHint" x-cloak
                  class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                <p class="font-semibold"><i class="bi bi-exclamation-triangle mr-1"></i> Margin di bawah minimal</p>
+                <p class="font-semibold">
+                    <i class="bi bi-exclamation-triangle mr-1"></i>
+                    <span x-text="marginAbovePercent ? 'Margin di atas batas atas' : 'Margin di bawah minimal'"></span>
+                </p>
                 <p class="mt-1 text-xs">
                     Margin saat ini
                     <strong x-text="(overallMarginPercent ?? '—') + '%'"></strong>
                     / <strong x-text="formatMoney(productsMarginTotal)"></strong>
                     · Minimal
                     <strong x-text="(accountMinMarginPct ?? '—') + '%'"></strong>
-                    / <strong x-text="formatMoney(requiredNominalThreshold)"></strong>.
+                    / <strong x-text="formatMoney(requiredNominalThreshold)"></strong>
+                    · Maksimal
+                    <strong x-text="marginMaxPercent + '%'"></strong>.
                     Opportunity tetap bisa disimpan, tetapi memerlukan approval Superadmin
                     (kecuali stage Prospecting/Qualification).
                 </p>
@@ -671,8 +766,17 @@
             cap: Number(t.cap) || 0,
         }));
         const PPH29_PERCENT = Number(config.pph29Percent) || 22;
+        const ROYALTY_PERCENT = Number(config.royaltyPercent) || 20;
+        const ZINIT_TIERS = (config.zinitTiers || []).map(t => ({
+            max: t.max === null || t.max === undefined || t.max === '' ? null : Number(t.max),
+            platform_fee: Number(t.platform_fee) || 0,
+            rate_percent: Number(t.rate_percent) || 0,
+            cap: t.cap === null || t.cap === undefined || t.cap === '' ? null : Number(t.cap),
+        }));
 
         function pphPercentLookup(taxCategory, itemKind) {
+            if (taxCategory === 'zinit' && itemKind === 'jasa') return PPH_NON_WAPU_JASA;
+            if (taxCategory === 'zinit') return 0;
             if (taxCategory === 'non_wapu' && itemKind === 'barang') return 0;
             if (taxCategory === 'non_wapu' && itemKind === 'jasa') return PPH_NON_WAPU_JASA;
             if ((taxCategory === 'wapu' || taxCategory === 'inaproc') && itemKind === 'barang') return PPH_WAPU_BARANG;
@@ -704,22 +808,80 @@
             return Math.round(amount * 100) / 100;
         }
 
-        function calcNetMargin(base, costExclude, taxCategory, itemKind) {
-            const pphPct = pphPercentLookup(taxCategory, itemKind);
-            const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
-            if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
-                const costInclude = Math.round(costExclude * TAX_MULTIPLIER * 100) / 100;
-                const gross = Math.round((base - pph - costInclude) * 100) / 100;
-                const pnbp = taxCategory === 'inaproc'
-                    ? calcPnbpFromInclude(Math.round(base * TAX_MULTIPLIER * 100) / 100)
-                    : 0;
-                const spread = base - costExclude;
-                const pph29 = (taxCategory === 'inaproc' && spread > 0)
-                    ? Math.round(spread * (PPH29_PERCENT / 100) * 100) / 100
-                    : 0;
-                return Math.round((gross - pnbp - pph29) * 100) / 100;
+        function matchZinitTier(volume) {
+            const tiers = [...ZINIT_TIERS].sort((a, b) => {
+                if (a.max === null && b.max === null) return 0;
+                if (a.max === null) return 1;
+                if (b.max === null) return -1;
+                return a.max - b.max;
+            });
+            let fallback = tiers[tiers.length - 1] || { max: null, platform_fee: 0, rate_percent: 0, cap: null };
+            for (const tier of tiers) {
+                if (tier.max === null) return tier;
+                if (volume <= tier.max) return tier;
             }
-            return Math.round((base - pph - costExclude) * 100) / 100;
+            return fallback;
+        }
+
+        function calcZinitFees(volume) {
+            volume = Math.max(0, Math.round((Number(volume) || 0) * 100) / 100);
+            if (volume <= 0) {
+                return { volume: 0, platform_fee: 0, service_fee: 0, success_fee: 0, rate_percent: 0, cap: null };
+            }
+            const tier = matchZinitTier(volume);
+            const platform = Math.round((Number(tier.platform_fee) || 0) * 100) / 100;
+            const rate = Number(tier.rate_percent) || 0;
+            let service = Math.round(volume * (rate / 100) * 100) / 100;
+            const cap = tier.cap === null || tier.cap === undefined ? null : Number(tier.cap);
+            if (cap !== null && cap > 0) service = Math.min(service, cap);
+            return {
+                volume,
+                platform_fee: platform,
+                service_fee: service,
+                success_fee: Math.round((platform + service) * 100) / 100,
+                rate_percent: rate,
+                cap,
+            };
+        }
+
+        function calcZinitFeesFromSellExclude(sellExclude, quantity = 1) {
+            const qty = quantity > 0 ? quantity : 1;
+            const includeVolume = Math.round((Number(sellExclude) || 0) * TAX_MULTIPLIER * qty * 100) / 100;
+            return calcZinitFees(includeVolume);
+        }
+
+        function calcNetMargin(base, costExclude, taxCategory, itemKind, quantity = 1, hasRoyalty = false) {
+            let net;
+            if (taxCategory === 'zinit') {
+                const qty = quantity > 0 ? quantity : 1;
+                const fees = calcZinitFeesFromSellExclude(base, qty);
+                const feePerUnit = fees.success_fee / qty;
+                const pphPct = pphPercentLookup(taxCategory, itemKind);
+                const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
+                net = Math.round((base - pph - feePerUnit - costExclude) * 100) / 100;
+            } else {
+                const pphPct = pphPercentLookup(taxCategory, itemKind);
+                const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
+                if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
+                    const costInclude = Math.round(costExclude * TAX_MULTIPLIER * 100) / 100;
+                    const gross = Math.round((base - pph - costInclude) * 100) / 100;
+                    const pnbp = taxCategory === 'inaproc'
+                        ? calcPnbpFromInclude(Math.round(base * TAX_MULTIPLIER * 100) / 100)
+                        : 0;
+                    const spread = base - costExclude;
+                    const pph29 = (taxCategory === 'inaproc' && spread > 0)
+                        ? Math.round(spread * (PPH29_PERCENT / 100) * 100) / 100
+                        : 0;
+                    net = Math.round((gross - pnbp - pph29) * 100) / 100;
+                } else {
+                    net = Math.round((base - pph - costExclude) * 100) / 100;
+                }
+            }
+            if (hasRoyalty) {
+                const royalty = Math.round(costExclude * (ROYALTY_PERCENT / 100) * 100) / 100;
+                net = Math.round((net - royalty) * 100) / 100;
+            }
+            return net;
         }
 
         const initialProducts = (config.products || []).map(p => {
@@ -728,22 +890,32 @@
             const sell = Number(p.sell_exclude) || 0;
             const cost = Number(p.cost_exclude) || 0;
             const discount = Number(p.discount_exclude) || 0;
+            const qty = Number(p.quantity) || 1;
+            const hasRoyalty = !!(p.has_royalty);
             const base = discount > 0 ? discount : sell;
-            const margin = calcNetMargin(base, cost, taxCategory, itemKind);
+            const margin = calcNetMargin(base, cost, taxCategory, itemKind, qty, hasRoyalty);
             const pphPct = pphPercentLookup(taxCategory, itemKind);
             const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
-            const denom = (taxCategory === 'wapu' || taxCategory === 'inaproc') ? (base - pph) : base;
+            let denom = base;
+            if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
+                denom = base - pph;
+            } else if (taxCategory === 'zinit') {
+                const fees = calcZinitFeesFromSellExclude(base, qty > 0 ? qty : 1);
+                const feePerUnit = fees.success_fee / (qty > 0 ? qty : 1);
+                denom = base - feePerUnit;
+            }
             const marginPercent = denom > 0 ? Math.round((margin / denom) * 10000) / 100 : 0;
 
             return {
                 name: p.name ?? '',
-                quantity: Number(p.quantity) || 0,
+                quantity: qty,
                 sell_exclude: sell,
                 cost_exclude: cost,
                 discount_exclude: discount,
                 vendor: p.vendor ?? '',
                 tax_category: taxCategory,
                 item_kind: itemKind,
+                has_royalty: hasRoyalty,
                 margin_percent: marginPercent,
                 _lockMarginPercent: false,
                 cost_foreign: !!(p.cost_foreign || p.cost_in_usd),
@@ -768,6 +940,7 @@
             pnbpPercent: PNBP_PERCENT,
             pnbpTiers: PNBP_TIERS,
             pph29Percent: PPH29_PERCENT,
+            royaltyPercent: ROYALTY_PERCENT,
             amount: {{ (float) old('amount', $opportunity->amount ?? 0) }},
             hasDiscount: !!config.hasDiscount,
             discountAmount: Number(config.discountAmount) || 0,
@@ -778,6 +951,7 @@
             accountMarginMeta: config.accountMarginMeta || {},
             marginNominalUmum: Number(config.marginNominalUmum) || 0,
             marginNominalOngkirPribadi: Number(config.marginNominalOngkirPribadi) || 0,
+            marginMaxPercent: Number(config.marginMaxPercent) || 90,
             purchasingMode: !!config.purchasingMode,
             productTemplateUrl: config.productTemplateUrl || '',
             productImportBusy: false,
@@ -811,10 +985,14 @@
             get overallMarginPercent() {
                 const denom = this.products.reduce((s, p) => {
                     const qty = Number(p.quantity) || 0;
-                    const effSell = this.effectiveSellExclude(p);
                     const taxCategory = p.tax_category || 'non_wapu';
 
-                    if (taxCategory === 'wapu') {
+                    if (taxCategory === 'zinit') {
+                        return s + this.zinitPotFee(p);
+                    }
+
+                    const effSell = this.effectiveSellExclude(p);
+                    if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
                         const pph = this.pphAmount(p);
                         return s + qty * (effSell - pph);
                     }
@@ -830,16 +1008,24 @@
                 const pct = this.overallMarginPercent;
                 return pct === null || pct < min;
             },
+            get marginAbovePercent() {
+                const max = Number(this.marginMaxPercent) || 0;
+                if (max <= 0) return false;
+                const pct = this.overallMarginPercent;
+                return pct !== null && pct > max;
+            },
             get marginBelowNominal() {
                 const thr = this.requiredNominalThreshold;
                 return thr > 0 && this.productsMarginTotal < thr;
             },
             get marginNeedsApprovalHint() {
                 if (this.skipsApproval) return false;
-                return !!(this.accountId && (this.marginBelowPercent || this.marginBelowNominal));
+                return !!(this.accountId && (this.marginBelowPercent || this.marginAbovePercent || this.marginBelowNominal));
             },
             get productsTotal() {
-                return this.products.reduce((s, p) => s + (Number(p.quantity) || 0) * this.effectiveSellInclude(p), 0);
+                return this.products.reduce((s, p) => {
+                    return s + (Number(p.quantity) || 0) * this.effectiveSellInclude(p);
+                }, 0);
             },
             get productsMarginTotal() {
                 return this.round(this.products.reduce(
@@ -863,6 +1049,7 @@
             taxCategoryLabel(category) {
                 if (category === 'wapu') return 'Wapu';
                 if (category === 'inaproc') return 'Inaproc';
+                if (category === 'zinit') return 'Zinit';
                 return 'Non Wapu';
             },
             syncDiscountPercentFromAmount() {
@@ -975,6 +1162,44 @@
             appliesPph29(p) {
                 return (p.tax_category || 'non_wapu') === 'inaproc';
             },
+            appliesZinit(p) {
+                return (p.tax_category || 'non_wapu') === 'zinit';
+            },
+            appliesRoyalty(p) {
+                return !!p.has_royalty;
+            },
+            royaltyAmount(p) {
+                if (!this.appliesRoyalty(p)) return 0;
+                return this.round((Number(p.cost_exclude) || 0) * ((Number(this.royaltyPercent) || 0) / 100));
+            },
+            onRoyaltyChange(p) {
+                p._lockMarginPercent = false;
+                p.margin_percent = this.calcMarginPercent(p);
+                this.refreshDiscountFromMargin();
+            },
+            zinitFees(p) {
+                const qty = Number(p.quantity) || 1;
+                return calcZinitFeesFromSellExclude(this.effectiveSellExclude(p), qty > 0 ? qty : 1);
+            },
+            zinitPlatformFee(p) {
+                return this.zinitFees(p).platform_fee;
+            },
+            zinitServiceFee(p) {
+                return this.zinitFees(p).service_fee;
+            },
+            zinitSuccessFee(p) {
+                return this.zinitFees(p).success_fee;
+            },
+            zinitPotFee(p) {
+                const qty = Number(p.quantity) || 1;
+                const safeQty = qty > 0 ? qty : 1;
+                return this.round((this.effectiveSellExclude(p) * safeQty) - this.zinitSuccessFee(p));
+            },
+            zinitServiceFeeLabel(p) {
+                const fees = this.zinitFees(p);
+                const rate = fees.rate_percent;
+                return 'Jual include × ' + rate + '%';
+            },
             pphPercentFor(p) {
                 return pphPercentLookup(p.tax_category || 'non_wapu', p.item_kind || 'barang');
             },
@@ -988,6 +1213,9 @@
                 return calcPnbpFromInclude(this.effectiveSellInclude(p));
             },
             grossMarginAmount(p) {
+                if (this.appliesZinit(p)) {
+                    return this.marginAmount(p);
+                }
                 const base = this.effectiveSellExclude(p);
                 const costExclude = Number(p.cost_exclude) || 0;
                 const taxCategory = p.tax_category || 'non_wapu';
@@ -1004,10 +1232,22 @@
                 return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
             marginAmount(p) {
-                return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p));
+                if (this.appliesZinit(p)) {
+                    const qty = Number(p.quantity) || 1;
+                    const safeQty = qty > 0 ? qty : 1;
+                    const feePerUnit = this.zinitSuccessFee(p) / safeQty;
+                    return this.round(this.effectiveSellExclude(p) - this.pphAmount(p) - feePerUnit - this.royaltyAmount(p) - (Number(p.cost_exclude) || 0));
+                }
+                return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p) - this.royaltyAmount(p));
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
+                if (this.appliesZinit(p)) {
+                    const qty = Number(p.quantity) || 1;
+                    const safeQty = qty > 0 ? qty : 1;
+                    const denom = this.effectiveSellExclude(p) - (this.zinitSuccessFee(p) / safeQty);
+                    return denom > 0 ? this.round((margin / denom) * 100) : 0;
+                }
                 const base = this.effectiveSellExclude(p);
                 const taxCategory = p.tax_category || 'non_wapu';
                 const denom = (taxCategory === 'wapu' || taxCategory === 'inaproc')
@@ -1019,18 +1259,27 @@
                 return Number(p.margin_percent) || 0;
             },
             marginLabel(p) {
+                if (this.appliesZinit(p)) {
+                    let s = 'Jual';
+                    if (this.appliesPph(p)) s += ' − PPH';
+                    s += ' − Fee Zinit';
+                    if (this.appliesRoyalty(p)) s += ' − Royalti';
+                    s += ' − Modal';
+                    return s;
+                }
                 const hasItemDiscount = (Number(p.discount_exclude) || 0) > 0;
                 const head = hasItemDiscount ? 'Diskon' : 'Jual Exclude';
+                const royaltyBit = this.appliesRoyalty(p) ? ' − Royalti' : '';
                 if ((p.tax_category || 'non_wapu') === 'wapu') {
-                    return head + ' − PPH − Modal Include';
+                    return head + ' − PPH − Modal Include' + royaltyBit;
                 }
                 if (this.appliesPph29(p)) {
-                    return head + ' − PPH − PNBP − PPH29 − Modal Include';
+                    return head + ' − PPH − PNBP − PPH29 − Modal Include' + royaltyBit;
                 }
                 if (this.appliesPph(p)) {
-                    return head + ' − PPH − Modal';
+                    return head + ' − PPH − Modal' + royaltyBit;
                 }
-                return hasItemDiscount ? 'Diskon − Modal' : 'Jual Exclude − Beli Exclude';
+                return (hasItemDiscount ? 'Diskon − Modal' : 'Jual Exclude − Beli Exclude') + royaltyBit;
             },
             /**
              * Dari % margin target (net) + modal → hitung harga basis.
@@ -1226,6 +1475,7 @@
                     vendor: '',
                     tax_category: this.selectedTaxCategory,
                     item_kind: 'barang',
+                    has_royalty: false,
                     margin_percent: 0,
                     _lockMarginPercent: false,
                     cost_foreign: false,
@@ -1238,6 +1488,23 @@
                 this.products.splice(i, 1);
                 this.refreshDiscountFromMargin();
             },
+            /** Prospecting + ada nama produk → Qualification (sinkron select Stage). */
+            promoteStageFromProducts() {
+                if (this.purchasingMode || this.stage !== 'Prospecting') return;
+                const hasNamed = this.products.some(p => String(p.name || '').trim() !== '');
+                if (!hasNamed) return;
+
+                this.stage = 'Qualification';
+                this.$nextTick(() => {
+                    const el = this.$root.querySelector('select[name="stage"]');
+                    if (!el) return;
+                    el.value = 'Qualification';
+                    if (window.jQuery) {
+                        window.jQuery(el).val('Qualification').trigger('change');
+                    }
+                });
+            },
+
             async importProductsFromFile(event) {
                 const input = event.target;
                 const file = input?.files?.[0];
@@ -1251,6 +1518,9 @@
                 if (this.purchasingMode || this.productImportBusy) return;
 
                 this.productImportBusy = true;
+                await this.$nextTick();
+                await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
                 try {
                     const rows = await this.parseProductSpreadsheet(file);
                     const imported = [];
@@ -1389,6 +1659,7 @@
                     cost_exclude: this.parseId(map.harga_beli_exclude ?? 0),
                     tax_category: this.selectedTaxCategory,
                     item_kind: itemKind,
+                    has_royalty: false,
                     margin_percent: 0,
                     _lockMarginPercent: false,
                     cost_foreign: false,
@@ -1398,8 +1669,13 @@
                 };
             },
             init() {
-                this.$watch('products', () => { if (this.products.length > 0) this.amount = this.productsTotal; }, { deep: true });
+                this.$watch('products', () => {
+                    if (this.products.length > 0) this.amount = this.productsTotal;
+                    this.promoteStageFromProducts();
+                }, { deep: true });
                 if (this.products.length > 0) this.amount = this.productsTotal;
+                this.promoteStageFromProducts();
+
 
                 this.$nextTick(() => {
                     if (!window.CrmSelect2) return;

@@ -56,8 +56,8 @@
         </div>
         <div class="sm:col-span-2">
             <label class="crm-label">Street Address</label>
-            <input type="text" name="billing_address_street" value="{{ old('billing_address_street', $account->billing_address_street) }}"
-                   class="crm-field">
+            <textarea name="billing_address_street" rows="3" class="crm-field"
+                      placeholder="Jl. ...">{{ old('billing_address_street', $account->billing_address_street) }}</textarea>
         </div>
         <div>
             <label class="crm-label">Provinsi</label>

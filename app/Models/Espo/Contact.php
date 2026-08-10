@@ -20,6 +20,12 @@ class Contact extends Model
         'description', 'account_id', 'assigned_user_id',
     ];
 
+    public const TITLES = [
+        'Mr.', 'Mrs.', 'Ms.', 'Miss',
+        'Bapak', 'Ibu', 'Saudara', 'Saudari',
+        'Dr.', 'Ir.', 'Prof.',
+    ];
+
     public function espoEntityType(): string
     {
         return 'Contact';
@@ -37,6 +43,9 @@ class Contact extends Model
 
     public function getFullNameAttribute(): string
     {
-        return trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? '')) ?: ($this->name ?? '-');
+        $name = trim(($this->first_name ?? '').' '.($this->last_name ?? '')) ?: ($this->name ?? '-');
+        $title = trim((string) ($this->salutation_name ?? ''));
+
+        return $title !== '' ? $title.' '.$name : $name;
     }
 }

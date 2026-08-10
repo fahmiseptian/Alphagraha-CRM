@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\CrmSetting;
+use App\Support\CustomerTop;
 use App\Support\FreeShippingZone;
 use App\Support\OpportunityProductPricing;
 use App\Support\PaymentLevel;
@@ -21,6 +22,8 @@ class SettingController extends Controller
             'pphWapuJasa' => OpportunityProductPricing::pphWapuJasaPercent(),
             'pnbpTiers' => OpportunityProductPricing::pnbpTiers(),
             'pph29Percent' => OpportunityProductPricing::pph29Percent(),
+            'zinitTiers' => OpportunityProductPricing::zinitTiers(),
+            'royaltyPercent' => OpportunityProductPricing::royaltyPercent(),
         ]);
     }
 
@@ -32,10 +35,16 @@ class SettingController extends Controller
             'pph_wapu_barang' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph_wapu_jasa' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph29_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+            'royalty_percent' => ['required', 'numeric', 'min:0', 'max:100'],
             'pnbp_tiers' => ['required', 'array', 'min:1'],
             'pnbp_tiers.*.max' => ['nullable', 'numeric', 'min:0'],
             'pnbp_tiers.*.rate_percent' => ['required', 'numeric', 'min:0', 'max:100'],
             'pnbp_tiers.*.cap' => ['required', 'numeric', 'min:0'],
+            'zinit_tiers' => ['required', 'array', 'min:1'],
+            'zinit_tiers.*.max' => ['nullable', 'numeric', 'min:0'],
+            'zinit_tiers.*.platform_fee' => ['required', 'numeric', 'min:0'],
+            'zinit_tiers.*.rate_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+            'zinit_tiers.*.cap' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         CrmSetting::set('tax.ppn_percent', round((float) $data['ppn_percent'], 2), [
@@ -96,6 +105,21 @@ class SettingController extends Controller
             'description' => 'PPH Pasal 29 Inaproc: (jual exclude − modal exclude) × % × qty.',
         ]);
 
+        $zinitTiers = OpportunityProductPricing::normalizeZinitTiers($data['zinit_tiers']);
+        CrmSetting::set('tax.zinit_tiers', $zinitTiers, [
+            'type' => 'json',
+            'group' => 'tax',
+            'label' => 'Rate Scale Zinit',
+            'description' => 'Jenjang Fee Zinit: batas jual include, platform fee, service fee %, dan CAP.',
+        ]);
+
+        CrmSetting::set('tax.royalty_percent', round((float) $data['royalty_percent'], 2), [
+            'type' => 'number',
+            'group' => 'tax',
+            'label' => 'Royalti (%)',
+            'description' => 'Persentase royalti dari modal exclude bila checkbox Royalti dicentang (semua kategori pajak).',
+        ]);
+
         return redirect()
             ->route('settings.edit')
             ->with('success', 'Pengaturan pajak berhasil disimpan.');
@@ -104,25 +128,36 @@ class SettingController extends Controller
     public function editMargin()
     {
         $defaults = PaymentLevel::allMinMargins();
+        $topMargins = CustomerTop::allMinMargins();
 
         return view('admin.settings.margin', [
             'marginLancar' => PaymentLevel::minMarginPercent(PaymentLevel::LANCAR) ?? $defaults[PaymentLevel::LANCAR],
             'marginMandek' => PaymentLevel::minMarginPercent(PaymentLevel::MANDEK) ?? $defaults[PaymentLevel::MANDEK],
             'marginJelek' => PaymentLevel::minMarginPercent(PaymentLevel::JELEK) ?? $defaults[PaymentLevel::JELEK],
+            'topMargins' => $topMargins,
+            'topLabels' => CustomerTop::LABELS,
             'nominalUmum' => PaymentLevel::marginNominalUmum(),
             'nominalOngkirPribadi' => PaymentLevel::marginNominalOngkirPribadi(),
+            'marginMaxPercent' => PaymentLevel::maxMarginPercent(),
         ]);
     }
 
     public function updateMargin(Request $request)
     {
-        $data = $request->validate([
+        $rules = [
             'margin_lancar' => ['required', 'numeric', 'min:0', 'max:100'],
             'margin_mandek' => ['required', 'numeric', 'min:0', 'max:100'],
             'margin_jelek' => ['required', 'numeric', 'min:0', 'max:100'],
+            'margin_max_percent' => ['required', 'numeric', 'min:0', 'max:100'],
             'nominal_umum' => ['required', 'numeric', 'min:0'],
             'nominal_ongkir_pribadi' => ['required', 'numeric', 'min:0'],
-        ]);
+        ];
+
+        foreach (CustomerTop::OPTIONS as $top) {
+            $rules['margin_top_'.$top] = ['required', 'numeric', 'min:0', 'max:100'];
+        }
+
+        $data = $request->validate($rules);
 
         CrmSetting::set('payment_level.margin_lancar', round((float) $data['margin_lancar'], 2), [
             'type' => 'number',
@@ -145,6 +180,25 @@ class SettingController extends Controller
             'description' => 'Minimal margin opportunity (%) untuk customer level Jelek sebelum quotation perlu approval Superadmin.',
         ]);
 
+        $topSettingLabels = [
+            CustomerTop::CASH => 'Minimal Margin Cash (%)',
+            CustomerTop::DAYS_7 => 'Minimal Margin TOP 7 Hari (%)',
+            CustomerTop::DAYS_14 => 'Minimal Margin TOP 14 Hari (%)',
+            CustomerTop::DAYS_30 => 'Minimal Margin TOP 30 Hari (%)',
+            CustomerTop::DAYS_45 => 'Minimal Margin TOP 45 Hari (%)',
+            CustomerTop::DAYS_60 => 'Minimal Margin TOP 60 Hari (%)',
+        ];
+
+        foreach (CustomerTop::OPTIONS as $top) {
+            $field = 'margin_top_'.$top;
+            CrmSetting::set(CustomerTop::settingKey($top), round((float) $data[$field], 2), [
+                'type' => 'number',
+                'group' => 'customer_top',
+                'label' => $topSettingLabels[$top] ?? 'Minimal Margin TOP (%)',
+                'description' => 'Minimal margin opportunity (%) untuk customer dengan TOP '.CustomerTop::label($top).'.',
+            ]);
+        }
+
         CrmSetting::set(PaymentLevel::SETTING_NOMINAL_UMUM, round((float) $data['nominal_umum'], 2), [
             'type' => 'number',
             'group' => 'payment_level',
@@ -157,6 +211,13 @@ class SettingController extends Controller
             'group' => 'payment_level',
             'label' => 'Margin Nominal Ongkir Pribadi (Rp)',
             'description' => 'Ambang margin nominal bila memakai ongkir pribadi (Rp).',
+        ]);
+
+        CrmSetting::set(PaymentLevel::SETTING_MAX_PERCENT, round((float) $data['margin_max_percent'], 2), [
+            'type' => 'number',
+            'group' => 'payment_level',
+            'label' => 'Batas Atas Margin (%)',
+            'description' => 'Maksimal margin opportunity (%). Di atas nilai ini memerlukan approval Superadmin.',
         ]);
 
         return redirect()

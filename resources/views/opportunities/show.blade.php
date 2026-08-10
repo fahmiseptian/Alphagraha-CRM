@@ -390,7 +390,7 @@
                     @elseif ($isMarginRejected)
                         <i class="bi bi-x-circle mr-1"></i> Margin ditolak
                     @elseif ($isMarginApproved)
-                        <i class="bi bi-check-circle mr-1"></i> Margin di bawah minimal — disetujui
+                        <i class="bi bi-check-circle mr-1"></i> Margin di luar batas — disetujui
                     @else
                         {{ $opportunity->marginStatusLabel() }}
                     @endif
@@ -402,6 +402,8 @@
                     &middot; Minimal:
                     <strong>{{ $opportunity->crm_margin_threshold !== null ? number_format((float) $opportunity->crm_margin_threshold, 2, ',', '.').'%' : '—' }}</strong>
                     / <strong>{{ money($opportunity->crm_margin_nominal_threshold, $marginCurrency) }}</strong>
+                    &middot; Maksimal:
+                    <strong>{{ number_format(\App\Support\PaymentLevel::maxMarginPercent(), 2, ',', '.') }}%</strong>
                 </p>
                 @if ($opportunity->crm_has_shipping_charge)
                     <p class="mt-1 text-xs opacity-80">
@@ -581,7 +583,9 @@
                                     <td class="text-slate-600">{{ ucfirst($p['item_kind']) }}</td>
                                     <td class="text-slate-700">{{ $p['name'] }}</td>
                                     <td class="text-right text-slate-600">{{ rtrim(rtrim(number_format($p['quantity'], 2, ',', '.'), '0'), ',') }}</td>
-                                    <td class="text-right text-slate-600">{{ money($p['sell_exclude'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">
+                                        {{ money($p['sell_exclude'], $opportunity->amount_currency ?: 'IDR') }}
+                                    </td>
                                     <td class="text-right text-slate-600">
                                         @if (($p['discount_exclude'] ?? 0) > 0)
                                             {{ money($p['discount_exclude'], $opportunity->amount_currency ?: 'IDR') }}
@@ -589,7 +593,9 @@
                                             —
                                         @endif
                                     </td>
-                                    <td class="text-right text-slate-600">{{ money($p['effective_sell_include'] ?? $p['sell_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">
+                                        {{ money($p['effective_sell_include'] ?? $p['sell_include'], $opportunity->amount_currency ?: 'IDR') }}
+                                    </td>
                                     <td class="text-right text-slate-400">
                                         {{ money($p['cost_exclude'], $opportunity->amount_currency ?: 'IDR') }}
                                         @if ((! empty($p['cost_foreign']) || ! empty($p['cost_in_usd'])) && (float) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0) > 0)
@@ -602,7 +608,17 @@
                                     </td>
                                     <td class="text-right text-slate-400">{{ money($p['cost_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                     <td class="text-right text-slate-600">
-                                        @if (($p['pph_applicable'] ?? false) || ($p['pnbp_applicable'] ?? false) || ($p['pph29_applicable'] ?? false))
+                                        @if (! empty($p['zinit_applicable']))
+                                            @if ($p['pph_applicable'] ?? false)
+                                                <span class="block text-[10px] text-slate-500">PPH {{ money($p['pph'] ?? 0, $opportunity->amount_currency ?: 'IDR') }} ({{ rtrim(rtrim(number_format((float) ($p['pph_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%)</span>
+                                            @endif
+                                            @if ($p['royalty_applicable'] ?? false)
+                                                <span class="block text-[10px] text-slate-500">Royalti {{ money($p['royalty'] ?? 0, $opportunity->amount_currency ?: 'IDR') }} ({{ rtrim(rtrim(number_format((float) ($p['royalty_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%)</span>
+                                            @endif
+                                            <span class="block text-[10px] text-slate-500">Fee {{ money($p['zinit_success_fee'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
+                                            <span class="block text-[10px] text-slate-500">Service {{ money($p['zinit_service_fee'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
+                                            <span class="block text-[10px] text-slate-500">Platform {{ money($p['zinit_platform_fee'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
+                                        @elseif (($p['pph_applicable'] ?? false) || ($p['pnbp_applicable'] ?? false) || ($p['pph29_applicable'] ?? false) || ($p['royalty_applicable'] ?? false))
                                             @if ($p['pph_applicable'] ?? false)
                                                 <span class="block">{{ money($p['pph'], $opportunity->amount_currency ?: 'IDR') }}</span>
                                                 @if (($p['pph_percent'] ?? 0) > 0)
@@ -614,6 +630,9 @@
                                             @endif
                                             @if ($p['pph29_applicable'] ?? false)
                                                 <span class="mt-0.5 block text-[10px] text-slate-500">PPH29 {{ money($p['pph29'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
+                                            @endif
+                                            @if ($p['royalty_applicable'] ?? false)
+                                                <span class="mt-0.5 block text-[10px] text-slate-500">Royalti {{ money($p['royalty'] ?? 0, $opportunity->amount_currency ?: 'IDR') }} ({{ rtrim(rtrim(number_format((float) ($p['royalty_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%)</span>
                                             @endif
                                         @else
                                             —
@@ -849,7 +868,9 @@
                 @php $quo = $opportunity->quotation; @endphp
                 <div class="flex flex-col gap-3">
                     <div class="flex items-start gap-3">
-                        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700"><i class="bi bi-file-earmark-text text-xl"></i></span>
+                        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg {{ $opportunity->canOpenQuotation() ? 'bg-brand-100 text-brand-700' : 'bg-amber-100 text-amber-700' }}">
+                            <i class="bi {{ $opportunity->canOpenQuotation() ? 'bi-file-earmark-text' : 'bi-lock' }} text-xl"></i>
+                        </span>
                         <div class="min-w-0">
                             <p class="truncate font-semibold text-slate-800">{{ $quo->number }}</p>
                             <p class="text-xs text-slate-400">
@@ -859,17 +880,29 @@
                             <div class="mt-1"><x-badge :color="$quo->statusColor()">{{ $quo->statusLabel() }}</x-badge></div>
                         </div>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <a href="{{ route('quotations.show', $quo) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> View</a>
-                        @if ($quo->isMarginLocked() && ! auth()->user()->canApproveMargin())
-                            <span class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800" title="Menunggu approval margin">
-                                <i class="bi bi-lock"></i> Preview/PDF terkunci
-                            </span>
-                        @else
-                            <a href="{{ route('quotations.preview', $quo) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-window"></i> Preview</a>
-                            <a href="{{ route('quotations.pdf', $quo) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-download"></i> PDF</a>
-                        @endif
-                    </div>
+                    @if (! $opportunity->canOpenQuotation())
+                        <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                            <p class="font-medium"><i class="bi bi-lock-fill mr-1"></i> QO terkunci</p>
+                            <p class="mt-1 text-amber-800/90">{{ $opportunity->quotationLockedReason() }}</p>
+                        </div>
+                    @else
+                        <div class="flex flex-wrap items-center gap-2">
+                            <a href="{{ route('quotations.show', $quo) }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-eye"></i> View</a>
+                            @if ($quo->isMarginLocked() && ! auth()->user()->canApproveMargin())
+                                <span class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800" title="Menunggu approval margin">
+                                    <i class="bi bi-lock"></i> Preview/PDF terkunci
+                                </span>
+                            @else
+                                <a href="{{ route('quotations.preview', $quo) }}" target="_blank" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><i class="bi bi-window"></i> Preview</a>
+                                <a href="{{ route('quotations.pdf', $quo) }}" class="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"><i class="bi bi-download"></i> PDF</a>
+                            @endif
+                        </div>
+                    @endif
+                </div>
+            @elseif (! $opportunity->canCreateQuotation())
+                <div class="flex flex-col items-center justify-center gap-3 py-4 text-center">
+                    <span class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500"><i class="bi bi-slash-circle text-2xl"></i></span>
+                    <p class="text-sm text-slate-600">{{ $opportunity->quotationBlockedReason() }}</p>
                 </div>
             @elseif ($opportunity->isMarginLocked() || $opportunity->discountNeedsAttention())
                 <div class="flex flex-col items-center justify-center gap-3 py-4 text-center">

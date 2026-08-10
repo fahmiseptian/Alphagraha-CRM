@@ -53,11 +53,27 @@ class Account extends Model
     }
 
     /**
-     * Minimal margin (%) untuk level ini. Null bila Suspend.
+     * Minimal margin (%) efektif: max(level pembayaran, TOP).
+     * Null bila Suspend (tidak boleh quote).
      */
     public function minMarginPercent(): ?float
     {
-        return PaymentLevel::minMarginPercent($this->paymentLevel());
+        if ($this->isPaymentSuspended()) {
+            return null;
+        }
+
+        $fromLevel = PaymentLevel::minMarginPercent($this->paymentLevel()) ?? 0.0;
+        $fromTop = CustomerTop::minMarginPercent($this->crm_top);
+
+        return max($fromLevel, $fromTop);
+    }
+
+    /**
+     * Minimal margin (%) khusus dari setting TOP customer.
+     */
+    public function topMinMarginPercent(): float
+    {
+        return CustomerTop::minMarginPercent($this->crm_top);
     }
 
     public function top(): string

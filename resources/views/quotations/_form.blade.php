@@ -11,6 +11,7 @@
             'cost_exclude' => (float) ($i->cost_exclude ?? 0),
             'tax_category' => $i->tax_category,
             'item_kind' => $i->item_kind,
+            'has_royalty' => (bool) ($i->has_royalty ?? false),
             'vendor' => $i->vendor,
           ])->values()->all()
         : ($seedItems ?? []));
@@ -113,6 +114,7 @@
                             <input type="hidden" :name="`items[${index}][cost_exclude]`" x-model.number="item.cost_exclude">
                             <input type="hidden" :name="`items[${index}][tax_category]`" x-model="item.tax_category">
                             <input type="hidden" :name="`items[${index}][item_kind]`" x-model="item.item_kind">
+                            <input type="hidden" :name="`items[${index}][has_royalty]`" :value="item.has_royalty ? 1 : 0">
                             <input type="hidden" :name="`items[${index}][vendor]`" x-model="item.vendor">
                             <div class="grid grid-cols-12 gap-2">
                                 <div class="col-span-12 sm:col-span-5">
@@ -331,6 +333,7 @@
             cost_exclude: Number(item.cost_exclude) || 0,
             tax_category: item.tax_category ?? '',
             item_kind: item.item_kind ?? '',
+            has_royalty: !!(item.has_royalty),
             vendor: item.vendor ?? '',
         }));
 
@@ -414,7 +417,7 @@
                     _uid: makeUid(),
                     name: '', description: '', quantity: 1, unit: '', unit_price: 0,
                     sell_exclude: 0, discount_exclude: 0, cost_exclude: 0,
-                    tax_category: '', item_kind: '', vendor: '',
+                    tax_category: '', item_kind: '', has_royalty: false, vendor: '',
                 });
             },
             removeItem(index) {

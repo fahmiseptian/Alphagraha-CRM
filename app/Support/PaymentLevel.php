@@ -41,9 +41,13 @@ class PaymentLevel
 
     public const SETTING_NOMINAL_ONGKIR_PRIBADI = 'payment_level.margin_nominal_ongkir_pribadi';
 
+    public const SETTING_MAX_PERCENT = 'payment_level.margin_max_percent';
+
     public const DEFAULT_NOMINAL_UMUM = 0.0;
 
     public const DEFAULT_NOMINAL_ONGKIR_PRIBADI = 0.0;
+
+    public const DEFAULT_MAX_PERCENT = 90.0;
 
     public static function label(string $level): string
     {
@@ -109,6 +113,14 @@ class PaymentLevel
     public static function marginNominalOngkirPribadi(): float
     {
         return CrmSetting::getFloat(self::SETTING_NOMINAL_ONGKIR_PRIBADI, self::DEFAULT_NOMINAL_ONGKIR_PRIBADI);
+    }
+
+    /**
+     * Batas atas margin (%) — hanya persentase. Default 90.
+     */
+    public static function maxMarginPercent(): float
+    {
+        return CrmSetting::getFloat(self::SETTING_MAX_PERCENT, self::DEFAULT_MAX_PERCENT);
     }
 
     /**

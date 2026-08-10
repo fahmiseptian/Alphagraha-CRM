@@ -616,6 +616,7 @@ class OpportunityController extends Controller
                 'vendor' => $normalized['vendor'] ?? '',
                 'tax_category' => $prev['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $prev['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                'has_royalty' => $prev['has_royalty'] ?? false,
                 // Harga jual & diskon item dikunci; purchasing hanya ubah modal & vendor.
                 'sell_exclude' => $prev['sell_exclude'] ?? ($p['sell_exclude'] ?? 0),
                 'cost_exclude' => $normalized['cost_exclude'],
@@ -801,6 +802,7 @@ class OpportunityController extends Controller
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
+            'products.*.has_royalty' => ['nullable'],
             'has_discount' => ['nullable', 'boolean'],
             'discount_amount' => ['nullable', 'numeric', 'min:0'],
             'has_shipping_charge' => ['nullable', 'boolean'],
@@ -917,6 +919,7 @@ class OpportunityController extends Controller
                         'vendor' => $normalized['vendor'] ?? '',
                         'tax_category' => $normalized['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                         'item_kind' => $normalized['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                        'has_royalty' => $normalized['has_royalty'] ?? false,
                         'sell_exclude' => $normalized['sell_exclude'] ?? 0,
                         'cost_exclude' => $normalized['cost_exclude'],
                         'discount_exclude' => $normalized['discount_exclude'] ?? 0,
@@ -1044,7 +1047,7 @@ class OpportunityController extends Controller
 
         $accounts = $this->scopeAssigned(Account::query())
             ->orderBy('name')
-            ->get(['id', 'name', 'crm_regency_code', 'billing_address_city', 'crm_payment_level']);
+            ->get(['id', 'name', 'crm_regency_code', 'billing_address_city', 'crm_payment_level', 'crm_top']);
 
         $accountMarginMeta = $accounts->mapWithKeys(function (Account $account) {
             return [$account->id => [
@@ -1058,6 +1061,7 @@ class OpportunityController extends Controller
             'accountMarginMeta' => $accountMarginMeta,
             'marginNominalUmum' => \App\Support\PaymentLevel::marginNominalUmum(),
             'marginNominalOngkirPribadi' => \App\Support\PaymentLevel::marginNominalOngkirPribadi(),
+            'marginMaxPercent' => \App\Support\PaymentLevel::maxMarginPercent(),
             'contacts' => Contact::query()
                 ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
                 ->orderBy('first_name')

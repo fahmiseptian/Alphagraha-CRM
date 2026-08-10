@@ -117,12 +117,22 @@ class QuotationController extends Controller
                         ->with('error', $error);
                 }
 
+                if ($stageError = $opportunity->quotationBlockedReason()) {
+                    return redirect()->route('opportunities.show', $opportunity)
+                        ->with('error', $stageError);
+                }
+
                 if ($error = $this->opportunityQuotationBlockMessage($opportunity)) {
                     return redirect()->route('opportunities.show', $opportunity)
                         ->with('error', $error);
                 }
 
                 if ($opportunity->quotation) {
+                    if (! $opportunity->canOpenQuotation()) {
+                        return redirect()->route('opportunities.show', $opportunity)
+                            ->with('error', $opportunity->quotationLockedReason());
+                    }
+
                     return redirect()->route('quotations.show', $opportunity->quotation)
                         ->with('success', 'This opportunity already has a quotation.');
                 }
@@ -274,6 +284,7 @@ class QuotationController extends Controller
     public function show(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
 
         // Self-heal: samakan lock QO dengan status margin opportunity terbaru.
         $this->syncMarginLockFromOpportunity($quotation);
@@ -297,6 +308,7 @@ class QuotationController extends Controller
     public function edit(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
         $quotation->load(['items', 'opportunity']);
 
         return view('quotations.edit', $this->formData($quotation->opportunity?->company) + ['quotation' => $quotation]);
@@ -305,6 +317,7 @@ class QuotationController extends Controller
     public function update(Request $request, Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
         $data = $this->validateData($request, $quotation);
 
         if ($error = $this->paymentLevelBlockForPayload($data, $quotation)) {
@@ -420,6 +433,7 @@ class QuotationController extends Controller
     public function preview(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
         $this->syncMarginLockFromOpportunity($quotation);
         $this->ensureMarginUnlocked($quotation);
         $this->ensureCreatorSignature($quotation);
@@ -433,6 +447,7 @@ class QuotationController extends Controller
     public function pdf(Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
         $this->syncMarginLockFromOpportunity($quotation);
         $this->ensureMarginUnlocked($quotation);
         $this->ensureCreatorSignature($quotation);
@@ -453,6 +468,7 @@ class QuotationController extends Controller
     public function updateStatus(Request $request, Quotation $quotation)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
         $data = $request->validate([
             'status' => ['required', Rule::in(array_keys(Quotation::STATUSES))],
         ]);
@@ -529,6 +545,7 @@ class QuotationController extends Controller
     public function previewRevision(Quotation $quotation, QuotationRevision $revision)
     {
         $this->authorizeAccess($quotation);
+        $this->ensureQuotationStageOpen($quotation);
         $this->ensureMarginUnlocked($quotation);
 
         if ((int) $revision->quotation_id !== (int) $quotation->id) {
@@ -621,6 +638,7 @@ class QuotationController extends Controller
             'items.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
             'items.*.tax_category' => ['nullable', 'string', 'max:20'],
             'items.*.item_kind' => ['nullable', 'string', 'max:20'],
+            'items.*.has_royalty' => ['nullable'],
             'items.*.vendor' => ['nullable', 'string', 'max:255'],
         ];
 
@@ -676,6 +694,7 @@ class QuotationController extends Controller
                 'cost_exclude' => round((float) ($i->cost_exclude ?? 0), 2),
                 'tax_category' => (string) ($i->tax_category ?? ''),
                 'item_kind' => (string) ($i->item_kind ?? ''),
+                'has_royalty' => (bool) ($i->has_royalty ?? false),
                 'vendor' => (string) ($i->vendor ?? ''),
             ])->values()->all(),
         ];
@@ -749,6 +768,7 @@ class QuotationController extends Controller
                 'vendor' => $item['vendor'] ?? '',
                 'tax_category' => $item['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $item['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                'has_royalty' => ! empty($item['has_royalty']),
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => (float) ($incomingCost ?? 0),
                 'discount_exclude' => $discountExclude,
@@ -765,6 +785,7 @@ class QuotationController extends Controller
                 'total' => round($quantity * $billedPrice, 2),
                 'tax_category' => $enriched['tax_category'],
                 'item_kind' => $enriched['item_kind'],
+                'has_royalty' => ! empty($enriched['has_royalty']),
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => $enriched['cost_exclude'],
                 'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,
@@ -988,6 +1009,25 @@ class QuotationController extends Controller
         }
     }
 
+    /**
+     * QO yang sudah terlanjur dibuat tetap terkunci sampai opportunity masuk Proposal+.
+     */
+    protected function ensureQuotationStageOpen(Quotation $quotation): void
+    {
+        $quotation->loadMissing('opportunity');
+        $opportunity = $quotation->opportunity;
+
+        if (! $opportunity || $opportunity->canOpenQuotation()) {
+            return;
+        }
+
+        throw new HttpResponseException(
+            redirect()
+                ->route('opportunities.show', $opportunity)
+                ->with('error', $opportunity->quotationLockedReason())
+        );
+    }
+
     protected function paymentLevelBlockMessage(?Account $account): ?string
     {
         if (! $account) {
@@ -1029,7 +1069,8 @@ class QuotationController extends Controller
 
     protected function opportunityQuotationBlockMessage(Opportunity $opportunity): ?string
     {
-        return $this->opportunityDiscountBlockMessage($opportunity)
+        return $opportunity->quotationBlockedReason()
+            ?? $this->opportunityDiscountBlockMessage($opportunity)
             ?? $this->opportunityMarginBlockMessage($opportunity);
     }
 
@@ -1103,6 +1144,7 @@ class QuotationController extends Controller
         }
 
         $pctThreshold = $account->minMarginPercent();
+        $maxPctThreshold = \App\Support\PaymentLevel::maxMarginPercent();
         $marginPct = $opportunity->overallMarginPercent();
         $marginNominal = $opportunity->totalProductsMargin();
         $nominalThreshold = $opportunity->requiredMarginNominalThreshold();
@@ -1114,13 +1156,14 @@ class QuotationController extends Controller
 
         // Suspend: gate pembayaran sudah di-block sebelumnya.
         $belowPct = $pctThreshold !== null && ($marginPct === null || $marginPct < $pctThreshold);
+        $abovePct = $maxPctThreshold > 0 && $marginPct !== null && $marginPct > $maxPctThreshold;
         $belowNominal = $nominalThreshold > 0 && $marginNominal < $nominalThreshold;
-        $below = $belowPct || $belowNominal;
+        $outOfRange = $belowPct || $abovePct || $belowNominal;
 
         $wasPending = $quotation->crm_margin_status === Quotation::MARGIN_PENDING;
         $wasApproved = $quotation->crm_margin_status === Quotation::MARGIN_APPROVED;
 
-        if (! $below) {
+        if (! $outOfRange) {
             $quotation->crm_margin_status = null;
             $quotation->crm_margin_requested_at = null;
             $quotation->crm_margin_reviewed_by = null;

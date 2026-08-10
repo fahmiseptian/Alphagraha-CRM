@@ -228,6 +228,7 @@ class Quotation extends Model
                 'unit_price' => $billed,
                 'tax_category' => (string) ($p['tax_category'] ?? ''),
                 'item_kind' => (string) ($p['item_kind'] ?? ''),
+                'has_royalty' => ! empty($p['has_royalty']),
                 'sell_exclude' => $list,
                 'discount_exclude' => $discount,
                 'cost_exclude' => (float) ($p['cost_exclude'] ?? 0),
@@ -250,6 +251,7 @@ class Quotation extends Model
             'cost_exclude' => round((float) ($row['cost_exclude'] ?? 0), 2),
             'tax_category' => (string) ($row['tax_category'] ?? ''),
             'item_kind' => (string) ($row['item_kind'] ?? ''),
+            'has_royalty' => ! empty($row['has_royalty']) ? 1 : 0,
             'vendor' => (string) ($row['vendor'] ?? ''),
         ])->values()->all();
 
@@ -269,6 +271,7 @@ class Quotation extends Model
             'cost_exclude' => $i->cost_exclude ?? 0,
             'tax_category' => $i->tax_category ?? '',
             'item_kind' => $i->item_kind ?? '',
+            'has_royalty' => (bool) ($i->has_royalty ?? false),
             'vendor' => $i->vendor ?? '',
         ])->all();
 
@@ -300,6 +303,7 @@ class Quotation extends Model
                 'total' => round($quantity * $billedPrice, 2),
                 'tax_category' => $item['tax_category'] !== '' ? $item['tax_category'] : null,
                 'item_kind' => $item['item_kind'] !== '' ? $item['item_kind'] : null,
+                'has_royalty' => ! empty($item['has_royalty']),
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => (float) $item['cost_exclude'],
                 'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,

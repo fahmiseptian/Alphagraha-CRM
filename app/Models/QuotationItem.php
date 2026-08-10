@@ -13,7 +13,7 @@ class QuotationItem extends Model
     protected $fillable = [
         'quotation_id', 'name', 'description', 'quantity', 'unit',
         'unit_price', 'total', 'sort_order',
-        'tax_category', 'item_kind', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'vendor',
+        'tax_category', 'item_kind', 'has_royalty', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'vendor',
     ];
 
     protected $casts = [
@@ -23,6 +23,7 @@ class QuotationItem extends Model
         'sell_exclude' => 'decimal:2',
         'cost_exclude' => 'decimal:2',
         'discount_exclude' => 'decimal:2',
+        'has_royalty' => 'boolean',
     ];
 
     public function quotation(): BelongsTo
@@ -67,6 +68,7 @@ class QuotationItem extends Model
             'discount_exclude' => $discountExclude,
             'tax_category' => $this->tax_category ?? OpportunityProductPricing::TAX_NON_WAPU,
             'item_kind' => $this->item_kind ?? OpportunityProductPricing::KIND_BARANG,
+            'has_royalty' => (bool) $this->has_royalty,
         ]);
 
         return round((float) $enriched['quantity'] * (float) $enriched['margin'], 2);

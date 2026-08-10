@@ -29,7 +29,7 @@ class Opportunity extends Model implements HasMedia
         'name', 'account_id', 'company', 'stage', 'type', 'amount', 'amount_currency',
         'close_date', 'probability', 'lead_source', 'description', 'crm_lost_reason', 'assigned_user_id',
         'contact_id', 'vendor',
-        'crm_tax_category', 'crm_item_kind', 'crm_sell_exclude', 'crm_cost_exclude',
+        'crm_tax_category', 'crm_item_kind', 'crm_has_royalty', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_cost_in_usd', 'crm_cost_fx_code', 'crm_cost_usd', 'crm_cost_usd_rate',
         'crm_item_discount',
         'crm_won_margin',
@@ -51,6 +51,7 @@ class Opportunity extends Model implements HasMedia
         'vendor' => 'array',
         'crm_tax_category' => 'array',
         'crm_item_kind' => 'array',
+        'crm_has_royalty' => 'array',
         'crm_sell_exclude' => 'array',
         'crm_cost_exclude' => 'array',
         'crm_cost_in_usd' => 'array',
@@ -90,6 +91,10 @@ class Opportunity extends Model implements HasMedia
 
     /** Stage awal — belum butuh approval margin / diskon tambahan. */
     public const NO_APPROVAL_STAGES = ['Prospecting', 'Qualification'];
+
+    public const PROSPECTING_STAGE = 'Prospecting';
+
+    public const QUALIFICATION_STAGE = 'Qualification';
 
     public const WON_STAGE = 'Closed Won';
     public const LOST_STAGE = 'Closed Lost';
@@ -332,6 +337,7 @@ class Opportunity extends Model implements HasMedia
         $vendors = array_values((array) ($this->vendor ?? []));
         $taxCategories = array_values((array) ($this->crm_tax_category ?? []));
         $itemKinds = array_values((array) ($this->crm_item_kind ?? []));
+        $hasRoyaltyFlags = array_values((array) ($this->crm_has_royalty ?? []));
         $sellExcludes = array_values((array) ($this->crm_sell_exclude ?? []));
         $costExcludes = array_values((array) ($this->crm_cost_exclude ?? []));
         $costInUsdFlags = array_values((array) ($this->crm_cost_in_usd ?? []));
@@ -342,7 +348,8 @@ class Opportunity extends Model implements HasMedia
 
         $count = max(
             count($names), count($qtys), count($prices), count($costs), count($vendors),
-            count($taxCategories), count($itemKinds), count($sellExcludes), count($costExcludes),
+            count($taxCategories), count($itemKinds), count($hasRoyaltyFlags),
+            count($sellExcludes), count($costExcludes),
             count($itemDiscounts), count($costInUsdFlags), count($costFxCodes), count($costUsds), count($costUsdRates)
         );
 
@@ -352,7 +359,7 @@ class Opportunity extends Model implements HasMedia
 
         return collect(range(0, $count - 1))
             ->map(function ($i) use (
-                $names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds,
+                $names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds, $hasRoyaltyFlags,
                 $sellExcludes, $costExcludes, $itemDiscounts, $costInUsdFlags, $costFxCodes, $costUsds, $costUsdRates
             ) {
                 $priceInclude = (float) ($prices[$i] ?? 0);
@@ -368,6 +375,7 @@ class Opportunity extends Model implements HasMedia
                     : 0;
                 $taxCategory = (string) ($taxCategories[$i] ?? OpportunityProductPricing::TAX_NON_WAPU);
                 $itemKind = (string) ($itemKinds[$i] ?? OpportunityProductPricing::KIND_BARANG);
+                $hasRoyalty = OpportunityProductPricing::hasRoyaltyFlag($hasRoyaltyFlags[$i] ?? false);
                 $costForeign = in_array((string) ($costInUsdFlags[$i] ?? '0'), ['1', 'true', 'yes'], true);
                 $fxCode = strtoupper(trim((string) ($costFxCodes[$i] ?? '')));
                 if ($costForeign && $fxCode === '') {
@@ -382,6 +390,7 @@ class Opportunity extends Model implements HasMedia
                     'vendor' => (string) ($vendors[$i] ?? ''),
                     'tax_category' => $taxCategory,
                     'item_kind' => $itemKind,
+                    'has_royalty' => $hasRoyalty,
                     'sell_exclude' => $sellExclude,
                     'cost_exclude' => $costExclude,
                     'discount_exclude' => $itemDiscount,
@@ -414,6 +423,7 @@ class Opportunity extends Model implements HasMedia
         $this->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
         $this->crm_tax_category = $rows->pluck('tax_category')->all();
         $this->crm_item_kind = $rows->pluck('item_kind')->all();
+        $this->crm_has_royalty = $rows->map(fn ($p) => OpportunityProductPricing::hasRoyaltyFlag($p['has_royalty'] ?? false) ? '1' : '0')->all();
         $this->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
         $this->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
         $this->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
@@ -426,6 +436,32 @@ class Opportunity extends Model implements HasMedia
         })->all();
         $this->crm_cost_usd = $rows->map(fn ($p) => (string) ($p['cost_fx'] ?? $p['cost_usd'] ?? 0))->all();
         $this->crm_cost_usd_rate = $rows->map(fn ($p) => (string) ($p['fx_rate'] ?? $p['usd_rate'] ?? 0))->all();
+
+        $this->promoteToQualificationWhenHasProducts($rows);
+    }
+
+    /**
+     * Bila ada produk terisi dan stage masih Prospecting → naikkan ke Qualification.
+     *
+     * @param  \Illuminate\Support\Collection|array|null  $rows
+     */
+    public function promoteToQualificationWhenHasProducts($rows = null): bool
+    {
+        if ((string) $this->stage !== self::PROSPECTING_STAGE) {
+            return false;
+        }
+
+        $rows = $rows !== null ? collect($rows) : $this->products;
+        $hasProducts = $rows->contains(fn ($p) => filled(is_array($p) ? ($p['name'] ?? '') : ''));
+
+        if (! $hasProducts) {
+            return false;
+        }
+
+        $this->stage = self::QUALIFICATION_STAGE;
+        $this->probability = self::defaultProbabilityForStage(self::QUALIFICATION_STAGE);
+
+        return true;
     }
 
     /**
@@ -466,6 +502,7 @@ class Opportunity extends Model implements HasMedia
         $p['fx_rate'] = $fxRate;
         $p['usd_rate'] = $fxRate;
         $p['cost_exclude'] = $costExclude;
+        $p['has_royalty'] = OpportunityProductPricing::hasRoyaltyFlag($p['has_royalty'] ?? false);
 
         return $p;
     }
@@ -530,10 +567,24 @@ class Opportunity extends Model implements HasMedia
             $this->products->sum(function (array $row) {
                 $qty = (float) ($row['quantity'] ?? 1);
                 $taxCategory = (string) ($row['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU);
+
+                if ($taxCategory === OpportunityProductPricing::TAX_ZINIT) {
+                    $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
+                    $fee = (float) ($row['zinit_success_fee'] ?? 0);
+                    // GP% terhadap Pot Fee (jual excl − Fee Zinit), total baris.
+                    $pot = ($row['zinit_pot_fee'] ?? null);
+                    if ($pot !== null) {
+                        return (float) $pot;
+                    }
+
+                    return ($qty * $effectiveSell) - $fee;
+                }
+
                 $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
 
-                if ($taxCategory === OpportunityProductPricing::TAX_WAPU) {
+                if (in_array($taxCategory, [OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_INAPROC], true)) {
                     $pph = (float) ($row['pph'] ?? 0);
+
                     return $qty * ($effectiveSell - $pph);
                 }
 
@@ -624,6 +675,41 @@ class Opportunity extends Model implements HasMedia
         return in_array((string) $this->stage, self::NO_APPROVAL_STAGES, true);
     }
 
+    /**
+     * Stage awal (Prospecting / Qualification) tidak boleh membuat Quotation.
+     */
+    public function canCreateQuotation(): bool
+    {
+        return ! $this->skipsApproval();
+    }
+
+    /**
+     * Membuka / mengakses QO yang sudah ada — sama syaratnya dengan membuat QO.
+     */
+    public function canOpenQuotation(): bool
+    {
+        return $this->canCreateQuotation();
+    }
+
+    public function quotationBlockedReason(): ?string
+    {
+        if ($this->canCreateQuotation()) {
+            return null;
+        }
+
+        return 'Quotation hanya bisa dibuat mulai stage Proposal. Stage Prospecting dan Qualification belum diizinkan.';
+    }
+
+    /** Pesan saat QO sudah ada tetapi stage masih Prospecting / Qualification. */
+    public function quotationLockedReason(): ?string
+    {
+        if ($this->canOpenQuotation()) {
+            return null;
+        }
+
+        return 'Quotation terkunci. Pindahkan / lanjutkan opportunity ke tahap Proposal untuk membuka QO.';
+    }
+
     public function isCustomerFreeShipping(): bool
     {
         $this->loadMissing('account');
@@ -678,6 +764,7 @@ class Opportunity extends Model implements HasMedia
         $marginPct = $this->overallMarginPercent();
         $marginNominal = $this->totalProductsMargin();
         $pctThreshold = $account?->minMarginPercent();
+        $maxPctThreshold = \App\Support\PaymentLevel::maxMarginPercent();
         $nominalThreshold = $this->requiredMarginNominalThreshold();
 
         $this->crm_margin_percent = $marginPct;
@@ -710,13 +797,14 @@ class Opportunity extends Model implements HasMedia
         }
 
         $belowPct = $pctThreshold !== null && ($marginPct === null || $marginPct < $pctThreshold);
+        $abovePct = $maxPctThreshold > 0 && $marginPct !== null && $marginPct > $maxPctThreshold;
         $belowNominal = $nominalThreshold > 0 && $marginNominal < $nominalThreshold;
-        $below = $belowPct || $belowNominal;
+        $outOfRange = $belowPct || $abovePct || $belowNominal;
 
         $wasPending = $this->crm_margin_status === self::MARGIN_PENDING;
         $wasApproved = $this->crm_margin_status === self::MARGIN_APPROVED;
 
-        if (! $below) {
+        if (! $outOfRange) {
             $this->crm_margin_status = null;
             $this->crm_margin_requested_at = null;
             $this->crm_margin_reviewed_by = null;
@@ -787,6 +875,7 @@ class Opportunity extends Model implements HasMedia
                     'vendor' => (string) ($get('vendor', '') ?? ''),
                     'tax_category' => $tax !== '' ? $tax : OpportunityProductPricing::TAX_NON_WAPU,
                     'item_kind' => $kind !== '' ? $kind : OpportunityProductPricing::KIND_BARANG,
+                    'has_royalty' => OpportunityProductPricing::hasRoyaltyFlag($get('has_royalty', false)),
                     'sell_exclude' => $list,
                     'cost_exclude' => (float) ($get('cost_exclude', 0) ?: 0),
                     'discount_exclude' => $discount,

@@ -24,6 +24,7 @@ class ContactService
         $contact->account_id = $account->id;
         $contact->first_name = $firstName;
         $contact->last_name = $lastName ?: null;
+        $contact->salutation_name = $this->normalizeTitle($data['salutation_name'] ?? null);
         $contact->job_role = $this->normalizeJobRole($data['job_role'] ?? null);
         $contact->name = trim($firstName.' '.$lastName) ?: $firstName;
         $contact->assigned_user_id = $account->assigned_user_id ?: ($createdById ?? auth()->id());
@@ -46,6 +47,7 @@ class ContactService
         $contact->account_id = $account->id;
         $contact->first_name = $firstName;
         $contact->last_name = $lastName ?: null;
+        $contact->salutation_name = $this->normalizeTitle($data['salutation_name'] ?? null);
         $contact->job_role = $this->normalizeJobRole($data['job_role'] ?? null);
         $contact->name = trim($firstName.' '.$lastName) ?: $firstName;
         $contact->modified_at = Carbon::now()->format('Y-m-d H:i:s');
@@ -55,6 +57,13 @@ class ContactService
         $this->writer->syncPrimaryPhone($contact->id, 'Contact', $data['phone'] ?? null);
 
         return $contact;
+    }
+
+    protected function normalizeTitle(mixed $value): ?string
+    {
+        $title = trim((string) ($value ?? ''));
+
+        return $title !== '' ? $title : null;
     }
 
     protected function normalizeJobRole(mixed $value): ?string
