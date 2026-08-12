@@ -8,7 +8,7 @@
                 {{-- Insert placeholder toolbar --}}
                 <div class="mb-3 flex flex-wrap gap-1.5">
                     <span class="mr-1 self-center text-xs text-slate-400">Insert:</span>
-                    @foreach (['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','items_table_diskon_item','total_price','sales_name','sales_job_position','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'] as $ph)
+                    @foreach (['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','items_table_idr_include','items_table_diskon_item','total_price','sales_name','sales_job_position','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'] as $ph)
                         @php $placeholderTag = '{'.'{ '.$ph.' }'.'}'; @endphp
                         <button type="button" onclick="insertPlaceholder('{{ $ph }}')"
                                 class="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-brand-700 hover:bg-brand-50">

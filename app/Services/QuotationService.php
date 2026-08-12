@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Quotation;
 use App\Models\QuotationTemplate;
 use App\Models\User;
+use App\Support\OpportunityProductPricing;
 use Carbon\Carbon;
 
 /**
@@ -217,6 +218,8 @@ class QuotationService
             'items_rows' => $this->renderItemsRows($quotation),
             'items_table_idr' => $this->renderItemsTableIndo($quotation),
             'items_rows_idr' => $this->renderItemsRowsIndo($quotation),
+            'items_table_idr_include' => $this->renderItemsTableIndoInclude($quotation),
+            'items_rows_idr_include' => $this->renderItemsRowsIndoInclude($quotation),
             'items_table_diskon_item' => $this->renderItemsTableDiskonItem($quotation),
             'items_rows_diskon_item' => $this->renderItemsRowsDiskonItem($quotation),
             'company_legal_name' => $company['legal_name'] ?? '',
@@ -610,6 +613,121 @@ class QuotationService
             .$this->renderItemsRowsIndo($quotation)
             .$this->renderItemsTableIndoSummary($quotation)
             .'</tbody></table>';
+    }
+
+    /**
+     * Multiplier PPN untuk konversi exclude → include pada template QO.
+     */
+    protected function quotationIncludeMultiplier(Quotation $quotation): float
+    {
+        $taxPercent = (float) $quotation->tax_percent;
+        if ($taxPercent <= 0) {
+            $taxPercent = OpportunityProductPricing::ppnPercent();
+        }
+
+        return 1 + ($taxPercent / 100);
+    }
+
+    protected function toIncludePrice(float $exclude, float $multiplier): float
+    {
+        return round($exclude * $multiplier, 2);
+    }
+
+    /**
+     * Sama seperti items_table_idr, tetapi harga/total otomatis Include (× PPN).
+     */
+    protected function renderItemsRowsIndoInclude(Quotation $quotation): string
+    {
+        $rows = '';
+        $no = 1;
+        $multiplier = $this->quotationIncludeMultiplier($quotation);
+
+        foreach ($quotation->items as $item) {
+            $unitLabel = trim((string) $item->unit) ?: 'Unit';
+            $specHtml = $this->formatItemDescription($item->description);
+            $qty = (float) $item->quantity;
+            $unitInclude = $this->toIncludePrice((float) $item->unit_price, $multiplier);
+            $lineInclude = round($qty * $unitInclude, 2);
+
+            $rows .= '<tr>'
+                .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
+                .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
+                .($specHtml !== '' ? '<span style="display:block; height:4px;"></span><small>'.$specHtml.'</small>' : '')
+                .'</td>'
+                .'<td style="'.$this->cellStyle('center').'">'
+                .rtrim(rtrim(number_format($qty, 2), '0'), '.').' '.e($unitLabel).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($unitInclude, $quotation->currency).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($lineInclude, $quotation->currency).'</td>'
+                .'</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="5" style="'.$this->cellStyle('center').'color:#999;">Belum ada item.</td></tr>';
+        }
+
+        return $rows;
+    }
+
+    protected function renderItemsTableIndoIncludeSummary(Quotation $quotation): string
+    {
+        $currency = $quotation->currency;
+        $labelStyle = $this->cellStyle('right', true);
+        $valueStyle = $this->cellStyle('right', true);
+        $multiplier = $this->quotationIncludeMultiplier($quotation);
+        $labelColspan = 3;
+
+        $subtotalInclude = 0.0;
+        foreach ($quotation->items as $item) {
+            $unitInclude = $this->toIncludePrice((float) $item->unit_price, $multiplier);
+            $subtotalInclude += round((float) $item->quantity * $unitInclude, 2);
+        }
+        $subtotalInclude = round($subtotalInclude, 2);
+        $discountInclude = $this->toIncludePrice((float) $quotation->discount, $multiplier);
+        $totalInclude = round(max($subtotalInclude - $discountInclude, 0), 2);
+
+        $rows = '<tr>'
+            .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+            .'<td style="'.$labelStyle.'">Subtotal</td>'
+            .'<td style="'.$valueStyle.'">'.money($subtotalInclude, $currency).'</td>'
+            .'</tr>';
+
+        if ($discountInclude > 0) {
+            $rows .= '<tr>'
+                .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+                .'<td style="'.$labelStyle.'">Diskon</td>'
+                .'<td style="'.$valueStyle.'">-'.money($discountInclude, $currency).'</td>'
+                .'</tr>';
+        }
+
+        $rows .= '<tr>'
+            .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
+            .'<td style="'.$labelStyle.'">Total</td>'
+            .'<td style="'.$valueStyle.'">'.money($totalInclude, $currency).'</td>'
+            .'</tr>';
+
+        return $rows;
+    }
+
+    protected function renderItemsTableIndoInclude(Quotation $quotation): string
+    {
+        $taxLabel = rtrim(rtrim(number_format((float) (
+            (float) $quotation->tax_percent > 0
+                ? $quotation->tax_percent
+                : OpportunityProductPricing::ppnPercent()
+        ), 2), '0'), '.');
+
+        return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0; line-height: 1;">'
+            .'<thead><tr>'
+            .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
+            .'<th style="'.$this->cellStyle('center', true).'">Spesifikasi</th>'
+            .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga</th>'
+            .'</tr></thead><tbody>'
+            .$this->renderItemsRowsIndoInclude($quotation)
+            .$this->renderItemsTableIndoIncludeSummary($quotation)
+            .'</tbody></table>'
+            .'<p style="font-size:10px;color:#64748b;margin:4px 0 0;">* Harga sudah termasuk PPN '.$taxLabel.'%</p>';
     }
 
     protected function renderItemsRowsDiskonItem(Quotation $quotation): string

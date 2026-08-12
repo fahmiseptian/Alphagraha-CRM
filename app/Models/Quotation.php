@@ -316,12 +316,12 @@ class Quotation extends Model
     /**
      * Sinkronkan Quotation Items → Product List Opportunity (1:1).
      *
-     * @return array{synced: bool, notify_margin: bool}
+     * @return array{synced: bool, notify_margin: bool, notify_discount: bool}
      */
     public function syncItemsToLinkedOpportunity(): array
     {
         if (! $this->opportunity_id) {
-            return ['synced' => false, 'notify_margin' => false];
+            return ['synced' => false, 'notify_margin' => false, 'notify_discount' => false];
         }
 
         $opportunity = $this->relationLoaded('opportunity')
@@ -329,15 +329,19 @@ class Quotation extends Model
             : $this->opportunity()->first();
 
         if (! $opportunity) {
-            return ['synced' => false, 'notify_margin' => false];
+            return ['synced' => false, 'notify_margin' => false, 'notify_discount' => false];
         }
 
         $this->loadMissing('items');
 
+        $pricingBefore = $opportunity->productsPricingFingerprint();
+
         if (! $opportunity->replaceProductsFromQuotationItems($this->items)) {
-            return ['synced' => false, 'notify_margin' => false];
+            return ['synced' => false, 'notify_margin' => false, 'notify_discount' => false];
         }
 
+        $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
+        $notifyDiscount = $opportunity->reopenDiscountApprovalIfPricingChanged($pricingChanged);
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
         $opportunity->modified_at = now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
@@ -345,6 +349,10 @@ class Quotation extends Model
         $opportunity->setRelation('quotation', $this);
         $opportunity->syncLinkedQuotationMarginApproval();
 
-        return ['synced' => true, 'notify_margin' => $notifyMargin];
+        return [
+            'synced' => true,
+            'notify_margin' => $notifyMargin,
+            'notify_discount' => $notifyDiscount,
+        ];
     }
 }

@@ -6,7 +6,9 @@ use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\OpportunityNote;
 use App\Models\PurchaseOrder;
 use App\Models\Quotation;
+use App\Support\CustomerTop;
 use App\Support\OpportunityProductPricing;
+use App\Support\PaymentLevel;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -26,7 +28,7 @@ class Opportunity extends Model implements HasMedia
     protected $table = 'opportunity';
 
     protected $fillable = [
-        'name', 'account_id', 'company', 'stage', 'type', 'amount', 'amount_currency',
+        'name', 'account_id', 'crm_top', 'company', 'stage', 'type', 'amount', 'amount_currency',
         'close_date', 'probability', 'lead_source', 'description', 'crm_lost_reason', 'assigned_user_id',
         'contact_id', 'vendor',
         'crm_tax_category', 'crm_item_kind', 'crm_has_royalty', 'crm_sell_exclude', 'crm_cost_exclude',
@@ -719,10 +721,47 @@ class Opportunity extends Model implements HasMedia
 
     public function requiredMarginNominalThreshold(): float
     {
-        return \App\Support\PaymentLevel::requiredMarginNominal(
+        return PaymentLevel::requiredMarginNominal(
             $this->isCustomerFreeShipping(),
             (bool) $this->crm_has_shipping_charge
         );
+    }
+
+    public function top(): string
+    {
+        if (CustomerTop::isValid($this->crm_top)) {
+            return (string) $this->crm_top;
+        }
+
+        $this->loadMissing('account');
+
+        return $this->account?->top() ?? CustomerTop::DEFAULT;
+    }
+
+    public function topLabel(): string
+    {
+        return CustomerTop::label($this->top());
+    }
+
+    /**
+     * Minimal margin (%) efektif: max(level pembayaran customer, TOP opportunity).
+     * Null bila customer Suspend (tidak boleh quote).
+     */
+    public function minMarginPercent(): ?float
+    {
+        $this->loadMissing('account');
+        $account = $this->account;
+
+        if ($account?->isPaymentSuspended()) {
+            return null;
+        }
+
+        $fromLevel = $account
+            ? (PaymentLevel::minMarginPercent($account->paymentLevel()) ?? 0.0)
+            : 0.0;
+        $fromTop = CustomerTop::minMarginPercent($this->top());
+
+        return max($fromLevel, $fromTop);
     }
 
     public function marginNeedsApproval(): bool
@@ -759,12 +798,11 @@ class Opportunity extends Model implements HasMedia
     public function refreshMarginApprovalState(bool $isNew = false): bool
     {
         $this->loadMissing('account');
-        $account = $this->account;
 
         $marginPct = $this->overallMarginPercent();
         $marginNominal = $this->totalProductsMargin();
-        $pctThreshold = $account?->minMarginPercent();
-        $maxPctThreshold = \App\Support\PaymentLevel::maxMarginPercent();
+        $pctThreshold = $this->minMarginPercent();
+        $maxPctThreshold = PaymentLevel::maxMarginPercent();
         $nominalThreshold = $this->requiredMarginNominalThreshold();
 
         $this->crm_margin_percent = $marginPct;
@@ -1040,6 +1078,47 @@ class Opportunity extends Model implements HasMedia
         $this->crm_discount_note = null;
 
         return true;
+    }
+
+    /**
+     * Fingerprint nama barang + harga jual/modal — untuk deteksi perubahan yang memicu notif/re-approval diskon.
+     */
+    public function productsPricingFingerprint(): string
+    {
+        return md5(json_encode(
+            $this->products->map(fn (array $p) => [
+                'name' => (string) ($p['name'] ?? ''),
+                'sell_exclude' => round((float) ($p['sell_exclude'] ?? 0), 2),
+                'cost_exclude' => round((float) ($p['cost_exclude'] ?? 0), 2),
+            ])->values()->all()
+        ));
+    }
+
+    /**
+     * Bila ada diskon tambahan dan nama barang / harga jual / harga modal berubah
+     * → approval diskon kembali pending.
+     * Return true jika status baru menjadi pending (perlu notifikasi).
+     */
+    public function reopenDiscountApprovalIfPricingChanged(bool $pricingChanged): bool
+    {
+        if (! $pricingChanged || $this->skipsApproval() || ! $this->hasActiveDiscount()) {
+            return false;
+        }
+
+        if ($this->stage === self::LOST_STAGE) {
+            return false;
+        }
+
+        $wasPending = $this->crm_discount_status === self::DISCOUNT_PENDING;
+
+        $this->crm_discount_status = self::DISCOUNT_PENDING;
+        $this->crm_discount_requested_by = auth()->id() ?: $this->crm_discount_requested_by;
+        $this->crm_discount_requested_at = now();
+        $this->crm_discount_reviewed_by = null;
+        $this->crm_discount_reviewed_at = null;
+        $this->crm_discount_note = null;
+
+        return ! $wasPending;
     }
 
     /**

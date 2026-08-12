@@ -56,13 +56,16 @@
     </div>
 @endif
 
-@if ($opportunity->hasActiveDiscount())
+@php
+    $discStatus = $opportunity->crm_discount_status;
+    $isRejected = ! $opportunity->skipsApproval()
+        && $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_REJECTED;
+    $showDiscountPanel = $opportunity->hasActiveDiscount() || $isRejected;
+@endphp
+@if ($showDiscountPanel)
     @php
-        $discStatus = $opportunity->crm_discount_status;
         $discPct = $opportunity->discountPercent();
         $isPending = $opportunity->discountNeedsAttention();
-        $isRejected = ! $opportunity->skipsApproval()
-            && $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_REJECTED;
         $isApproved = ! $opportunity->skipsApproval()
             && $discStatus === \App\Models\Espo\Opportunity::DISCOUNT_APPROVED;
         $currency = $opportunity->amount_currency ?: 'IDR';
@@ -89,7 +92,7 @@
                             <i class="bi bi-hourglass-split mr-1"></i> Diskon menunggu approval Superadmin
                         @elseif ($isRejected)
                             <i class="bi bi-x-circle mr-1"></i> Diskon ditolak
-                            @if ($discountAmount > 0)
+                            @if ($discountAmount > 0 && $opportunity->hasActiveDiscount())
                                 <span class="font-normal">— nominal disetujui {{ money($discountAmount, $currency) }}</span>
                             @endif
                         @elseif ($isApproved)
@@ -170,6 +173,18 @@
                                     </button>
                                 </div>
                             </form>
+                            <form method="POST" action="{{ route('opportunities.discount.reject', $opportunity) }}"
+                                  onsubmit="return confirm('Tolak permintaan diskon tambahan ini?')"
+                                  class="space-y-2">
+                                @csrf
+                                <input type="hidden" name="discount_amount" value="0">
+                                <input type="text" name="note" placeholder="Catatan reject (opsional)"
+                                       class="w-full rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                                <button type="submit"
+                                        class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                                    <i class="bi bi-x-lg"></i> Reject
+                                </button>
+                            </form>
                         </div>
                         <div x-show="adjustMode" x-cloak class="rounded-lg border border-green-200 bg-white p-3">
                             <p class="mb-2 text-xs font-semibold text-green-800">Sesuaikan diskon — isi nominal atau % margin</p>
@@ -214,6 +229,9 @@
                                 <div class="flex flex-wrap gap-2">
                                     <button type="submit"
                                             class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition"
+                                            :formaction="discountAmount > 0
+                                                ? {{ json_encode(route('opportunities.discount.approve', $opportunity)) }}
+                                                : {{ json_encode(route('opportunities.discount.reject', $opportunity)) }}"
                                             :class="discountAmount > 0
                                                 ? 'border-transparent bg-green-600 text-white hover:bg-green-700'
                                                 : 'border-transparent bg-red-600 text-white hover:bg-red-700'">
@@ -504,6 +522,15 @@
             <dl class="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
                 <div><dt class="text-slate-400">Company</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->company ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Account / Customer</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->account)->name ?: '—' }}</dd></div>
+                <div>
+                    <dt class="text-slate-400">TOP</dt>
+                    <dd class="mt-0.5 font-medium text-slate-700">
+                        {{ $opportunity->topLabel() }}
+                        @if ($opportunity->account && $opportunity->top() !== $opportunity->account->top())
+                            <span class="text-xs font-normal text-slate-400">(customer: {{ $opportunity->account->topLabel() }})</span>
+                        @endif
+                    </dd>
+                </div>
                 <div><dt class="text-slate-400">Type</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->type ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Amount</dt><dd class="mt-0.5 font-semibold text-slate-800">{{ money($opportunity->amount, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
                 @if ($opportunity->crm_has_shipping_charge)

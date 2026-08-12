@@ -262,6 +262,9 @@ class QuotationController extends Controller
                 if ($oppSync['notify_margin'] && $quotation->opportunity) {
                     $this->notifications->notifyOpportunityMarginRequested($quotation->opportunity);
                 }
+                if (($oppSync['notify_discount'] ?? false) && $quotation->opportunity) {
+                    $this->notifications->notifyDiscountRequested($quotation->opportunity);
+                }
 
                 return $quotation;
             });
@@ -272,6 +275,9 @@ class QuotationController extends Controller
         $msg = 'Quotation ' . $quotation->number . ' created successfully.';
         if ($oppSyncedOnCreate) {
             $msg .= ' Product List Opportunity disinkronkan.';
+        }
+        if ($quotation->opportunity?->discountNeedsAttention()) {
+            $msg .= ' Diskon Opportunity menunggu approval Superadmin.';
         }
         if ($quotation->marginNeedsApproval()) {
             $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';
@@ -328,9 +334,10 @@ class QuotationController extends Controller
         $becameRevision = false;
         $syncedOpportunity = false;
         $notifyOppMargin = false;
+        $notifyOppDiscount = false;
 
         try {
-            $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision, &$syncedOpportunity, &$notifyOppMargin) {
+            $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision, &$syncedOpportunity, &$notifyOppMargin, &$notifyOppDiscount) {
                 $before = $this->contentFingerprint($quotation);
                 $everSent = $quotation->hasBeenSent();
                 // Naik R hanya jika status SAAT INI Sent. Draft setelah R1 tidak boleh jadi R2.
@@ -360,6 +367,7 @@ class QuotationController extends Controller
                 $oppSync = $quotation->syncItemsToLinkedOpportunity();
                 $syncedOpportunity = $oppSync['synced'];
                 $notifyOppMargin = $oppSync['notify_margin'];
+                $notifyOppDiscount = $oppSync['notify_discount'] ?? false;
 
                 $after = $this->contentFingerprint($quotation->fresh(['items']));
                 $contentChanged = $before !== $after;
@@ -403,6 +411,9 @@ class QuotationController extends Controller
         if ($notifyOppMargin && $result->opportunity) {
             $this->notifications->notifyOpportunityMarginRequested($result->opportunity);
         }
+        if ($notifyOppDiscount && $result->opportunity) {
+            $this->notifications->notifyDiscountRequested($result->opportunity);
+        }
 
         $msg = 'Quotation updated successfully.';
         if ($becameRevision) {
@@ -410,6 +421,9 @@ class QuotationController extends Controller
         }
         if ($syncedOpportunity) {
             $msg .= ' Product List Opportunity disinkronkan.';
+        }
+        if ($result->opportunity?->discountNeedsAttention()) {
+            $msg .= ' Diskon Opportunity menunggu approval Superadmin.';
         }
         if ($result->marginNeedsApproval()) {
             $msg .= ' Margin di bawah minimal — menunggu approval Superadmin.';
@@ -1143,7 +1157,7 @@ class QuotationController extends Controller
             return false;
         }
 
-        $pctThreshold = $account->minMarginPercent();
+        $pctThreshold = $opportunity->minMarginPercent();
         $maxPctThreshold = \App\Support\PaymentLevel::maxMarginPercent();
         $marginPct = $opportunity->overallMarginPercent();
         $marginNominal = $opportunity->totalProductsMargin();

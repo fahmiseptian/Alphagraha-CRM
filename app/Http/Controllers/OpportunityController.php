@@ -8,8 +8,10 @@ use App\Models\Espo\Contact;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
 use App\Models\Espo\Team;
+use App\Support\CustomerTop;
 use App\Support\OpportunityProductBulkExcel;
 use App\Support\OpportunityProductPricing;
+use App\Support\PaymentLevel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -170,6 +172,12 @@ class OpportunityController extends Controller
             $accountId = null;
         }
 
+        $defaultTop = CustomerTop::DEFAULT;
+        if ($accountId) {
+            $account = Account::query()->find($accountId);
+            $defaultTop = $account?->top() ?? CustomerTop::DEFAULT;
+        }
+
         $opportunity = new Opportunity([
             'company' => Opportunity::COMPANIES[0] ?? null,
             'stage' => 'Prospecting',
@@ -177,6 +185,7 @@ class OpportunityController extends Controller
             'probability' => 10,
             'assigned_user_id' => auth()->id(),
             'account_id' => $accountId,
+            'crm_top' => $defaultTop,
         ]);
 
         return view('opportunities.create', $this->formData($opportunity) + [
@@ -268,7 +277,9 @@ class OpportunityController extends Controller
         }
 
         $data = $this->validateData($request, creating: false, opportunity: $opportunity);
+        $pricingBefore = $opportunity->productsPricingFingerprint();
         $this->applyValidatedData($opportunity, $data, $request);
+        $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
 
         if ($opportunity->isDirty('stage')
             && $opportunity->stage === Opportunity::WON_STAGE
@@ -277,6 +288,7 @@ class OpportunityController extends Controller
         }
 
         $notifyDiscount = $opportunity->activateDiscountApprovalIfNeeded()
+            || $opportunity->reopenDiscountApprovalIfPricingChanged($pricingChanged)
             || (
                 $opportunity->crm_discount_status === Opportunity::DISCOUNT_PENDING
                 && ($opportunity->isDirty('crm_discount_status') || $opportunity->isDirty('crm_discount_amount'))
@@ -404,7 +416,8 @@ class OpportunityController extends Controller
     }
 
     /**
-     * Superadmin menolak request — wajib isi nominal diskon yang disetujui (counter-offer).
+     * Superadmin menolak request diskon.
+     * discount_amount kosong/0 = tolak sepenuhnya; >0 = counter-offer (nominal yang diperbolehkan).
      */
     public function rejectDiscount(Request $request, Opportunity $opportunity)
     {
@@ -418,14 +431,12 @@ class OpportunityController extends Controller
         }
 
         $data = $request->validate([
-            'discount_amount' => ['required', 'numeric', 'min:0'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
             'note' => ['nullable', 'string', 'max:1000'],
-        ], [
-            'discount_amount.required' => 'Isi nominal diskon yang disetujui.',
         ]);
 
         $requestedAmount = (float) $opportunity->crm_discount_amount;
-        $approvedAmount = (float) $data['discount_amount'];
+        $approvedAmount = (float) ($data['discount_amount'] ?? 0);
         $note = $data['note'] ?? null;
 
         if ($approvedAmount <= 0) {
@@ -454,7 +465,11 @@ class OpportunityController extends Controller
         );
         app(\App\Services\NotificationService::class)->markDiscountRequestActioned($opportunity);
 
-        return back()->with('success', 'Diskon ditolak. Sales mendapat notifikasi nominal yang disetujui.');
+        $message = $approvedAmount > 0
+            ? 'Diskon ditolak. Sales mendapat notifikasi nominal yang disetujui.'
+            : 'Diskon ditolak. Sales mendapat notifikasi.';
+
+        return back()->with('success', $message);
     }
 
     /**
@@ -631,8 +646,11 @@ class OpportunityController extends Controller
             ]);
         })->filter(fn ($p) => filled($p['name'] ?? null))->values();
 
+        $pricingBefore = $opportunity->productsPricingFingerprint();
         $opportunity->applyProductRows($rows);
+        $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
         $opportunity->syncWonMargin();
+        $notifyDiscount = $opportunity->reopenDiscountApprovalIfPricingChanged($pricingChanged);
         $opportunity->loadMissing('quotation');
         $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
             || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
@@ -643,6 +661,9 @@ class OpportunityController extends Controller
         $syncedQuotationItems = $opportunity->syncProductsToLinkedQuotation();
         $opportunity->syncLinkedQuotationMarginApproval();
 
+        if ($notifyDiscount && $opportunity->discountNeedsAttention()) {
+            app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
+        }
         if ($notifyMargin) {
             app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
         }
@@ -657,6 +678,9 @@ class OpportunityController extends Controller
         $message = 'Harga modal & vendor berhasil diperbarui.';
         if ($syncedQuotationItems) {
             $message .= ' Item Quotation disinkronkan; status QO menjadi Draft.';
+        }
+        if ($opportunity->discountNeedsAttention()) {
+            $message .= ' Diskon menunggu approval Superadmin.';
         }
 
         return redirect()->route('opportunities.show', $opportunity)
@@ -678,6 +702,7 @@ class OpportunityController extends Controller
         }
 
         if ($data['stage'] !== $opportunity->stage) {
+            $previousStage = $opportunity->stage;
             $opportunity->stage = $data['stage'];
             $opportunity->probability = Opportunity::defaultProbabilityForStage($data['stage']);
 
@@ -694,8 +719,14 @@ class OpportunityController extends Controller
                 $opportunity->crm_discount_status = null;
             }
 
+            // Hanya anggap "baru" saat keluar dari stage yang skip approval
+            // (Prospecting/Qualification → Proposal/dst). Proposal → Negotiation
+            // harus mempertahankan approval yang sudah disetujui.
+            $leavingSkipApproval = in_array($previousStage, Opportunity::NO_APPROVAL_STAGES, true)
+                && ! $opportunity->skipsApproval();
+
             $notifyDiscount = $opportunity->activateDiscountApprovalIfNeeded();
-            $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: true);
+            $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: $leavingSkipApproval);
             $opportunity->clearPendingApprovalsForLost();
             $opportunity->save();
             $opportunity->syncLinkedQuotationMarginApproval();
@@ -775,6 +806,7 @@ class OpportunityController extends Controller
             'type' => ['required', 'string', Rule::in(Opportunity::TYPES)],
             'name' => ['required', 'string', 'max:255'],
             'account_id' => ['nullable', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
+            'crm_top' => ['required', 'string', Rule::in(CustomerTop::OPTIONS)],
             'stage' => ['required', 'string', Rule::in($allowedStages)],
             'amount' => ['required', 'numeric', 'min:0'],
             'amount_currency' => ['nullable', 'string', 'max:6'],
@@ -887,6 +919,7 @@ class OpportunityController extends Controller
             'type' => $data['type'],
             'name' => $data['name'],
             'account_id' => ($data['account_id'] ?? null) ?: null,
+            'crm_top' => CustomerTop::normalize($data['crm_top'] ?? null),
             'stage' => $data['stage'],
             'amount' => $data['amount'] ?? null,
             'amount_currency' => ($data['amount_currency'] ?? null) ?: 'IDR',
@@ -1050,18 +1083,27 @@ class OpportunityController extends Controller
             ->get(['id', 'name', 'crm_regency_code', 'billing_address_city', 'crm_payment_level', 'crm_top']);
 
         $accountMarginMeta = $accounts->mapWithKeys(function (Account $account) {
+            $fromLevel = $account->isPaymentSuspended()
+                ? null
+                : (PaymentLevel::minMarginPercent($account->paymentLevel()) ?? 0.0);
+
             return [$account->id => [
                 'free_shipping' => \App\Support\FreeShippingZone::isFreeForAccount($account),
                 'min_margin_pct' => $account->minMarginPercent(),
+                'payment_level_margin' => $fromLevel,
+                'suspended' => $account->isPaymentSuspended(),
+                'top' => $account->top(),
             ]];
         })->all();
 
         return [
             'accounts' => $accounts,
             'accountMarginMeta' => $accountMarginMeta,
-            'marginNominalUmum' => \App\Support\PaymentLevel::marginNominalUmum(),
-            'marginNominalOngkirPribadi' => \App\Support\PaymentLevel::marginNominalOngkirPribadi(),
-            'marginMaxPercent' => \App\Support\PaymentLevel::maxMarginPercent(),
+            'topOptions' => CustomerTop::LABELS,
+            'topMargins' => CustomerTop::allMinMargins(),
+            'marginNominalUmum' => PaymentLevel::marginNominalUmum(),
+            'marginNominalOngkirPribadi' => PaymentLevel::marginNominalOngkirPribadi(),
+            'marginMaxPercent' => PaymentLevel::maxMarginPercent(),
             'contacts' => Contact::query()
                 ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
                 ->orderBy('first_name')

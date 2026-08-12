@@ -39,6 +39,8 @@
           'contacts' => $contactOptions,
           'accountId' => old('account_id', $opportunity->account_id),
           'contactId' => old('contact_id', $opportunity->contact_id),
+          'crmTop' => old('crm_top', $opportunity->crm_top ?: ($opportunity->account?->crm_top ?? \App\Support\CustomerTop::DEFAULT)),
+          'topMargins' => $topMargins ?? \App\Support\CustomerTop::allMinMargins(),
           'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
           'ppnPercent' => $ppnPercent,
           'pphNonWapuJasa' => $pphNonWapuJasa,
@@ -119,7 +121,17 @@
                         </select>
                         @if ($purchasingMode)<input type="hidden" name="account_id" value="{{ $opportunity->account_id }}">@endif
                     </div>
-                    <div class="sm:col-span-2">
+                    <div>
+                        <label class="crm-label">TOP <span class="text-red-500">*</span></label>
+                        <select name="crm_top" required class="select2 w-full" data-placeholder="— Pilih TOP —" @disabled($purchasingMode)>
+                            @foreach ($topOptions ?? \App\Support\CustomerTop::LABELS as $value => $label)
+                                <option value="{{ $value }}" @selected(old('crm_top', $opportunity->crm_top ?: ($opportunity->account?->crm_top ?? 'cash')) === (string) $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                        @if ($purchasingMode)<input type="hidden" name="crm_top" value="{{ $opportunity->crm_top ?: ($opportunity->account?->crm_top ?? 'cash') }}">@endif
+                        <p class="mt-1 text-xs text-slate-400">Default dari customer. Bisa diubah untuk deal ini.</p>
+                    </div>
+                    <div>
                         <label class="crm-label">Contact</label>
                         <select name="contact_id" class="select2 select2-search w-full" data-placeholder="Select customer first" :disabled="!accountId || purchasingMode">
                             <option value="">— No contact —</option>
@@ -932,6 +944,9 @@
             contacts: config.contacts || [],
             accountId: config.accountId || '',
             contactId: config.contactId || '',
+            crmTop: config.crmTop || 'cash',
+            topMargins: config.topMargins || {},
+            _accountReady: false,
             currency: config.currency || 'IDR',
             ppnPercent: PPN_PERCENT,
             pphNonWapuJasa: PPH_NON_WAPU_JASA,
@@ -972,8 +987,17 @@
                 return !!(this.accountMeta && this.accountMeta.free_shipping);
             },
             get accountMinMarginPct() {
-                const v = this.accountMeta ? this.accountMeta.min_margin_pct : null;
-                return v === null || v === undefined ? null : Number(v);
+                if (!this.accountMeta) return null;
+                if (this.accountMeta.suspended) return null;
+
+                const fromLevel = this.accountMeta.payment_level_margin;
+                if (fromLevel === null || fromLevel === undefined) {
+                    const fallback = this.accountMeta.min_margin_pct;
+                    return fallback === null || fallback === undefined ? null : Number(fallback);
+                }
+
+                const fromTop = Number(this.topMargins[this.crmTop] ?? 0) || 0;
+                return Math.max(Number(fromLevel) || 0, fromTop);
             },
             get requiredNominalThreshold() {
                 const umum = Number(this.marginNominalUmum) || 0;
@@ -1431,7 +1455,21 @@
                     this.contactId = list.length > 0 ? String(list[0].id) : '';
                 }
 
+                this.applyCustomerTopDefault();
                 this.refreshContactSelect();
+            },
+            applyCustomerTopDefault() {
+                if (this.purchasingMode) return;
+
+                const nextTop = this.accountMeta?.top || 'cash';
+                this.crmTop = nextTop;
+                this.syncTopSelect();
+            },
+            syncTopSelect() {
+                const el = this.$root.querySelector('[name="crm_top"]');
+                if (!el || !window.CrmSelect2 || !window.jQuery) return;
+
+                window.jQuery(el).val(this.crmTop || 'cash').trigger('change');
             },
             refreshContactSelect() {
                 const el = this.$root.querySelector('[name="contact_id"]');
@@ -1683,12 +1721,19 @@
 
                     const accountEl = this.$root.querySelector('[name="account_id"]');
                     const currencyEl = this.$root.querySelector('[name="amount_currency"]');
+                    const topEl = this.$root.querySelector('[name="crm_top"]');
 
                     if (accountEl) {
-                        CrmSelect2.bindAlpine(accountEl, this, 'accountId', () => this.onAccountChange());
+                        CrmSelect2.bindAlpine(accountEl, this, 'accountId', () => {
+                            if (!this._accountReady) return;
+                            this.onAccountChange();
+                        });
                     }
                     if (currencyEl) {
                         CrmSelect2.bindAlpine(currencyEl, this, 'currency');
+                    }
+                    if (topEl && !this.purchasingMode) {
+                        CrmSelect2.bindAlpine(topEl, this, 'crmTop');
                     }
 
                     if (this.accountId && !this.contactId) {
@@ -1700,6 +1745,7 @@
 
                     this.refreshContactSelect();
                     this.syncDiscountPercentFromAmount();
+                    this._accountReady = true;
                 });
             },
         };
