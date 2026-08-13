@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 
@@ -30,8 +31,8 @@ class Opportunity extends Model implements HasMedia
     protected $fillable = [
         'name', 'account_id', 'crm_top', 'company', 'stage', 'type', 'amount', 'amount_currency',
         'close_date', 'probability', 'lead_source', 'description', 'crm_lost_reason', 'assigned_user_id',
-        'contact_id', 'vendor',
-        'crm_tax_category', 'crm_item_kind', 'crm_has_royalty', 'crm_sell_exclude', 'crm_cost_exclude',
+        'contact_id', 'vendor', 'crm_item_brand', 'crm_item_image',
+        'crm_tax_category', 'crm_item_kind', 'crm_has_royalty', 'crm_royalty_type', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_cost_in_usd', 'crm_cost_fx_code', 'crm_cost_usd', 'crm_cost_usd_rate',
         'crm_item_discount',
         'crm_won_margin',
@@ -51,9 +52,12 @@ class Opportunity extends Model implements HasMedia
         'price' => 'array',
         'cost' => 'array',
         'vendor' => 'array',
+        'crm_item_brand' => 'array',
+        'crm_item_image' => 'array',
         'crm_tax_category' => 'array',
         'crm_item_kind' => 'array',
         'crm_has_royalty' => 'array',
+        'crm_royalty_type' => 'array',
         'crm_sell_exclude' => 'array',
         'crm_cost_exclude' => 'array',
         'crm_cost_in_usd' => 'array',
@@ -337,9 +341,12 @@ class Opportunity extends Model implements HasMedia
         $prices = array_values((array) ($this->price ?? []));
         $costs = array_values((array) ($this->cost ?? []));
         $vendors = array_values((array) ($this->vendor ?? []));
+        $brands = array_values((array) ($this->crm_item_brand ?? []));
+        $images = array_values((array) ($this->crm_item_image ?? []));
         $taxCategories = array_values((array) ($this->crm_tax_category ?? []));
         $itemKinds = array_values((array) ($this->crm_item_kind ?? []));
         $hasRoyaltyFlags = array_values((array) ($this->crm_has_royalty ?? []));
+        $royaltyTypes = array_values((array) ($this->crm_royalty_type ?? []));
         $sellExcludes = array_values((array) ($this->crm_sell_exclude ?? []));
         $costExcludes = array_values((array) ($this->crm_cost_exclude ?? []));
         $costInUsdFlags = array_values((array) ($this->crm_cost_in_usd ?? []));
@@ -349,8 +356,8 @@ class Opportunity extends Model implements HasMedia
         $itemDiscounts = array_values((array) ($this->crm_item_discount ?? []));
 
         $count = max(
-            count($names), count($qtys), count($prices), count($costs), count($vendors),
-            count($taxCategories), count($itemKinds), count($hasRoyaltyFlags),
+            count($names), count($qtys), count($prices), count($costs), count($vendors), count($brands), count($images),
+            count($taxCategories), count($itemKinds), count($hasRoyaltyFlags), count($royaltyTypes),
             count($sellExcludes), count($costExcludes),
             count($itemDiscounts), count($costInUsdFlags), count($costFxCodes), count($costUsds), count($costUsdRates)
         );
@@ -361,7 +368,7 @@ class Opportunity extends Model implements HasMedia
 
         return collect(range(0, $count - 1))
             ->map(function ($i) use (
-                $names, $qtys, $prices, $costs, $vendors, $taxCategories, $itemKinds, $hasRoyaltyFlags,
+                $names, $qtys, $prices, $costs, $vendors, $brands, $images, $taxCategories, $itemKinds, $hasRoyaltyFlags, $royaltyTypes,
                 $sellExcludes, $costExcludes, $itemDiscounts, $costInUsdFlags, $costFxCodes, $costUsds, $costUsdRates
             ) {
                 $priceInclude = (float) ($prices[$i] ?? 0);
@@ -377,7 +384,9 @@ class Opportunity extends Model implements HasMedia
                     : 0;
                 $taxCategory = (string) ($taxCategories[$i] ?? OpportunityProductPricing::TAX_NON_WAPU);
                 $itemKind = (string) ($itemKinds[$i] ?? OpportunityProductPricing::KIND_BARANG);
-                $hasRoyalty = OpportunityProductPricing::hasRoyaltyFlag($hasRoyaltyFlags[$i] ?? false);
+                $royaltyType = OpportunityProductPricing::normalizeRoyaltyType(
+                    $royaltyTypes[$i] ?? (($hasRoyaltyFlags[$i] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+                );
                 $costForeign = in_array((string) ($costInUsdFlags[$i] ?? '0'), ['1', 'true', 'yes'], true);
                 $fxCode = strtoupper(trim((string) ($costFxCodes[$i] ?? '')));
                 if ($costForeign && $fxCode === '') {
@@ -385,14 +394,18 @@ class Opportunity extends Model implements HasMedia
                 }
                 $costFx = isset($costUsds[$i]) && $costUsds[$i] !== '' ? (float) $costUsds[$i] : 0.0;
                 $fxRate = isset($costUsdRates[$i]) && $costUsdRates[$i] !== '' ? (float) $costUsdRates[$i] : 0.0;
+                $image = trim((string) ($images[$i] ?? ''));
 
-                return OpportunityProductPricing::enrichRow([
+                $row = OpportunityProductPricing::enrichRow([
                     'name' => (string) ($names[$i] ?? ''),
                     'quantity' => (float) ($qtys[$i] ?? 1),
                     'vendor' => (string) ($vendors[$i] ?? ''),
+                    'brand' => (string) ($brands[$i] ?? ''),
+                    'image' => $image,
                     'tax_category' => $taxCategory,
                     'item_kind' => $itemKind,
-                    'has_royalty' => $hasRoyalty,
+                    'royalty_type' => $royaltyType,
+                    'has_royalty' => $royaltyType !== '',
                     'sell_exclude' => $sellExclude,
                     'cost_exclude' => $costExclude,
                     'discount_exclude' => $itemDiscount,
@@ -404,9 +417,52 @@ class Opportunity extends Model implements HasMedia
                     'fx_rate' => $fxRate,
                     'usd_rate' => $fxRate, // alias legacy
                 ]);
+                $row['image_url'] = self::productImageUrl($image);
+
+                return $row;
             })
             ->filter(fn ($row) => $row['name'] !== '' || $row['sell_exclude'] > 0 || $row['price'] > 0)
             ->values();
+
+        // Fee Zinit sekali dari grand total include (K52), tempel ke setiap baris Zinit untuk tampilan.
+        $hasZinit = $rows->contains(
+            fn (array $row) => ($row['tax_category'] ?? '') === OpportunityProductPricing::TAX_ZINIT
+        );
+        if ($hasZinit) {
+            $volume = round($rows->sum(function (array $row) {
+                if (($row['tax_category'] ?? '') !== OpportunityProductPricing::TAX_ZINIT) {
+                    return 0;
+                }
+
+                return (float) ($row['quantity'] ?? 1) * (float) ($row['effective_sell_include'] ?? $row['sell_include'] ?? 0);
+            }), 2);
+            $fees = OpportunityProductPricing::zinitFeesFromVolume($volume);
+            $jualExcl = round($rows->sum(function (array $row) {
+                if (($row['tax_category'] ?? '') !== OpportunityProductPricing::TAX_ZINIT) {
+                    return 0;
+                }
+
+                return (float) ($row['quantity'] ?? 1) * (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
+            }), 2);
+            $potFee = round($jualExcl - (float) $fees['success_fee'], 2);
+
+            $rows = $rows->map(function (array $row) use ($fees, $potFee) {
+                if (($row['tax_category'] ?? '') !== OpportunityProductPricing::TAX_ZINIT) {
+                    return $row;
+                }
+
+                $row['zinit_volume'] = $fees['volume'];
+                $row['zinit_platform_fee'] = $fees['platform_fee'];
+                $row['zinit_service_fee'] = $fees['service_fee'];
+                $row['zinit_success_fee'] = $fees['success_fee'];
+                $row['zinit_rate_percent'] = $fees['rate_percent'];
+                $row['zinit_pot_fee'] = $potFee;
+
+                return $row;
+            })->values();
+        }
+
+        return $rows;
     }
 
     /**
@@ -423,9 +479,22 @@ class Opportunity extends Model implements HasMedia
         $this->price = $rows->map(fn ($p) => (string) ($p['price'] ?? 0))->all();
         $this->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
         $this->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
+        $this->crm_item_brand = $rows->map(fn ($p) => (string) ($p['brand'] ?? ''))->all();
+        $this->crm_item_image = $rows->map(fn ($p) => trim((string) ($p['image'] ?? '')))->all();
         $this->crm_tax_category = $rows->pluck('tax_category')->all();
         $this->crm_item_kind = $rows->pluck('item_kind')->all();
-        $this->crm_has_royalty = $rows->map(fn ($p) => OpportunityProductPricing::hasRoyaltyFlag($p['has_royalty'] ?? false) ? '1' : '0')->all();
+        $this->crm_has_royalty = $rows->map(function ($p) {
+            $type = OpportunityProductPricing::normalizeRoyaltyType(
+                $p['royalty_type'] ?? (($p['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+            );
+
+            return $type !== '' ? '1' : '0';
+        })->all();
+        $this->crm_royalty_type = $rows->map(function ($p) {
+            return OpportunityProductPricing::normalizeRoyaltyType(
+                $p['royalty_type'] ?? (($p['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+            );
+        })->all();
         $this->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
         $this->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
         $this->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
@@ -440,6 +509,44 @@ class Opportunity extends Model implements HasMedia
         $this->crm_cost_usd_rate = $rows->map(fn ($p) => (string) ($p['fx_rate'] ?? $p['usd_rate'] ?? 0))->all();
 
         $this->promoteToQualificationWhenHasProducts($rows);
+    }
+
+    /**
+     * URL publik untuk image produk (path relatif di disk public).
+     */
+    public static function productImageUrl(?string $path): ?string
+    {
+        $path = trim((string) $path);
+        if ($path === '') {
+            return null;
+        }
+
+        return Storage::disk('public')->url($path);
+    }
+
+    /**
+     * Hapus file image produk yang tidak lagi dipakai.
+     *
+     * @param  list<string>  $keepPaths
+     */
+    public function purgeUnusedProductImages(array $keepPaths): void
+    {
+        $keep = collect($keepPaths)
+            ->map(fn ($p) => trim((string) $p))
+            ->filter()
+            ->unique()
+            ->all();
+
+        $dir = 'opportunity-products/'.$this->id;
+        if (! Storage::disk('public')->exists($dir)) {
+            return;
+        }
+
+        foreach (Storage::disk('public')->files($dir) as $file) {
+            if (! in_array($file, $keep, true)) {
+                Storage::disk('public')->delete($file);
+            }
+        }
     }
 
     /**
@@ -504,20 +611,62 @@ class Opportunity extends Model implements HasMedia
         $p['fx_rate'] = $fxRate;
         $p['usd_rate'] = $fxRate;
         $p['cost_exclude'] = $costExclude;
-        $p['has_royalty'] = OpportunityProductPricing::hasRoyaltyFlag($p['has_royalty'] ?? false);
+        $p['royalty_type'] = OpportunityProductPricing::normalizeRoyaltyType(
+            $p['royalty_type'] ?? (($p['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+        );
+        $p['has_royalty'] = $p['royalty_type'] !== '';
 
         return $p;
     }
 
     /**
+     * Grand total include untuk kategori Zinit (basis K52 rumus Fee Zinit).
+     */
+    public function zinitGrandTotalInclude(): float
+    {
+        return round(
+            $this->products->sum(function (array $row) {
+                if (($row['tax_category'] ?? '') !== OpportunityProductPricing::TAX_ZINIT) {
+                    return 0;
+                }
+
+                $qty = (float) ($row['quantity'] ?? 1);
+                $include = (float) ($row['effective_sell_include'] ?? $row['sell_include'] ?? 0);
+
+                return $qty * $include;
+            }),
+            2
+        );
+    }
+
+    /**
+     * Fee Zinit sekali dari grand total include.
+     *
+     * @return array{volume: float, platform_fee: float, service_fee: float, success_fee: float, rate_percent: float, cap: ?float, tier_max: ?float}
+     */
+    public function zinitDealFees(): array
+    {
+        return OpportunityProductPricing::zinitFeesFromVolume($this->zinitGrandTotalInclude());
+    }
+
+    /**
      * Total margin semua produk (per baris: margin satuan × qty).
+     * Zinit: Fix GP = Total GP − Fee Zinit.
      */
     public function totalProductsMargin(): float
     {
-        return round(
+        $sum = round(
             $this->products->sum(fn (array $row) => (float) ($row['quantity'] ?? 1) * (float) ($row['margin'] ?? 0)),
             2
         );
+
+        if ($this->products->contains(
+            fn (array $row) => ($row['tax_category'] ?? '') === OpportunityProductPricing::TAX_ZINIT
+        )) {
+            $sum = round($sum - (float) ($this->zinitDealFees()['success_fee'] ?? 0), 2);
+        }
+
+        return $sum;
     }
 
     /**
@@ -565,21 +714,15 @@ class Opportunity extends Model implements HasMedia
      */
     public function totalMarginPercentDenominator(): float
     {
-        return round(
+        $denom = round(
             $this->products->sum(function (array $row) {
                 $qty = (float) ($row['quantity'] ?? 1);
                 $taxCategory = (string) ($row['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU);
 
                 if ($taxCategory === OpportunityProductPricing::TAX_ZINIT) {
                     $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
-                    $fee = (float) ($row['zinit_success_fee'] ?? 0);
-                    // GP% terhadap Pot Fee (jual excl − Fee Zinit), total baris.
-                    $pot = ($row['zinit_pot_fee'] ?? null);
-                    if ($pot !== null) {
-                        return (float) $pot;
-                    }
 
-                    return ($qty * $effectiveSell) - $fee;
+                    return $qty * $effectiveSell;
                 }
 
                 $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
@@ -594,6 +737,15 @@ class Opportunity extends Model implements HasMedia
             }),
             2
         );
+
+        if ($this->products->contains(
+            fn (array $row) => ($row['tax_category'] ?? '') === OpportunityProductPricing::TAX_ZINIT
+        )) {
+            // Pot Fee = total jual excl − Fee Zinit (basis Fix GP%).
+            $denom = round($denom - (float) ($this->zinitDealFees()['success_fee'] ?? 0), 2);
+        }
+
+        return $denom;
     }
 
     /**
@@ -911,9 +1063,15 @@ class Opportunity extends Model implements HasMedia
                     'name' => (string) $get('name', ''),
                     'quantity' => (float) ($get('quantity', 1) ?: 1),
                     'vendor' => (string) ($get('vendor', '') ?? ''),
+                    'brand' => (string) ($get('brand', '') ?? ''),
+                    'image' => (string) ($get('image', '') ?? ''),
                     'tax_category' => $tax !== '' ? $tax : OpportunityProductPricing::TAX_NON_WAPU,
                     'item_kind' => $kind !== '' ? $kind : OpportunityProductPricing::KIND_BARANG,
-                    'has_royalty' => OpportunityProductPricing::hasRoyaltyFlag($get('has_royalty', false)),
+                    'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
+                        $get('royalty_type', ($get('has_royalty', false) ? OpportunityProductPricing::ROYALTY_LUAR : ''))
+                    ),
+                    'has_royalty' => OpportunityProductPricing::hasRoyaltyFlag($get('has_royalty', false))
+                        || OpportunityProductPricing::normalizeRoyaltyType($get('royalty_type', '')) !== '',
                     'sell_exclude' => $list,
                     'cost_exclude' => (float) ($get('cost_exclude', 0) ?: 0),
                     'discount_exclude' => $discount,
@@ -932,10 +1090,12 @@ class Opportunity extends Model implements HasMedia
             return false;
         }
 
-        // Pertahankan meta modal USD per index (QO tidak punya field ini).
+        // Pertahankan meta modal USD per index; brand/image ikut dari QO.
         $existing = $this->products->values();
         $rows = $rows->map(function ($row, $i) use ($existing) {
             $prev = $existing->get($i, []);
+            $row['brand'] = trim((string) ($row['brand'] ?? ''));
+            $row['image'] = trim((string) ($row['image'] ?? ''));
             $row['cost_foreign'] = ! empty($prev['cost_foreign']) || ! empty($prev['cost_in_usd']);
             $row['cost_in_usd'] = $row['cost_foreign'];
             $row['cost_fx_code'] = (string) ($prev['cost_fx_code'] ?? '');
@@ -949,8 +1109,11 @@ class Opportunity extends Model implements HasMedia
 
         $this->applyProductRows($rows);
 
+        $keepImages = $rows->map(fn ($p) => trim((string) ($p['image'] ?? '')))->filter()->values()->all();
+        $this->purgeUnusedProductImages($keepImages);
+
         $this->amount = $rows->isNotEmpty()
-            ? $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0))
+            ? $rows->sum(fn ($p) => (float) ($p['subtotal'] ?? ((float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0))))
             : $this->amount;
 
         $this->syncWonMargin();

@@ -13,6 +13,7 @@ class OpportunityProductBulkExcel
     public const HEADERS = [
         'jenis',
         'nama',
+        'brand',
         'qty',
         'vendor',
         'harga_jual_exclude',
@@ -28,8 +29,8 @@ class OpportunityProductBulkExcel
     public static function exampleRows(): array
     {
         return [
-            ['barang', 'Contoh Item A', 1, 'Vendor A', 1000000, 0, 800000],
-            ['jasa', 'Contoh Jasa B', 2, 'Vendor B', 500000, 0, 350000],
+            ['barang', 'Contoh Item A', 'Acer', 1, 'Vendor A', 1000000, 0, 800000],
+            ['jasa', 'Contoh Jasa B', 'ABB', 2, 'Vendor B', 500000, 0, 350000],
         ];
     }
 
@@ -188,6 +189,7 @@ XML);
             'name' => $name,
             'quantity' => self::toNumber($map['qty'] ?? $map['quantity'] ?? $map['jumlah'] ?? 1),
             'vendor' => trim((string) ($map['vendor'] ?? '')),
+            'brand' => trim((string) ($map['brand'] ?? $map['merek'] ?? '')),
             'sell_exclude' => self::toNumber($map['harga_jual_exclude'] ?? $map['sell_exclude'] ?? $map['harga_jual'] ?? 0),
             'discount_exclude' => self::toNumber($map['diskon_exclude'] ?? $map['discount_exclude'] ?? $map['diskon'] ?? 0),
             'cost_exclude' => self::toNumber($map['harga_beli_exclude'] ?? $map['cost_exclude'] ?? $map['harga_beli'] ?? $map['modal'] ?? 0),
@@ -207,6 +209,7 @@ XML);
             'harga_jual', 'sell', 'sell_exclude', 'harga_jual_excl' => 'harga_jual_exclude',
             'diskon', 'discount', 'discount_exclude', 'diskon_item' => 'diskon_exclude',
             'harga_beli', 'modal', 'cost', 'cost_exclude', 'harga_modal' => 'harga_beli_exclude',
+            'merek', 'brand_name' => 'brand',
             default => $h,
         };
     }

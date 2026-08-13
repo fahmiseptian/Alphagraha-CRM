@@ -8,7 +8,8 @@
     $pphWBarang = (float) old('pph_wapu_barang', $pphWapuBarang);
     $pphWJasa = (float) old('pph_wapu_jasa', $pphWapuJasa);
     $pph29 = (float) old('pph29_percent', $pph29Percent);
-    $royalty = (float) old('royalty_percent', $royaltyPercent ?? 20);
+    $royaltyDalam = (float) old('royalty_dalam_percent', $royaltyDalamPercent ?? 15);
+    $royaltyLuar = (float) old('royalty_luar_percent', $royaltyLuarPercent ?? 20);
     $tiersOld = old('pnbp_tiers');
     $tiers = collect(is_array($tiersOld) ? $tiersOld : ($pnbpTiers ?? []))->map(fn ($t) => [
         'max' => $t['max'] ?? null,
@@ -42,7 +43,8 @@
          pphWapuBarang: {{ $pphWBarang }},
          pphWapuJasa: {{ $pphWJasa }},
          pph29Percent: {{ $pph29 }},
-         royaltyPercent: {{ $royalty }},
+         royaltyDalamPercent: {{ $royaltyDalam }},
+         royaltyLuarPercent: {{ $royaltyLuar }},
          pnbpTiers: {{ \Illuminate\Support\Js::from($tiers) }},
          zinitTiers: {{ \Illuminate\Support\Js::from($zinitTiersForm) }},
      })">
@@ -195,27 +197,43 @@
 
         <x-card title="Royalti">
             <p class="mb-3 text-xs text-slate-500">
-                Pajak tambahan opsional via checkbox per item — berlaku di <strong>semua kategori</strong> (Non Wapu / Wapu / Inaproc / Zinit).
+                Pajak tambahan opsional per item — pilih <strong>satu</strong> jenis (atau tidak sama sekali).
+                Berlaku di semua kategori (Non Wapu / Wapu / Inaproc / Zinit).
                 Rumus: <code class="rounded bg-slate-100 px-1">modal excl × rate%</code>.
             </p>
-            <div class="max-w-xs">
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Royalti (%) <span class="text-red-500">*</span></label>
-                <input type="text" inputmode="decimal" required
-                       x-effect="if (editingField !== 'royalty') $el.value = formatId(royaltyPercent, 2)"
-                       @focus="editingField = 'royalty'"
-                       @blur="editingField = null; $el.value = formatId(royaltyPercent, 2)"
-                       @input="royaltyPercent = parseId($event.target.value)"
-                       class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
-                <input type="hidden" name="royalty_percent" :value="royaltyPercent">
-                <p class="mt-1 text-xs text-slate-400">Default 20%.</p>
+            <div class="grid gap-4 sm:grid-cols-2 max-w-xl">
+                <div>
+                    <label class="mb-1.5 block text-sm font-medium text-slate-700">Dalam negeri (%) <span class="text-red-500">*</span></label>
+                    <input type="text" inputmode="decimal" required
+                           x-effect="if (editingField !== 'royalty-dalam') $el.value = formatId(royaltyDalamPercent, 2)"
+                           @focus="editingField = 'royalty-dalam'"
+                           @blur="editingField = null; $el.value = formatId(royaltyDalamPercent, 2)"
+                           @input="royaltyDalamPercent = parseId($event.target.value)"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <input type="hidden" name="royalty_dalam_percent" :value="royaltyDalamPercent">
+                    <p class="mt-1 text-xs text-slate-400">Default 15%.</p>
+                </div>
+                <div>
+                    <label class="mb-1.5 block text-sm font-medium text-slate-700">Luar negeri (%) <span class="text-red-500">*</span></label>
+                    <input type="text" inputmode="decimal" required
+                           x-effect="if (editingField !== 'royalty-luar') $el.value = formatId(royaltyLuarPercent, 2)"
+                           @focus="editingField = 'royalty-luar'"
+                           @blur="editingField = null; $el.value = formatId(royaltyLuarPercent, 2)"
+                           @input="royaltyLuarPercent = parseId($event.target.value)"
+                           class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm tabular-nums focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                    <input type="hidden" name="royalty_luar_percent" :value="royaltyLuarPercent">
+                    <p class="mt-1 text-xs text-slate-400">Default 20%.</p>
+                </div>
             </div>
         </x-card>
 
         <x-card title="Zinit — Rate Scale">
             <p class="mb-3 text-xs text-slate-500">
-                Basis tier &amp; service fee: <strong>harga jual include</strong>.
-                Fee Zinit = Platform Fee + <code class="rounded bg-slate-100 px-1">MIN(jual_include × rate%, cap)</code>.
-                Margin = jual excl − Fee Zinit − modal excl.
+                Basis tier &amp; service fee: <strong>grand total jual include (K52)</strong>.
+                Fee Zinit = Platform Fee + <code class="rounded bg-slate-100 px-1">MIN(K52 × rate%, cap)</code>
+                (sama rumus Excel IFS; jenjang pertama memakai &lt; batas, jenjang berikutnya ≤).
+                Total (Include) = jual include saja (fee tidak ditambahkan).
+                Fix GP = Total GP − Fee Zinit.
                 Batas kosong = di atas semua batas sebelumnya.
             </p>
             <div class="overflow-x-auto">
@@ -330,10 +348,25 @@
                            @input="costExclude = parseId($event.target.value)"
                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm text-right tabular-nums">
                 </div>
-                <label class="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" x-model="hasRoyalty" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
-                    <span>Royalti <span class="text-slate-400" x-text="'(' + royaltyPercent + '%)'"></span></span>
-                </label>
+                <div class="sm:col-span-2">
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Royalti</label>
+                    <div class="flex flex-wrap gap-3 text-sm text-slate-700">
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox"
+                                   :checked="royaltyType === 'dalam'"
+                                   @change="royaltyType = royaltyType === 'dalam' ? '' : 'dalam'"
+                                   class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                            <span>Dalam negeri <span class="text-slate-400" x-text="'(' + royaltyDalamPercent + '%)'"></span></span>
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox"
+                                   :checked="royaltyType === 'luar'"
+                                   @change="royaltyType = royaltyType === 'luar' ? '' : 'luar'"
+                                   class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                            <span>Luar negeri <span class="text-slate-400" x-text="'(' + royaltyLuarPercent + '%)'"></span></span>
+                        </label>
+                    </div>
+                </div>
             </div>
 
             <p class="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" x-text="ruleSummary"></p>
@@ -363,7 +396,7 @@
                     <dd class="font-medium text-slate-800" x-text="format(pph29)"></dd>
                 </div>
                 <div class="flex justify-between gap-3" x-show="hasRoyalty">
-                    <dt class="text-slate-500">Royalti <span x-text="royaltyPercent"></span>%</dt>
+                    <dt class="text-slate-500">Royalti <span x-text="activeRoyaltyPercent"></span>%</dt>
                     <dd class="font-medium text-slate-800" x-text="format(royalty)"></dd>
                 </div>
                 <div class="flex justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2">
@@ -408,7 +441,7 @@
                     <dd class="font-medium text-slate-800" x-text="format(zinitPotFee)"></dd>
                 </div>
                 <div class="flex justify-between gap-3" x-show="hasRoyalty">
-                    <dt class="text-slate-500">Royalti <span x-text="royaltyPercent"></span>%</dt>
+                    <dt class="text-slate-500">Royalti <span x-text="activeRoyaltyPercent"></span>%</dt>
                     <dd class="font-medium text-slate-800" x-text="format(royalty)"></dd>
                 </div>
                 <div class="flex justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2">
@@ -432,7 +465,9 @@
             pphWapuBarang: Number(initial.pphWapuBarang) || 1.5,
             pphWapuJasa: Number(initial.pphWapuJasa) || 2,
             pph29Percent: Number(initial.pph29Percent) || 22,
-            royaltyPercent: Number(initial.royaltyPercent) || 20,
+            royaltyDalamPercent: Number(initial.royaltyDalamPercent) || 15,
+            royaltyLuarPercent: Number(initial.royaltyLuarPercent) || 20,
+            royaltyType: '',
             pnbpTiers: (initial.pnbpTiers || []).map(t => ({
                 max: t.max === null || t.max === undefined || t.max === '' ? '' : Number(t.max),
                 rate_percent: Number(t.rate_percent) || 0,
@@ -447,10 +482,17 @@
             editingField: null,
             taxCategory: 'non_wapu',
             itemKind: 'barang',
-            hasRoyalty: false,
             sellExclude: 1000000,
             costExclude: 800000,
             round(v) { return Math.round((Number(v) || 0) * 100) / 100; },
+            get hasRoyalty() {
+                return this.royaltyType === 'dalam' || this.royaltyType === 'luar';
+            },
+            get activeRoyaltyPercent() {
+                if (this.royaltyType === 'dalam') return Number(this.royaltyDalamPercent) || 0;
+                if (this.royaltyType === 'luar') return Number(this.royaltyLuarPercent) || 0;
+                return 0;
+            },
             formatId(value, decimals = 0) {
                 if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
                 return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: decimals });
@@ -515,8 +557,14 @@
                 const volume = this.sellInclude;
                 const tiers = this.sortedZinitTiers();
                 let fallback = tiers[tiers.length - 1] || { max: null, platform_fee: 0, rate_percent: 0, cap: null };
-                for (const tier of tiers) {
+                // Samakan Excel IFS: tier pertama < max, sisanya <= max.
+                for (let i = 0; i < tiers.length; i++) {
+                    const tier = tiers[i];
                     if (tier.max === null) return tier;
+                    if (i === 0) {
+                        if (volume < tier.max) return tier;
+                        continue;
+                    }
                     if (volume <= tier.max) return tier;
                 }
                 return fallback;
@@ -601,7 +649,7 @@
             },
             get royalty() {
                 if (!this.hasRoyalty) return 0;
-                return this.round((Number(this.costExclude) || 0) * ((Number(this.royaltyPercent) || 0) / 100));
+                return this.round((Number(this.costExclude) || 0) * (this.activeRoyaltyPercent / 100));
             },
             get zinitMarginLabel() {
                 let s = 'Margin (Pot Fee';

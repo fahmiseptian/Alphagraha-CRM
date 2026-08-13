@@ -23,7 +23,8 @@ class SettingController extends Controller
             'pnbpTiers' => OpportunityProductPricing::pnbpTiers(),
             'pph29Percent' => OpportunityProductPricing::pph29Percent(),
             'zinitTiers' => OpportunityProductPricing::zinitTiers(),
-            'royaltyPercent' => OpportunityProductPricing::royaltyPercent(),
+            'royaltyDalamPercent' => OpportunityProductPricing::royaltyDalamPercent(),
+            'royaltyLuarPercent' => OpportunityProductPricing::royaltyLuarPercent(),
         ]);
     }
 
@@ -35,7 +36,8 @@ class SettingController extends Controller
             'pph_wapu_barang' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph_wapu_jasa' => ['required', 'numeric', 'min:0', 'max:100'],
             'pph29_percent' => ['required', 'numeric', 'min:0', 'max:100'],
-            'royalty_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+            'royalty_dalam_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+            'royalty_luar_percent' => ['required', 'numeric', 'min:0', 'max:100'],
             'pnbp_tiers' => ['required', 'array', 'min:1'],
             'pnbp_tiers.*.max' => ['nullable', 'numeric', 'min:0'],
             'pnbp_tiers.*.rate_percent' => ['required', 'numeric', 'min:0', 'max:100'],
@@ -113,11 +115,26 @@ class SettingController extends Controller
             'description' => 'Jenjang Fee Zinit: batas jual include, platform fee, service fee %, dan CAP.',
         ]);
 
-        CrmSetting::set('tax.royalty_percent', round((float) $data['royalty_percent'], 2), [
+        CrmSetting::set('tax.royalty_dalam_percent', round((float) $data['royalty_dalam_percent'], 2), [
+            'type' => 'number',
+            'group' => 'tax',
+            'label' => 'Royalti Dalam Negeri (%)',
+            'description' => 'Persentase royalti produk dalam negeri dari modal exclude.',
+        ]);
+
+        CrmSetting::set('tax.royalty_luar_percent', round((float) $data['royalty_luar_percent'], 2), [
+            'type' => 'number',
+            'group' => 'tax',
+            'label' => 'Royalti Luar Negeri (%)',
+            'description' => 'Persentase royalti produk luar negeri dari modal exclude.',
+        ]);
+
+        // Legacy key: tetap diisi rate luar supaya kode lama tidak putus.
+        CrmSetting::set('tax.royalty_percent', round((float) $data['royalty_luar_percent'], 2), [
             'type' => 'number',
             'group' => 'tax',
             'label' => 'Royalti (%)',
-            'description' => 'Persentase royalti dari modal exclude bila checkbox Royalti dicentang (semua kategori pajak).',
+            'description' => 'Legacy alias rate luar negeri.',
         ]);
 
         return redirect()

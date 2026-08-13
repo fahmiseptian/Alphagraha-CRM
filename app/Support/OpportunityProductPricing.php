@@ -269,16 +269,63 @@ class OpportunityProductPricing
         return CrmSetting::getFloat('tax.pph29_percent', 22.0);
     }
 
+    public const ROYALTY_DALAM = 'dalam';
+
+    public const ROYALTY_LUAR = 'luar';
+
     /**
-     * Persentase Royalti (default 20). Dipakai bila checkbox Royalti dicentang.
+     * @return list<string>
      */
-    public static function royaltyPercent(): float
+    public static function royaltyTypes(): array
     {
-        return CrmSetting::getFloat('tax.royalty_percent', 20.0);
+        return [self::ROYALTY_DALAM, self::ROYALTY_LUAR];
+    }
+
+    public static function royaltyTypeLabel(?string $type): string
+    {
+        return match (self::normalizeRoyaltyType($type)) {
+            self::ROYALTY_DALAM => 'Dalam negeri',
+            self::ROYALTY_LUAR => 'Luar negeri',
+            default => '',
+        };
+    }
+
+    /**
+     * Normalisasi tipe royalti: '' | dalam | luar.
+     * Legacy boolean/flag true → luar (rate lama 20%).
+     */
+    public static function normalizeRoyaltyType(mixed $value): string
+    {
+        if ($value === null || $value === false || $value === '') {
+            return '';
+        }
+
+        if (is_bool($value)) {
+            return $value ? self::ROYALTY_LUAR : '';
+        }
+
+        $v = strtolower(trim((string) $value));
+        if ($v === '' || in_array($v, ['0', 'false', 'no', 'off', 'none'], true)) {
+            return '';
+        }
+
+        if (in_array($v, [self::ROYALTY_DALAM, 'dn', 'local', '15'], true)) {
+            return self::ROYALTY_DALAM;
+        }
+
+        if (in_array($v, [self::ROYALTY_LUAR, 'ln', 'foreign', '20', '1', 'true', 'yes', 'on'], true)) {
+            return self::ROYALTY_LUAR;
+        }
+
+        return '';
     }
 
     public static function hasRoyaltyFlag(mixed $value): bool
     {
+        if (is_string($value) && in_array(self::normalizeRoyaltyType($value), self::royaltyTypes(), true)) {
+            return true;
+        }
+
         if (is_bool($value)) {
             return $value;
         }
@@ -287,15 +334,45 @@ class OpportunityProductPricing
     }
 
     /**
+     * Persentase royalti luar negeri (legacy alias).
+     */
+    public static function royaltyPercent(): float
+    {
+        return self::royaltyLuarPercent();
+    }
+
+    public static function royaltyDalamPercent(): float
+    {
+        return CrmSetting::getFloat('tax.royalty_dalam_percent', 15.0);
+    }
+
+    public static function royaltyLuarPercent(): float
+    {
+        return CrmSetting::getFloat(
+            'tax.royalty_luar_percent',
+            CrmSetting::getFloat('tax.royalty_percent', 20.0)
+        );
+    }
+
+    public static function royaltyPercentFor(mixed $royaltyType): float
+    {
+        return match (self::normalizeRoyaltyType($royaltyType)) {
+            self::ROYALTY_DALAM => self::royaltyDalamPercent(),
+            self::ROYALTY_LUAR => self::royaltyLuarPercent(),
+            default => 0.0,
+        };
+    }
+
+    /**
      * Royalti per unit dari harga modal exclude.
      */
-    public static function royalty(float $costExclude, bool $hasRoyalty): float
+    public static function royalty(float $costExclude, mixed $royaltyTypeOrHasRoyalty = false): float
     {
-        if (! $hasRoyalty) {
-            return 0.0;
-        }
+        $type = is_bool($royaltyTypeOrHasRoyalty)
+            ? ($royaltyTypeOrHasRoyalty ? self::ROYALTY_LUAR : '')
+            : self::normalizeRoyaltyType($royaltyTypeOrHasRoyalty);
 
-        $rate = self::royaltyPercent() / 100;
+        $rate = self::royaltyPercentFor($type) / 100;
         if ($rate <= 0) {
             return 0.0;
         }
@@ -407,11 +484,21 @@ class OpportunityProductPricing
             'cap' => null,
         ];
 
-        foreach ($tiers as $tier) {
+        // Samakan Excel IFS: tier pertama memakai < max, tier berikutnya <= max.
+        foreach ($tiers as $index => $tier) {
             if ($tier['max'] === null) {
                 return $tier;
             }
-            if ($volume <= (float) $tier['max']) {
+
+            $max = (float) $tier['max'];
+            if ($index === 0) {
+                if ($volume < $max) {
+                    return $tier;
+                }
+                continue;
+            }
+
+            if ($volume <= $max) {
                 return $tier;
             }
         }
@@ -420,8 +507,8 @@ class OpportunityProductPricing
     }
 
     /**
-     * Hitung Fee Zinit dari volume jual include (total baris).
-     * Service fee = volume_include × rate% (cap bila ada); Fee = Platform + Service.
+     * Hitung Fee Zinit dari volume jual include (grand total include / K52).
+     * Fee = Platform Fee + MIN(volume × rate%, cap bila ada).
      *
      * @return array{
      *     volume: float,
@@ -628,13 +715,11 @@ class OpportunityProductPricing
         float $quantity = 1
     ): float {
         if ($taxCategory === self::TAX_ZINIT) {
-            $qty = $quantity > 0 ? $quantity : 1;
             $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
             $pph = self::pph($base, $taxCategory, $itemKind);
-            $fees = self::zinitFeesFromSellExclude($base, $qty);
-            $feePerUnit = round($fees['success_fee'] / $qty, 2);
 
-            return round($base - $pph - $feePerUnit - $costExclude, 2);
+            // GP per baris tanpa Fee Zinit — fee dipotong sekali di tingkat opportunity (Fix GP).
+            return round($base - $pph - $costExclude, 2);
         }
 
         $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
@@ -691,7 +776,7 @@ class OpportunityProductPricing
      * Margin bersih.
      * Wapu: (jual − PPH) − modal include
      * Inaproc: (jual − PPH − modal include) − PNBP − PPH 29
-     * Zinit: jual excl − PPH (jasa) − Fee Zinit − modal excl
+     * Zinit: jual excl − PPH (jasa) − modal excl (Fee Zinit dipotong sekali di opportunity)
      * Non Wapu: basis − PPH − modal exclude
      * + Royalti (opsional, semua kategori): − modal excl × royalty%
      */
@@ -702,7 +787,7 @@ class OpportunityProductPricing
         string $itemKind,
         float $itemDiscount = 0,
         float $quantity = 1,
-        bool $hasRoyalty = false
+        mixed $royaltyTypeOrHasRoyalty = false
     ): float {
         if ($taxCategory === self::TAX_ZINIT) {
             $baseMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $quantity);
@@ -714,7 +799,7 @@ class OpportunityProductPricing
             $baseMargin = round($gross - $pnbp - $pph29, 2);
         }
 
-        $royalty = self::royalty($costExclude, $hasRoyalty);
+        $royalty = self::royalty($costExclude, $royaltyTypeOrHasRoyalty);
 
         return round($baseMargin - $royalty, 2);
     }
@@ -728,14 +813,9 @@ class OpportunityProductPricing
         float $quantity = 1,
     ): ?float {
         if ($taxCategory === self::TAX_ZINIT) {
-            $qty = $quantity > 0 ? $quantity : 1;
             $base = self::effectiveSellExclude($sellExclude, $itemDiscount);
-            $fees = self::zinitFeesFromSellExclude($base, $qty);
-            $feePerUnit = $fees['success_fee'] / $qty;
-            // GP% terhadap Pot Fee (jual excl − Fee Zinit), sama seperti Excel.
-            $denom = $base - $feePerUnit;
 
-            return $denom > 0 ? round(($margin / $denom) * 100, 2) : null;
+            return $base > 0 ? round(($margin / $base) * 100, 2) : null;
         }
 
         $effectiveSell = self::effectiveSellExclude($sellExclude, $itemDiscount);
@@ -780,20 +860,25 @@ class OpportunityProductPricing
         $zinitFees = self::appliesZinit($taxCategory)
             ? self::zinitFeesFromSellExclude($effectiveSell, $qty)
             : null;
-        $hasRoyalty = self::hasRoyaltyFlag($row['has_royalty'] ?? false);
-        $royaltyPercent = $hasRoyalty ? self::royaltyPercent() : 0.0;
-        $royalty = self::royalty($costExclude, $hasRoyalty);
+        $royaltyType = self::normalizeRoyaltyType(
+            $row['royalty_type'] ?? (($row['has_royalty'] ?? false) ? self::ROYALTY_LUAR : '')
+        );
+        $hasRoyalty = $royaltyType !== '';
+        $royaltyPercent = self::royaltyPercentFor($royaltyType);
+        $royalty = self::royalty($costExclude, $royaltyType);
         $grossMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
         $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty, $hasRoyalty);
+        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty, $royaltyType);
         $marginPercent = self::marginPercent($margin, $sellExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
 
-        $subtotal = round($qty * $effectiveInclude, 2);
-        $price = $effectiveInclude;
         $zinitFeeTotal = (float) ($zinitFees['success_fee'] ?? 0);
         $zinitPotFee = self::appliesZinit($taxCategory)
             ? round(($effectiveSell * $qty) - $zinitFeeTotal, 2)
             : null;
+
+        // Subtotal / grand total include = jual include × qty (Fee Zinit dihitung dari nilai ini, tidak ditambahkan).
+        $subtotal = round($qty * $effectiveInclude, 2);
+        $price = $effectiveInclude;
 
         return array_merge($row, [
             'tax_category' => $taxCategory,
@@ -825,6 +910,8 @@ class OpportunityProductPricing
             'zinit_rate_percent' => $zinitFees['rate_percent'] ?? 0.0,
             'zinit_pot_fee' => $zinitPotFee,
             'has_royalty' => $hasRoyalty,
+            'royalty_type' => $royaltyType,
+            'royalty_type_label' => self::royaltyTypeLabel($royaltyType),
             'royalty' => $royalty,
             'royalty_percent' => $royaltyPercent,
             'royalty_applicable' => $hasRoyalty && $royalty > 0,

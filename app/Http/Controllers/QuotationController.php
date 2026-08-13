@@ -8,6 +8,7 @@ use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
 use App\Models\QuotationRevision;
 use App\Models\QuotationTemplate;
+use App\Services\AgcApiService;
 use App\Services\NotificationService;
 use App\Support\OpportunityProductPricing;
 use App\Services\QuotationService;
@@ -15,8 +16,11 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\File;
 
 class QuotationController extends Controller
 {
@@ -216,7 +220,7 @@ class QuotationController extends Controller
 
         try {
             $oppSyncedOnCreate = false;
-            $quotation = DB::transaction(function () use ($data, &$oppSyncedOnCreate) {
+            $quotation = DB::transaction(function () use ($data, $request, &$oppSyncedOnCreate) {
                 $salesContext = $this->service->resolveSalesCodeContext(
                     $data['opportunity_id'] ?? null,
                     auth()->user()
@@ -246,7 +250,7 @@ class QuotationController extends Controller
 
                 $quotation->save();
 
-                $this->syncItems($quotation, $data['items']);
+                $this->syncItems($quotation, $data['items'], $request);
                 $quotation->load('items');
                 $quotation->recalculateTotals();
                 $quotation->save();
@@ -337,7 +341,7 @@ class QuotationController extends Controller
         $notifyOppDiscount = false;
 
         try {
-            $result = DB::transaction(function () use ($quotation, $data, &$becamePending, &$becameRevision, &$syncedOpportunity, &$notifyOppMargin, &$notifyOppDiscount) {
+            $result = DB::transaction(function () use ($quotation, $data, $request, &$becamePending, &$becameRevision, &$syncedOpportunity, &$notifyOppMargin, &$notifyOppDiscount) {
                 $before = $this->contentFingerprint($quotation);
                 $everSent = $quotation->hasBeenSent();
                 // Naik R hanya jika status SAAT INI Sent. Draft setelah R1 tidak boleh jadi R2.
@@ -359,7 +363,7 @@ class QuotationController extends Controller
                 }
                 $quotation->save();
 
-                $this->syncItems($quotation, $data['items']);
+                $this->syncItems($quotation, $data['items'], $request);
                 $quotation->load('items');
                 $quotation->recalculateTotals();
                 $quotation->save();
@@ -653,7 +657,12 @@ class QuotationController extends Controller
             'items.*.tax_category' => ['nullable', 'string', 'max:20'],
             'items.*.item_kind' => ['nullable', 'string', 'max:20'],
             'items.*.has_royalty' => ['nullable'],
+            'items.*.royalty_type' => ['nullable', 'string', Rule::in(['', OpportunityProductPricing::ROYALTY_DALAM, OpportunityProductPricing::ROYALTY_LUAR])],
             'items.*.vendor' => ['nullable', 'string', 'max:255'],
+            'items.*.brand' => ['nullable', 'string', 'max:255'],
+            'items.*.image' => ['nullable', 'string', 'max:500'],
+            'items.*.remove_image' => ['nullable'],
+            'items.*.image_file' => ['nullable', File::image()->max(2048)],
         ];
 
         if (! $isCreate) {
@@ -708,16 +717,23 @@ class QuotationController extends Controller
                 'cost_exclude' => round((float) ($i->cost_exclude ?? 0), 2),
                 'tax_category' => (string) ($i->tax_category ?? ''),
                 'item_kind' => (string) ($i->item_kind ?? ''),
-                'has_royalty' => (bool) ($i->has_royalty ?? false),
+                'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
+                    $i->royalty_type ?? (($i->has_royalty ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+                ),
+                'has_royalty' => (bool) ($i->has_royalty ?? false)
+                    || OpportunityProductPricing::normalizeRoyaltyType($i->royalty_type ?? '') !== '',
                 'vendor' => (string) ($i->vendor ?? ''),
+                'brand' => (string) ($i->brand ?? ''),
+                'image' => (string) ($i->image ?? ''),
             ])->values()->all(),
         ];
 
         return md5(json_encode($payload));
     }
 
-    protected function syncItems(Quotation $quotation, array $items): void
+    protected function syncItems(Quotation $quotation, array $items, ?Request $request = null): void
     {
+        $oldImages = $quotation->items()->pluck('image')->filter()->values()->all();
         $quotation->items()->delete();
 
         $oppProducts = null;
@@ -725,6 +741,8 @@ class QuotationController extends Controller
             $opportunity = Opportunity::query()->find($quotation->opportunity_id);
             $oppProducts = $opportunity?->products;
         }
+
+        $keptImages = [];
 
         foreach (array_values($items) as $index => $item) {
             $quantity = (float) $item['quantity'];
@@ -776,13 +794,26 @@ class QuotationController extends Controller
                 $discountExclude = 0;
             }
 
+            $royaltyType = OpportunityProductPricing::normalizeRoyaltyType(
+                $item['royalty_type'] ?? (($item['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+            );
+
+            $brand = trim((string) ($item['brand'] ?? ($opp['brand'] ?? '')));
+            $image = $this->resolveQuotationItemImagePath($request, $quotation, $index, $item, $opp);
+            if ($image !== '') {
+                $keptImages[] = $image;
+            }
+
             $enriched = OpportunityProductPricing::enrichRow([
                 'name' => $item['name'],
                 'quantity' => $quantity,
                 'vendor' => $item['vendor'] ?? '',
+                'brand' => $brand,
+                'image' => $image,
                 'tax_category' => $item['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $item['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
-                'has_royalty' => ! empty($item['has_royalty']),
+                'royalty_type' => $royaltyType,
+                'has_royalty' => $royaltyType !== '',
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => (float) ($incomingCost ?? 0),
                 'discount_exclude' => $discountExclude,
@@ -799,14 +830,72 @@ class QuotationController extends Controller
                 'total' => round($quantity * $billedPrice, 2),
                 'tax_category' => $enriched['tax_category'],
                 'item_kind' => $enriched['item_kind'],
-                'has_royalty' => ! empty($enriched['has_royalty']),
+                'royalty_type' => $royaltyType !== '' ? $royaltyType : null,
+                'has_royalty' => $royaltyType !== '',
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => $enriched['cost_exclude'],
                 'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,
                 'vendor' => $enriched['vendor'] ?: null,
+                'brand' => $brand !== '' ? $brand : null,
+                'image' => $image !== '' ? $image : null,
                 'sort_order' => $index,
             ]);
         }
+
+        foreach ($oldImages as $oldPath) {
+            if ($oldPath && ! in_array($oldPath, $keptImages, true)) {
+                // Jangan hapus jika masih dipakai opportunity product.
+                $stillOnOpp = false;
+                if ($oppProducts) {
+                    $stillOnOpp = $oppProducts->contains(fn ($p) => trim((string) ($p['image'] ?? '')) === $oldPath);
+                }
+                if (! $stillOnOpp) {
+                    Storage::disk('public')->delete($oldPath);
+                }
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     * @param  array<string, mixed>|null  $oppProduct
+     */
+    protected function resolveQuotationItemImagePath(
+        ?Request $request,
+        Quotation $quotation,
+        int $index,
+        array $item,
+        ?array $oppProduct = null
+    ): string {
+        $current = trim((string) ($item['image'] ?? ''));
+        if ($current === '' && $oppProduct) {
+            $current = trim((string) ($oppProduct['image'] ?? ''));
+        }
+
+        $remove = in_array(
+            strtolower((string) ($item['remove_image'] ?? '0')),
+            ['1', 'true', 'yes', 'on'],
+            true
+        );
+
+        $file = $request?->file("items.{$index}.image_file");
+        if ($file instanceof UploadedFile && $file->isValid()) {
+            $dir = $quotation->opportunity_id
+                ? 'opportunity-products/'.$quotation->opportunity_id
+                : 'quotation-products/'.$quotation->id;
+            $path = $file->store($dir, 'public');
+            if ($current !== '' && $current !== $path) {
+                // Biarkan purge opportunity handle; jangan hapus di sini jika masih dipakai.
+            }
+
+            return $path ?: '';
+        }
+
+        if ($remove) {
+            return '';
+        }
+
+        return $current;
     }
 
     protected function snapshotRevision(Quotation $quotation, string $note): void
@@ -1013,6 +1102,7 @@ class QuotationController extends Controller
             'templates' => $templates,
             'statuses' => Quotation::STATUSES,
             'templateCompany' => $company,
+            'brandOptions' => app(AgcApiService::class)->brands(),
         ];
     }
 

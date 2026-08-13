@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Espo\Account;
 use App\Models\Espo\Opportunity;
+use App\Support\OpportunityProductPricing;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -228,11 +229,17 @@ class Quotation extends Model
                 'unit_price' => $billed,
                 'tax_category' => (string) ($p['tax_category'] ?? ''),
                 'item_kind' => (string) ($p['item_kind'] ?? ''),
-                'has_royalty' => ! empty($p['has_royalty']),
+                'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
+                    $p['royalty_type'] ?? (($p['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+                ),
+                'has_royalty' => ! empty($p['has_royalty'])
+                    || OpportunityProductPricing::normalizeRoyaltyType($p['royalty_type'] ?? '') !== '',
                 'sell_exclude' => $list,
                 'discount_exclude' => $discount,
                 'cost_exclude' => (float) ($p['cost_exclude'] ?? 0),
                 'vendor' => (string) ($p['vendor'] ?? ''),
+                'brand' => (string) ($p['brand'] ?? ''),
+                'image' => (string) ($p['image'] ?? ''),
             ];
         })->all();
     }
@@ -251,8 +258,14 @@ class Quotation extends Model
             'cost_exclude' => round((float) ($row['cost_exclude'] ?? 0), 2),
             'tax_category' => (string) ($row['tax_category'] ?? ''),
             'item_kind' => (string) ($row['item_kind'] ?? ''),
-            'has_royalty' => ! empty($row['has_royalty']) ? 1 : 0,
+            'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
+                $row['royalty_type'] ?? (($row['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+            ),
+            'has_royalty' => ! empty($row['has_royalty'])
+                || OpportunityProductPricing::normalizeRoyaltyType($row['royalty_type'] ?? '') !== '' ? 1 : 0,
             'vendor' => (string) ($row['vendor'] ?? ''),
+            'brand' => (string) ($row['brand'] ?? ''),
+            'image' => (string) ($row['image'] ?? ''),
         ])->values()->all();
 
         return md5(json_encode($core));
@@ -271,8 +284,14 @@ class Quotation extends Model
             'cost_exclude' => $i->cost_exclude ?? 0,
             'tax_category' => $i->tax_category ?? '',
             'item_kind' => $i->item_kind ?? '',
-            'has_royalty' => (bool) ($i->has_royalty ?? false),
+            'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
+                $i->royalty_type ?? (($i->has_royalty ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+            ),
+            'has_royalty' => (bool) ($i->has_royalty ?? false)
+                || OpportunityProductPricing::normalizeRoyaltyType($i->royalty_type ?? '') !== '',
             'vendor' => $i->vendor ?? '',
+            'brand' => $i->brand ?? '',
+            'image' => $i->image ?? '',
         ])->all();
 
         return self::itemsSyncFingerprint($payload);
@@ -303,11 +322,15 @@ class Quotation extends Model
                 'total' => round($quantity * $billedPrice, 2),
                 'tax_category' => $item['tax_category'] !== '' ? $item['tax_category'] : null,
                 'item_kind' => $item['item_kind'] !== '' ? $item['item_kind'] : null,
-                'has_royalty' => ! empty($item['has_royalty']),
+                'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType($item['royalty_type'] ?? '') ?: null,
+                'has_royalty' => ! empty($item['has_royalty'])
+                    || OpportunityProductPricing::normalizeRoyaltyType($item['royalty_type'] ?? '') !== '',
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => (float) $item['cost_exclude'],
                 'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,
                 'vendor' => $item['vendor'] !== '' ? $item['vendor'] : null,
+                'brand' => ($item['brand'] ?? '') !== '' ? $item['brand'] : null,
+                'image' => ($item['image'] ?? '') !== '' ? $item['image'] : null,
                 'sort_order' => $index,
             ]);
         }

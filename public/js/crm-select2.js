@@ -78,7 +78,7 @@
     window.CrmSelect2 = {
         init(root) {
             const $scope = root ? $(root) : $(document);
-            $scope.find('select.select2').each(function () {
+            $scope.find('select.select2').not('[data-brand-select]').each(function () {
                 window.CrmSelect2.initElement(this);
             });
         },

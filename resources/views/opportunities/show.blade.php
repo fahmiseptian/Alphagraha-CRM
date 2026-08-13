@@ -590,6 +590,7 @@
                                 <th>Kategori</th>
                                 <th>Jenis</th>
                                 <th>Item</th>
+                                <th>Brand</th>
                                 <th class="text-right">Qty</th>
                                 <th class="text-right">Jual Excl</th>
                                 <th class="text-right">Diskon Item</th>
@@ -608,7 +609,17 @@
                                 <tr>
                                     <td class="text-slate-600">{{ $p['tax_category_label'] ?? \App\Support\OpportunityProductPricing::taxCategoryLabel((string) ($p['tax_category'] ?? 'non_wapu')) }}</td>
                                     <td class="text-slate-600">{{ ucfirst($p['item_kind']) }}</td>
-                                    <td class="text-slate-700">{{ $p['name'] }}</td>
+                                    <td class="text-slate-700">
+                                        <div class="flex items-center gap-2">
+                                            @if (! empty($p['image_url']))
+                                                <a href="{{ $p['image_url'] }}" target="_blank" rel="noopener" class="block h-10 w-10 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50">
+                                                    <img src="{{ $p['image_url'] }}" alt="" class="h-full w-full object-cover">
+                                                </a>
+                                            @endif
+                                            <span>{{ $p['name'] }}</span>
+                                        </div>
+                                    </td>
+                                    <td class="text-slate-600">{{ $p['brand'] ?: '—' }}</td>
                                     <td class="text-right text-slate-600">{{ rtrim(rtrim(number_format($p['quantity'], 2, ',', '.'), '0'), ',') }}</td>
                                     <td class="text-right text-slate-600">
                                         {{ money($p['sell_exclude'], $opportunity->amount_currency ?: 'IDR') }}
@@ -640,11 +651,17 @@
                                                 <span class="block text-[10px] text-slate-500">PPH {{ money($p['pph'] ?? 0, $opportunity->amount_currency ?: 'IDR') }} ({{ rtrim(rtrim(number_format((float) ($p['pph_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%)</span>
                                             @endif
                                             @if ($p['royalty_applicable'] ?? false)
-                                                <span class="block text-[10px] text-slate-500">Royalti {{ money($p['royalty'] ?? 0, $opportunity->amount_currency ?: 'IDR') }} ({{ rtrim(rtrim(number_format((float) ($p['royalty_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%)</span>
+                                                <span class="block text-[10px] text-slate-500">
+                                                    Royalti {{ money($p['royalty'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}
+                                                    ({{ rtrim(rtrim(number_format((float) ($p['royalty_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%
+                                                    @if (! empty($p['royalty_type_label']))
+                                                        · {{ $p['royalty_type_label'] }}
+                                                    @endif)
+                                                </span>
                                             @endif
-                                            <span class="block text-[10px] text-slate-500">Fee {{ money($p['zinit_success_fee'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
-                                            <span class="block text-[10px] text-slate-500">Service {{ money($p['zinit_service_fee'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
-                                            <span class="block text-[10px] text-slate-500">Platform {{ money($p['zinit_platform_fee'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
+                                            @if (! ($p['pph_applicable'] ?? false) && ! ($p['royalty_applicable'] ?? false))
+                                                —
+                                            @endif
                                         @elseif (($p['pph_applicable'] ?? false) || ($p['pnbp_applicable'] ?? false) || ($p['pph29_applicable'] ?? false) || ($p['royalty_applicable'] ?? false))
                                             @if ($p['pph_applicable'] ?? false)
                                                 <span class="block">{{ money($p['pph'], $opportunity->amount_currency ?: 'IDR') }}</span>
@@ -659,7 +676,13 @@
                                                 <span class="mt-0.5 block text-[10px] text-slate-500">PPH29 {{ money($p['pph29'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}</span>
                                             @endif
                                             @if ($p['royalty_applicable'] ?? false)
-                                                <span class="mt-0.5 block text-[10px] text-slate-500">Royalti {{ money($p['royalty'] ?? 0, $opportunity->amount_currency ?: 'IDR') }} ({{ rtrim(rtrim(number_format((float) ($p['royalty_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%)</span>
+                                                <span class="mt-0.5 block text-[10px] text-slate-500">
+                                                    Royalti {{ money($p['royalty'] ?? 0, $opportunity->amount_currency ?: 'IDR') }}
+                                                    ({{ rtrim(rtrim(number_format((float) ($p['royalty_percent'] ?? 0), 2, ',', '.'), '0'), ',') }}%
+                                                    @if (! empty($p['royalty_type_label']))
+                                                        · {{ $p['royalty_type_label'] }}
+                                                    @endif)
+                                                </span>
                                             @endif
                                         @else
                                             —
@@ -674,9 +697,23 @@
                         </tbody>
                         <tfoot>
                             <tr class="bg-slate-50">
-                                <td class="font-semibold text-slate-700" colspan="13">Total</td>
+                                <td class="font-semibold text-slate-700" colspan="14">Total</td>
                                 <td class="text-right font-bold text-slate-900">{{ money($products->sum('subtotal'), $opportunity->amount_currency ?: 'IDR') }}</td>
                             </tr>
+                            @php
+                                $hasZinitProducts = $products->contains(fn ($p) => ! empty($p['zinit_applicable']));
+                                $zinitDealFee = $hasZinitProducts ? (float) ($opportunity->zinitDealFees()['success_fee'] ?? 0) : 0;
+                            @endphp
+                            @if ($hasZinitProducts)
+                                <tr class="bg-amber-50/60">
+                                    <td class="text-slate-600" colspan="14">Fee Zinit (dari grand total include)</td>
+                                    <td class="text-right font-semibold text-amber-800">{{ money($zinitDealFee, $opportunity->amount_currency ?: 'IDR') }}</td>
+                                </tr>
+                                <tr class="bg-green-50/60">
+                                    <td class="text-slate-600" colspan="14">Total Margin (Fix GP)</td>
+                                    <td class="text-right font-semibold text-green-800">{{ money($opportunity->totalProductsMargin(), $opportunity->amount_currency ?: 'IDR') }}</td>
+                                </tr>
+                            @endif
                         </tfoot>
                     </table>
                 </div>

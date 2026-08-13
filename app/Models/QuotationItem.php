@@ -13,7 +13,7 @@ class QuotationItem extends Model
     protected $fillable = [
         'quotation_id', 'name', 'description', 'quantity', 'unit',
         'unit_price', 'total', 'sort_order',
-        'tax_category', 'item_kind', 'has_royalty', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'vendor',
+        'tax_category', 'item_kind', 'has_royalty', 'royalty_type', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'vendor', 'brand', 'image',
     ];
 
     protected $casts = [
@@ -68,6 +68,9 @@ class QuotationItem extends Model
             'discount_exclude' => $discountExclude,
             'tax_category' => $this->tax_category ?? OpportunityProductPricing::TAX_NON_WAPU,
             'item_kind' => $this->item_kind ?? OpportunityProductPricing::KIND_BARANG,
+            'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
+                $this->royalty_type ?? (($this->has_royalty ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : '')
+            ),
             'has_royalty' => (bool) $this->has_royalty,
         ]);
 

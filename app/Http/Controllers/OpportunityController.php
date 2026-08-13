@@ -12,11 +12,15 @@ use App\Support\CustomerTop;
 use App\Support\OpportunityProductBulkExcel;
 use App\Support\OpportunityProductPricing;
 use App\Support\PaymentLevel;
+use App\Services\AgcApiService;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -609,6 +613,7 @@ class OpportunityController extends Controller
             'products.*.fx_rate' => ['nullable', 'numeric', 'min:0'],
             'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
+            'products.*.brand' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
         ]);
@@ -629,8 +634,11 @@ class OpportunityController extends Controller
                 'name' => $prev['name'] ?? ($p['name'] ?? ''),
                 'quantity' => $prev['quantity'] ?? ($p['quantity'] ?? 1),
                 'vendor' => $normalized['vendor'] ?? '',
+                'brand' => (string) ($prev['brand'] ?? ''),
+                'image' => (string) ($prev['image'] ?? ''),
                 'tax_category' => $prev['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $prev['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                'royalty_type' => $prev['royalty_type'] ?? (($prev['has_royalty'] ?? false) ? OpportunityProductPricing::ROYALTY_LUAR : ''),
                 'has_royalty' => $prev['has_royalty'] ?? false,
                 // Harga jual & diskon item dikunci; purchasing hanya ubah modal & vendor.
                 'sell_exclude' => $prev['sell_exclude'] ?? ($p['sell_exclude'] ?? 0),
@@ -832,9 +840,14 @@ class OpportunityController extends Controller
             'products.*.fx_rate' => ['nullable', 'numeric', 'min:0'],
             'products.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
+            'products.*.brand' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
             'products.*.has_royalty' => ['nullable'],
+            'products.*.royalty_type' => ['nullable', 'string', Rule::in(['', OpportunityProductPricing::ROYALTY_DALAM, OpportunityProductPricing::ROYALTY_LUAR])],
+            'products.*.image' => ['nullable', 'string', 'max:500'],
+            'products.*.remove_image' => ['nullable'],
+            'products.*.image_file' => ['nullable', File::image()->max(2048)],
             'has_discount' => ['nullable', 'boolean'],
             'discount_amount' => ['nullable', 'numeric', 'min:0'],
             'has_shipping_charge' => ['nullable', 'boolean'],
@@ -941,17 +954,30 @@ class OpportunityController extends Controller
         }
 
         if ($request->has('products')) {
+            $oldImages = array_values(array_filter(array_map(
+                fn ($p) => trim((string) $p),
+                (array) ($opportunity->crm_item_image ?? [])
+            )));
+
             $rows = collect($data['products'] ?? [])
-                ->filter(fn ($p) => filled($p['name'] ?? null))
-                ->map(function ($p) {
+                ->values()
+                ->map(function ($p, $index) use ($request, $opportunity) {
+                    if (! filled($p['name'] ?? null)) {
+                        return null;
+                    }
+
                     $normalized = Opportunity::normalizeProductInput($p);
+                    $image = $this->resolveProductImagePath($request, $opportunity, $index, $p);
 
                     return OpportunityProductPricing::enrichRow([
                         'name' => $normalized['name'] ?? '',
                         'quantity' => $normalized['quantity'] ?? 1,
                         'vendor' => $normalized['vendor'] ?? '',
+                        'brand' => trim((string) ($normalized['brand'] ?? '')),
+                        'image' => $image,
                         'tax_category' => $normalized['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                         'item_kind' => $normalized['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
+                        'royalty_type' => $normalized['royalty_type'] ?? '',
                         'has_royalty' => $normalized['has_royalty'] ?? false,
                         'sell_exclude' => $normalized['sell_exclude'] ?? 0,
                         'cost_exclude' => $normalized['cost_exclude'],
@@ -965,18 +991,63 @@ class OpportunityController extends Controller
                         'usd_rate' => $normalized['fx_rate'],
                     ]);
                 })
+                ->filter()
                 ->values();
 
             $opportunity->applyProductRows($rows);
 
+            $keepImages = $rows->map(fn ($p) => trim((string) ($p['image'] ?? '')))->filter()->values()->all();
+            foreach ($oldImages as $oldPath) {
+                if ($oldPath !== '' && ! in_array($oldPath, $keepImages, true)) {
+                    Storage::disk('public')->delete($oldPath);
+                }
+            }
+            $opportunity->purgeUnusedProductImages($keepImages);
+
             if ($rows->isNotEmpty()) {
-                $opportunity->amount = $rows->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0));
+                $opportunity->amount = $rows->sum(fn ($p) => (float) ($p['subtotal'] ?? ((float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0))));
             }
         }
 
         $this->applyDiscountData($opportunity, $data, $isNew);
         $this->applyShippingChargeData($opportunity, $data);
         $opportunity->syncWonMargin();
+    }
+
+    /**
+     * Resolve path image produk: upload baru, hapus, atau pertahankan path lama.
+     *
+     * @param  array<string, mixed>  $product
+     */
+    protected function resolveProductImagePath(Request $request, Opportunity $opportunity, int $index, array $product): string
+    {
+        $current = trim((string) ($product['image'] ?? ''));
+        $remove = in_array(
+            strtolower((string) ($product['remove_image'] ?? '0')),
+            ['1', 'true', 'yes', 'on'],
+            true
+        );
+
+        $file = $request->file("products.{$index}.image_file");
+        if ($file instanceof UploadedFile && $file->isValid()) {
+            $dir = 'opportunity-products/'.$opportunity->id;
+            $path = $file->store($dir, 'public');
+            if ($current !== '' && $current !== $path) {
+                Storage::disk('public')->delete($current);
+            }
+
+            return $path ?: '';
+        }
+
+        if ($remove) {
+            if ($current !== '') {
+                Storage::disk('public')->delete($current);
+            }
+
+            return '';
+        }
+
+        return $current;
     }
 
     protected function applyShippingChargeData(Opportunity $opportunity, array $data): void
@@ -1096,11 +1167,14 @@ class OpportunityController extends Controller
             ]];
         })->all();
 
+        $brands = app(AgcApiService::class)->brands();
+
         return [
             'accounts' => $accounts,
             'accountMarginMeta' => $accountMarginMeta,
             'topOptions' => CustomerTop::LABELS,
             'topMargins' => CustomerTop::allMinMargins(),
+            'brandOptions' => $brands,
             'marginNominalUmum' => PaymentLevel::marginNominalUmum(),
             'marginNominalOngkirPribadi' => PaymentLevel::marginNominalOngkirPribadi(),
             'marginMaxPercent' => PaymentLevel::maxMarginPercent(),

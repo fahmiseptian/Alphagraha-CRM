@@ -7,6 +7,7 @@ use App\Models\QuotationTemplate;
 use App\Models\User;
 use App\Support\OpportunityProductPricing;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Logika inti penawaran: penomoran otomatis & merge data ke template HTML
@@ -218,6 +219,8 @@ class QuotationService
             'items_rows' => $this->renderItemsRows($quotation),
             'items_table_idr' => $this->renderItemsTableIndo($quotation),
             'items_rows_idr' => $this->renderItemsRowsIndo($quotation),
+            'items_table_idr_image' => $this->renderItemsTableIndoWithImage($quotation),
+            'items_rows_idr_image' => $this->renderItemsRowsIndoWithImage($quotation),
             'items_table_idr_include' => $this->renderItemsTableIndoInclude($quotation),
             'items_rows_idr_include' => $this->renderItemsRowsIndoInclude($quotation),
             'items_table_diskon_item' => $this->renderItemsTableDiskonItem($quotation),
@@ -486,19 +489,71 @@ class QuotationService
         return nl2br(e($description));
     }
 
+    /**
+     * Brand per baris QO (prioritas item QO, fallback Opportunity by index).
+     *
+     * @return list<string>
+     */
+    protected function productBrandsForQuotation(Quotation $quotation): array
+    {
+        $quotation->loadMissing(['items', 'opportunity']);
+
+        $fromItems = $quotation->items
+            ->map(fn ($i) => trim((string) ($i->brand ?? '')))
+            ->values()
+            ->all();
+
+        $opportunity = $quotation->opportunity;
+        $fromOpp = $opportunity
+            ? $opportunity->products->map(fn ($p) => trim((string) ($p['brand'] ?? '')))->values()->all()
+            : [];
+
+        $count = max(count($fromItems), count($fromOpp));
+        $brands = [];
+        for ($i = 0; $i < $count; $i++) {
+            $brands[] = ($fromItems[$i] ?? '') !== ''
+                ? $fromItems[$i]
+                : ($fromOpp[$i] ?? '');
+        }
+
+        return $brands;
+    }
+
+    /**
+     * Sel Spesifikasi: bila ada brand → <strong>Brand - </strong>Nama<br><small>spek</small>
+     */
+    protected function formatItemSpecificationHtml(string $name, ?string $brand, ?string $description): string
+    {
+        $name = trim($name);
+        $brand = trim((string) $brand);
+        $specHtml = $this->formatItemDescription($description);
+
+        if ($brand !== '') {
+            $title = '<strong>'.e($brand).' - </strong>'.e($name);
+        } else {
+            $title = e($name);
+        }
+
+        if ($specHtml !== '') {
+            $title .= '<br><small>'.$specHtml.'</small>';
+        }
+
+        return $title;
+    }
+
     protected function renderItemsRows(Quotation $quotation): string
     {
         $rows = '';
         $no = 1;
+        $brands = $this->productBrandsForQuotation($quotation);
 
-        foreach ($quotation->items as $item) {
+        foreach ($quotation->items as $index => $item) {
             $unitLabel = trim((string) $item->unit) ?: 'unit';
-            $specHtml = $this->formatItemDescription($item->description);
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
-                .'<td style="'.$this->cellStyle().'">'.e($item->name)
-                .($specHtml !== '' ? '<br><small>'.$specHtml.'</small>' : '')
+                .'<td style="'.$this->cellStyle().'">'
+                .$this->formatItemSpecificationHtml((string) $item->name, $brands[$index] ?? '', $item->description)
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -533,15 +588,15 @@ class QuotationService
     {
         $rows = '';
         $no = 1;
+        $brands = $this->productBrandsForQuotation($quotation);
 
-        foreach ($quotation->items as $item) {
+        foreach ($quotation->items as $index => $item) {
             $unitLabel = trim((string) $item->unit) ?: 'Unit';
-            $specHtml = $this->formatItemDescription($item->description);
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
-                .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
-                .($specHtml !== '' ? '<span style="display:block; height:4px;"></span><small>'.$specHtml.'</small>' : '')
+                .'<td style="'.$this->cellStyle().'">'
+                .$this->formatItemSpecificationHtml((string) $item->name, $brands[$index] ?? '', $item->description)
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -616,6 +671,111 @@ class QuotationService
     }
 
     /**
+     * Path image produk untuk template QO (prioritas: item QO, fallback Opportunity by index).
+     *
+     * @return list<string>
+     */
+    protected function productImagePathsForQuotation(Quotation $quotation): array
+    {
+        $quotation->loadMissing(['items', 'opportunity']);
+
+        $fromItems = $quotation->items
+            ->map(fn ($i) => trim((string) ($i->image ?? '')))
+            ->values()
+            ->all();
+
+        $opportunity = $quotation->opportunity;
+        $fromOpp = $opportunity
+            ? $opportunity->products->map(fn ($p) => trim((string) ($p['image'] ?? '')))->values()->all()
+            : [];
+
+        $count = max(count($fromItems), count($fromOpp));
+        $paths = [];
+        for ($i = 0; $i < $count; $i++) {
+            $paths[] = ($fromItems[$i] ?? '') !== ''
+                ? $fromItems[$i]
+                : ($fromOpp[$i] ?? '');
+        }
+
+        return $paths;
+    }
+
+    protected function renderProductImageHtml(?string $path): string
+    {
+        $path = trim((string) $path);
+        if ($path === '') {
+            return '<span style="color:#999;">—</span>';
+        }
+
+        $absolute = Storage::disk('public')->path($path);
+        if (! is_file($absolute)) {
+            return '<span style="color:#999;">—</span>';
+        }
+
+        $mime = mime_content_type($absolute) ?: 'image/png';
+        $data = base64_encode((string) file_get_contents($absolute));
+
+        return '<img src="data:'.$mime.';base64,'.$data.'" alt=""'
+            .' style="max-height:90px;max-width:72px;object-fit:contain;display:block;margin:0 auto;">';
+    }
+
+    /**
+     * Tabel item IDR + kolom Gambar (dari image product Opportunity).
+     * Layout: No. | Spesifikasi | Gambar | Qty | Harga Unit IDR | Total Harga IDR
+     */
+    protected function renderItemsRowsIndoWithImage(Quotation $quotation): string
+    {
+        $rows = '';
+        $no = 1;
+        $images = $this->productImagePathsForQuotation($quotation);
+        $brands = $this->productBrandsForQuotation($quotation);
+
+        foreach ($quotation->items as $index => $item) {
+            $unitLabel = trim((string) $item->unit) ?: 'Unit';
+            $imageHtml = $this->renderProductImageHtml($images[$index] ?? '');
+
+            $rows .= '<tr>'
+                .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
+                .'<td style="'.$this->cellStyle().'">'
+                .$this->formatItemSpecificationHtml((string) $item->name, $brands[$index] ?? '', $item->description)
+                .'</td>'
+                .'<td style="'.$this->cellStyle('center').'vertical-align:middle;">'.$imageHtml.'</td>'
+                .'<td style="'.$this->cellStyle('center').'">'
+                .rtrim(rtrim(number_format((float) $item->quantity, 2), '0'), '.').' '.e($unitLabel).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($item->unit_price, $quotation->currency).'</td>'
+                .'<td style="'.$this->cellStyle('right').'">'.money($item->total, $quotation->currency).'</td>'
+                .'</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="6" style="'.$this->cellStyle('center').'color:#999;">Belum ada item.</td></tr>';
+        }
+
+        return $rows;
+    }
+
+    protected function renderItemsTableIndoWithImageSummary(Quotation $quotation): string
+    {
+        return $this->renderItemsTableSummary($quotation, 4);
+    }
+
+    protected function renderItemsTableIndoWithImage(Quotation $quotation): string
+    {
+        return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:12px 0; line-height: 1;">'
+            .'<thead><tr>'
+            .'<th style="'.$this->cellStyle('center', true).'width:32px;">No.</th>'
+            .'<th style="'.$this->cellStyle('center', true).'">Spesifikasi</th>'
+            .'<th style="'.$this->cellStyle('center', true).'width:90px;">Gambar</th>'
+            .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Harga Unit IDR</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Harga IDR</th>'
+            .'</tr></thead><tbody>'
+            .$this->renderItemsRowsIndoWithImage($quotation)
+            .$this->renderItemsTableIndoWithImageSummary($quotation)
+            .'</tbody></table>';
+    }
+
+    /**
      * Multiplier PPN untuk konversi exclude → include pada template QO.
      */
     protected function quotationIncludeMultiplier(Quotation $quotation): float
@@ -641,18 +801,18 @@ class QuotationService
         $rows = '';
         $no = 1;
         $multiplier = $this->quotationIncludeMultiplier($quotation);
+        $brands = $this->productBrandsForQuotation($quotation);
 
-        foreach ($quotation->items as $item) {
+        foreach ($quotation->items as $index => $item) {
             $unitLabel = trim((string) $item->unit) ?: 'Unit';
-            $specHtml = $this->formatItemDescription($item->description);
             $qty = (float) $item->quantity;
             $unitInclude = $this->toIncludePrice((float) $item->unit_price, $multiplier);
             $lineInclude = round($qty * $unitInclude, 2);
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
-                .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
-                .($specHtml !== '' ? '<span style="display:block; height:4px;"></span><small>'.$specHtml.'</small>' : '')
+                .'<td style="'.$this->cellStyle().'">'
+                .$this->formatItemSpecificationHtml((string) $item->name, $brands[$index] ?? '', $item->description)
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format($qty, 2), '0'), '.').' '.e($unitLabel).'</td>'
@@ -769,12 +929,15 @@ class QuotationService
             }
 
             $total = round($qty * $hargaSetelahDiskon, 2);
-            $specHtml = $this->formatItemDescription($item->description);
+            $brand = trim((string) ($item->brand ?? ''));
+            if ($brand === '' && $opp) {
+                $brand = trim((string) ($opp['brand'] ?? ''));
+            }
 
             $rows .= '<tr>'
                 .'<td style="'.$this->cellStyle('center').'">'.$no++.'</td>'
-                .'<td style="'.$this->cellStyle().'"> <strong>'.e($item->name).'</strong>'
-                .($specHtml !== '' ? '<span style="display:block; height:4px;"></span><small>'.$specHtml.'</small>' : '')
+                .'<td style="'.$this->cellStyle().'">'
+                .$this->formatItemSpecificationHtml((string) $item->name, $brand, $item->description)
                 .'</td>'
                 .'<td style="'.$this->cellStyle('center').'">'
                 .rtrim(rtrim(number_format($qty, 2), '0'), '.').' '.e($unitLabel).'</td>'

@@ -7,9 +7,13 @@
             'cost_exclude' => $p['cost_exclude'],
             'discount_exclude' => $p['discount_exclude'] ?? 0,
             'vendor' => $p['vendor'],
+            'brand' => $p['brand'] ?? '',
             'tax_category' => $p['tax_category'],
             'item_kind' => $p['item_kind'],
             'has_royalty' => ! empty($p['has_royalty']),
+            'royalty_type' => (string) ($p['royalty_type'] ?? (! empty($p['has_royalty']) ? 'luar' : '')),
+            'image' => (string) ($p['image'] ?? ''),
+            'image_url' => $p['image_url'] ?? (\App\Models\Espo\Opportunity::productImageUrl($p['image'] ?? null)),
             'cost_foreign' => ! empty($p['cost_foreign']) || ! empty($p['cost_in_usd']),
             'cost_fx_code' => $p['cost_fx_code'] ?? (($p['cost_in_usd'] ?? false) ? 'USD' : ''),
             'cost_fx' => $p['cost_fx'] ?? $p['cost_usd'] ?? 0,
@@ -29,10 +33,11 @@
     $pnbpTiers = \App\Support\OpportunityProductPricing::pnbpTiers();
     $pph29Percent = \App\Support\OpportunityProductPricing::pph29Percent();
     $zinitTiers = \App\Support\OpportunityProductPricing::zinitTiers();
-    $royaltyPercent = \App\Support\OpportunityProductPricing::royaltyPercent();
+    $royaltyDalamPercent = \App\Support\OpportunityProductPricing::royaltyDalamPercent();
+    $royaltyLuarPercent = \App\Support\OpportunityProductPricing::royaltyLuarPercent();
     $purchasingMode = $purchasingMode ?? false;
 @endphp
-<form method="POST" action="{{ $action }}"
+<form method="POST" action="{{ $action }}" enctype="multipart/form-data"
       x-data="opportunityForm({{ \Illuminate\Support\Js::from([
           'products' => $initialProducts,
           'currency' => old('amount_currency', $opportunity->amount_currency ?: 'IDR'),
@@ -50,7 +55,8 @@
           'pnbpTiers' => $pnbpTiers,
           'pph29Percent' => $pph29Percent,
           'zinitTiers' => $zinitTiers,
-          'royaltyPercent' => $royaltyPercent,
+          'royaltyDalamPercent' => $royaltyDalamPercent,
+          'royaltyLuarPercent' => $royaltyLuarPercent,
           'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
           'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
           'hasShippingCharge' => (bool) old('has_shipping_charge', $opportunity->crm_has_shipping_charge),
@@ -324,25 +330,54 @@
                                     </div>
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Royalti</label>
-                                        <label class="mt-1.5 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700">
-                                            <input type="checkbox" value="1" x-model="p.has_royalty" @change="onRoyaltyChange(p)"
-                                                   class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" :disabled="purchasingMode">
-                                            <span x-text="royaltyPercent + '%'"></span>
-                                        </label>
-                                        <input type="hidden" :name="`products[${i}][has_royalty]`" :value="p.has_royalty ? 1 : 0">
+                                        <div class="mt-1.5 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700"
+                                             :class="p.royalty_type ? 'border-brand-300 bg-brand-50' : ''">
+                                            <label class="inline-flex items-center gap-1.5">
+                                                <input type="checkbox"
+                                                       :checked="p.royalty_type === 'dalam'"
+                                                       @change="toggleRoyaltyType(p, 'dalam')"
+                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                                       :disabled="purchasingMode">
+                                                <span x-text="royaltyDalamPercent + '%'"></span>
+                                            </label>
+                                            <label class="inline-flex items-center gap-1.5">
+                                                <input type="checkbox"
+                                                       :checked="p.royalty_type === 'luar'"
+                                                       @change="toggleRoyaltyType(p, 'luar')"
+                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                                       :disabled="purchasingMode">
+                                                <span x-text="royaltyLuarPercent + '%'"></span>
+                                            </label>
+                                        </div>
+                                        <input type="hidden" :name="`products[${i}][royalty_type]`" :value="p.royalty_type || ''">
+                                        <input type="hidden" :name="`products[${i}][has_royalty]`" :value="p.royalty_type ? 1 : 0">
                                     </div>
-                                    <div class="sm:col-span-3">
+                                    <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Item</label>
                                         <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
                                     <div class="sm:col-span-2">
+                                        <label class="crm-label text-xs">Brand</label>
+                                        <select :name="`products[${i}][brand]`"
+                                                class="select2 select2-search w-full text-sm"
+                                                data-placeholder="— Brand —"
+                                                data-brand-select
+                                                :disabled="purchasingMode"
+                                                x-init="$nextTick(() => initBrandSelect($el, i))">
+                                            <option value="">— Brand —</option>
+                                            @foreach ($brandOptions ?? [] as $brand)
+                                                <option value="{{ $brand['name'] }}">{{ $brand['name'] }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Qty</label>
                                         <input type="text" inputmode="decimal"
                                                x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(p.quantity, 2)"
                                                @focus="editingField = `qty-${i}`"
                                                @blur="editingField = null; $el.value = formatId(p.quantity, 2)"
                                                @input="p.quantity = parseId($event.target.value); refreshDiscountFromMargin()"
-                                               class="crm-field w-full min-w-[5.5rem] text-right tabular-nums" :readonly="purchasingMode">
+                                               class="crm-field w-full min-w-[4.5rem] text-right tabular-nums" :readonly="purchasingMode">
                                         <input type="hidden" :name="`products[${i}][quantity]`" :value="p.quantity">
                                     </div>
                                     <div class="sm:col-span-2">
@@ -351,6 +386,40 @@
                                     </div>
                                     <div class="flex items-end justify-end sm:col-span-1">
                                         <button type="button" x-show="!purchasingMode" @click="removeProduct(i)" class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3 flex flex-wrap items-center gap-3">
+                                    <div class="min-w-0 flex-1">
+                                        <label class="crm-label text-xs">Gambar <span class="font-normal text-slate-400">(opsional)</span></label>
+                                        <div class="mt-1.5 flex flex-wrap items-center gap-3">
+                                            <div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                                                <template x-if="p.image_preview || p.image_url">
+                                                    <img :src="p.image_preview || p.image_url" alt="" class="h-full w-full object-cover">
+                                                </template>
+                                                <template x-if="!(p.image_preview || p.image_url)">
+                                                    <i class="bi bi-image text-lg text-slate-300"></i>
+                                                </template>
+                                            </div>
+                                            <div class="min-w-0 flex-1 space-y-1">
+                                                <input type="file"
+                                                       :name="`products[${i}][image_file]`"
+                                                       accept="image/png,image/jpeg,image/webp,image/gif"
+                                                       class="crm-field w-full max-w-xs text-xs file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs file:font-medium file:text-slate-700"
+                                                       :disabled="purchasingMode"
+                                                       @change="onProductImageChange(p, $event)">
+                                                <div class="flex items-center gap-2" x-show="p.image_preview || p.image_url || p.image" x-cloak>
+                                                    <button type="button"
+                                                            x-show="!purchasingMode"
+                                                            @click="clearProductImage(p, i)"
+                                                            class="text-xs font-medium text-red-600 hover:text-red-700">
+                                                        Hapus gambar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <input type="hidden" :name="`products[${i}][image]`" :value="p.remove_image ? '' : (p.image || '')">
+                                        <input type="hidden" :name="`products[${i}][remove_image]`" :value="p.remove_image ? 1 : 0">
                                     </div>
                                 </div>
 
@@ -523,43 +592,11 @@
                                             </td>
                                         </tr>
                                         <tr x-show="appliesRoyalty(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'Royalti ' + royaltyPercent + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">Modal excl × rate</td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'Royalti ' + royaltyPercentFor(p) + '%'"></td>
+                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="royaltyTypeLabel(p)"></td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly :value="formatId(royaltyAmount(p))"
                                                        class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesZinit(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">Service Fee</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="zinitServiceFeeLabel(p)"></td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(zinitServiceFee(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesZinit(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">Platform Fee</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">Flat dari rate scale</td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(zinitPlatformFee(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesZinit(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">Fee Zinit</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">Service + Platform</td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(zinitSuccessFee(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesZinit(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600"> Modal Pot Fee Zinit</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">Jual excl − Fee</td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(zinitPotFee(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-green-200 bg-green-50 text-right tabular-nums font-semibold text-green-800">
                                             </td>
                                         </tr>
                                         <tr>
@@ -609,6 +646,9 @@
                         <div class="text-sm" :class="purchasingMode ? 'ml-auto' : ''">
                             <span class="text-slate-500">Total (Include):&nbsp;</span>
                             <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
+                            <span class="mx-2 text-slate-300" x-show="products.some(p => appliesZinit(p))" x-cloak>·</span>
+                            <span class="text-slate-500" x-show="products.some(p => appliesZinit(p))" x-cloak>Fee Zinit:&nbsp;</span>
+                            <span class="font-semibold text-amber-700" x-show="products.some(p => appliesZinit(p))" x-cloak x-text="formatMoney(zinitDealFees().success_fee)"></span>
                             <span class="mx-2 text-slate-300">·</span>
                             <span class="text-slate-500">Total Margin:&nbsp;</span>
                             <span class="font-semibold text-green-700" x-text="formatMoney(productsMarginTotal)"></span>
@@ -778,7 +818,8 @@
             cap: Number(t.cap) || 0,
         }));
         const PPH29_PERCENT = Number(config.pph29Percent) || 22;
-        const ROYALTY_PERCENT = Number(config.royaltyPercent) || 20;
+        const ROYALTY_DALAM_PERCENT = Number(config.royaltyDalamPercent) || 15;
+        const ROYALTY_LUAR_PERCENT = Number(config.royaltyLuarPercent) || 20;
         const ZINIT_TIERS = (config.zinitTiers || []).map(t => ({
             max: t.max === null || t.max === undefined || t.max === '' ? null : Number(t.max),
             platform_fee: Number(t.platform_fee) || 0,
@@ -828,8 +869,14 @@
                 return a.max - b.max;
             });
             let fallback = tiers[tiers.length - 1] || { max: null, platform_fee: 0, rate_percent: 0, cap: null };
-            for (const tier of tiers) {
+            // Samakan Excel IFS: tier pertama < max, sisanya <= max.
+            for (let i = 0; i < tiers.length; i++) {
+                const tier = tiers[i];
                 if (tier.max === null) return tier;
+                if (i === 0) {
+                    if (volume < tier.max) return tier;
+                    continue;
+                }
                 if (volume <= tier.max) return tier;
             }
             return fallback;
@@ -862,15 +909,19 @@
             return calcZinitFees(includeVolume);
         }
 
-        function calcNetMargin(base, costExclude, taxCategory, itemKind, quantity = 1, hasRoyalty = false) {
+        function royaltyPercentLookup(royaltyType) {
+            if (royaltyType === 'dalam') return ROYALTY_DALAM_PERCENT;
+            if (royaltyType === 'luar') return ROYALTY_LUAR_PERCENT;
+            return 0;
+        }
+
+        function calcNetMargin(base, costExclude, taxCategory, itemKind, quantity = 1, royaltyType = '') {
             let net;
             if (taxCategory === 'zinit') {
-                const qty = quantity > 0 ? quantity : 1;
-                const fees = calcZinitFeesFromSellExclude(base, qty);
-                const feePerUnit = fees.success_fee / qty;
                 const pphPct = pphPercentLookup(taxCategory, itemKind);
                 const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
-                net = Math.round((base - pph - feePerUnit - costExclude) * 100) / 100;
+                // GP per baris tanpa fee; Fee Zinit dipotong sekali di Total Margin.
+                net = Math.round((base - pph - costExclude) * 100) / 100;
             } else {
                 const pphPct = pphPercentLookup(taxCategory, itemKind);
                 const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
@@ -889,8 +940,9 @@
                     net = Math.round((base - pph - costExclude) * 100) / 100;
                 }
             }
-            if (hasRoyalty) {
-                const royalty = Math.round(costExclude * (ROYALTY_PERCENT / 100) * 100) / 100;
+            const rate = royaltyPercentLookup(royaltyType);
+            if (rate > 0) {
+                const royalty = Math.round(costExclude * (rate / 100) * 100) / 100;
                 net = Math.round((net - royalty) * 100) / 100;
             }
             return net;
@@ -903,9 +955,11 @@
             const cost = Number(p.cost_exclude) || 0;
             const discount = Number(p.discount_exclude) || 0;
             const qty = Number(p.quantity) || 1;
-            const hasRoyalty = !!(p.has_royalty);
+            let royaltyType = (p.royalty_type || '').toString();
+            if (!royaltyType && p.has_royalty) royaltyType = 'luar';
+            if (royaltyType !== 'dalam' && royaltyType !== 'luar') royaltyType = '';
             const base = discount > 0 ? discount : sell;
-            const margin = calcNetMargin(base, cost, taxCategory, itemKind, qty, hasRoyalty);
+            const margin = calcNetMargin(base, cost, taxCategory, itemKind, qty, royaltyType);
             const pphPct = pphPercentLookup(taxCategory, itemKind);
             const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
             let denom = base;
@@ -925,9 +979,15 @@
                 cost_exclude: cost,
                 discount_exclude: discount,
                 vendor: p.vendor ?? '',
+                brand: p.brand ?? '',
                 tax_category: taxCategory,
                 item_kind: itemKind,
-                has_royalty: hasRoyalty,
+                royalty_type: royaltyType,
+                has_royalty: !!royaltyType,
+                image: p.image ?? '',
+                image_url: p.image_url ?? '',
+                image_preview: '',
+                remove_image: false,
                 margin_percent: marginPercent,
                 _lockMarginPercent: false,
                 cost_foreign: !!(p.cost_foreign || p.cost_in_usd),
@@ -955,7 +1015,8 @@
             pnbpPercent: PNBP_PERCENT,
             pnbpTiers: PNBP_TIERS,
             pph29Percent: PPH29_PERCENT,
-            royaltyPercent: ROYALTY_PERCENT,
+            royaltyDalamPercent: ROYALTY_DALAM_PERCENT,
+            royaltyLuarPercent: ROYALTY_LUAR_PERCENT,
             amount: {{ (float) old('amount', $opportunity->amount ?? 0) }},
             hasDiscount: !!config.hasDiscount,
             discountAmount: Number(config.discountAmount) || 0,
@@ -1012,7 +1073,7 @@
                     const taxCategory = p.tax_category || 'non_wapu';
 
                     if (taxCategory === 'zinit') {
-                        return s + this.zinitPotFee(p);
+                        return s + qty * this.effectiveSellExclude(p);
                     }
 
                     const effSell = this.effectiveSellExclude(p);
@@ -1023,8 +1084,11 @@
 
                     return s + qty * effSell;
                 }, 0);
-                if (denom <= 0) return null;
-                return this.round((this.productsMarginTotal / denom) * 100);
+                const denomAfterFee = this.products.some(p => this.appliesZinit(p))
+                    ? this.round(denom - this.zinitDealFees().success_fee)
+                    : denom;
+                if (denomAfterFee <= 0) return null;
+                return this.round((this.productsMarginTotal / denomAfterFee) * 100);
             },
             get marginBelowPercent() {
                 const min = this.accountMinMarginPct;
@@ -1047,15 +1111,30 @@
                 return !!(this.accountId && (this.marginBelowPercent || this.marginAbovePercent || this.marginBelowNominal));
             },
             get productsTotal() {
-                return this.products.reduce((s, p) => {
+                return this.round(this.products.reduce((s, p) => {
                     return s + (Number(p.quantity) || 0) * this.effectiveSellInclude(p);
-                }, 0);
+                }, 0));
+            },
+            /** Grand total include Zinit (K52) — basis rumus Fee Zinit. */
+            get zinitGrandTotalInclude() {
+                return this.round(this.products.reduce((s, p) => {
+                    if (!this.appliesZinit(p)) return s;
+                    return s + (Number(p.quantity) || 0) * this.effectiveSellInclude(p);
+                }, 0));
+            },
+            zinitDealFees() {
+                return calcZinitFees(this.zinitGrandTotalInclude);
             },
             get productsMarginTotal() {
-                return this.round(this.products.reduce(
+                const lines = this.round(this.products.reduce(
                     (s, p) => s + (Number(p.quantity) || 0) * this.marginAmount(p),
                     0
                 ));
+                // Fix GP = Total GP − Fee Zinit (fee dihitung sekali dari grand total include).
+                if (this.products.some(p => this.appliesZinit(p))) {
+                    return this.round(lines - this.zinitDealFees().success_fee);
+                }
+                return lines;
             },
             /** Basis % diskon: Inaproc = margin kotor; lainnya = margin bersih. */
             get discountBasisMarginTotal() {
@@ -1190,39 +1269,56 @@
                 return (p.tax_category || 'non_wapu') === 'zinit';
             },
             appliesRoyalty(p) {
-                return !!p.has_royalty;
+                return p.royalty_type === 'dalam' || p.royalty_type === 'luar';
+            },
+            royaltyPercentFor(p) {
+                return royaltyPercentLookup(p.royalty_type || '');
+            },
+            royaltyTypeLabel(p) {
+                if (p.royalty_type === 'dalam') return 'Dalam negeri · modal excl × rate';
+                if (p.royalty_type === 'luar') return 'Luar negeri · modal excl × rate';
+                return '';
             },
             royaltyAmount(p) {
                 if (!this.appliesRoyalty(p)) return 0;
-                return this.round((Number(p.cost_exclude) || 0) * ((Number(this.royaltyPercent) || 0) / 100));
+                return this.round((Number(p.cost_exclude) || 0) * (this.royaltyPercentFor(p) / 100));
+            },
+            toggleRoyaltyType(p, type) {
+                p.royalty_type = p.royalty_type === type ? '' : type;
+                p.has_royalty = !!p.royalty_type;
+                this.onRoyaltyChange(p);
             },
             onRoyaltyChange(p) {
+                p.has_royalty = !!p.royalty_type;
                 p._lockMarginPercent = false;
                 p.margin_percent = this.calcMarginPercent(p);
                 this.refreshDiscountFromMargin();
             },
-            zinitFees(p) {
-                const qty = Number(p.quantity) || 1;
-                return calcZinitFeesFromSellExclude(this.effectiveSellExclude(p), qty > 0 ? qty : 1);
+            onProductImageChange(p, event) {
+                const file = event?.target?.files?.[0] || null;
+                if (p._previewUrl) {
+                    try { URL.revokeObjectURL(p._previewUrl); } catch (e) {}
+                    p._previewUrl = '';
+                }
+                if (!file) {
+                    p.image_preview = '';
+                    return;
+                }
+                p.remove_image = false;
+                p._previewUrl = URL.createObjectURL(file);
+                p.image_preview = p._previewUrl;
             },
-            zinitPlatformFee(p) {
-                return this.zinitFees(p).platform_fee;
-            },
-            zinitServiceFee(p) {
-                return this.zinitFees(p).service_fee;
-            },
-            zinitSuccessFee(p) {
-                return this.zinitFees(p).success_fee;
-            },
-            zinitPotFee(p) {
-                const qty = Number(p.quantity) || 1;
-                const safeQty = qty > 0 ? qty : 1;
-                return this.round((this.effectiveSellExclude(p) * safeQty) - this.zinitSuccessFee(p));
-            },
-            zinitServiceFeeLabel(p) {
-                const fees = this.zinitFees(p);
-                const rate = fees.rate_percent;
-                return 'Jual include × ' + rate + '%';
+            clearProductImage(p, index) {
+                if (p._previewUrl) {
+                    try { URL.revokeObjectURL(p._previewUrl); } catch (e) {}
+                    p._previewUrl = '';
+                }
+                p.image_preview = '';
+                p.image_url = '';
+                p.image = '';
+                p.remove_image = true;
+                const input = this.$root?.querySelector?.(`input[name="products[${index}][image_file]"]`);
+                if (input) input.value = '';
             },
             pphPercentFor(p) {
                 return pphPercentLookup(p.tax_category || 'non_wapu', p.item_kind || 'barang');
@@ -1256,21 +1352,17 @@
                 return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
             marginAmount(p) {
+                // Zinit: GP per baris tanpa fee; Fee Zinit dipotong sekali di Total Margin (Fix GP).
                 if (this.appliesZinit(p)) {
-                    const qty = Number(p.quantity) || 1;
-                    const safeQty = qty > 0 ? qty : 1;
-                    const feePerUnit = this.zinitSuccessFee(p) / safeQty;
-                    return this.round(this.effectiveSellExclude(p) - this.pphAmount(p) - feePerUnit - this.royaltyAmount(p) - (Number(p.cost_exclude) || 0));
+                    return this.round(this.effectiveSellExclude(p) - this.pphAmount(p) - this.royaltyAmount(p) - (Number(p.cost_exclude) || 0));
                 }
                 return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p) - this.royaltyAmount(p));
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
                 if (this.appliesZinit(p)) {
-                    const qty = Number(p.quantity) || 1;
-                    const safeQty = qty > 0 ? qty : 1;
-                    const denom = this.effectiveSellExclude(p) - (this.zinitSuccessFee(p) / safeQty);
-                    return denom > 0 ? this.round((margin / denom) * 100) : 0;
+                    const base = this.effectiveSellExclude(p);
+                    return base > 0 ? this.round((margin / base) * 100) : 0;
                 }
                 const base = this.effectiveSellExclude(p);
                 const taxCategory = p.tax_category || 'non_wapu';
@@ -1286,7 +1378,6 @@
                 if (this.appliesZinit(p)) {
                     let s = 'Jual';
                     if (this.appliesPph(p)) s += ' − PPH';
-                    s += ' − Fee Zinit';
                     if (this.appliesRoyalty(p)) s += ' − Royalti';
                     s += ' − Modal';
                     return s;
@@ -1511,9 +1602,15 @@
                     cost_exclude: 0,
                     discount_exclude: 0,
                     vendor: '',
+                    brand: '',
                     tax_category: this.selectedTaxCategory,
                     item_kind: 'barang',
+                    royalty_type: '',
                     has_royalty: false,
+                    image: '',
+                    image_url: '',
+                    image_preview: '',
+                    remove_image: false,
                     margin_percent: 0,
                     _lockMarginPercent: false,
                     cost_foreign: false,
@@ -1521,10 +1618,59 @@
                     cost_fx: 0,
                     fx_rate: 0,
                 });
+                this.refreshBrandSelects();
             },
             removeProduct(i) {
+                const el = this.$root.querySelector(`select[name="products[${i}][brand]"]`);
+                if (el && window.CrmSelect2) {
+                    CrmSelect2.destroy(el);
+                }
                 this.products.splice(i, 1);
                 this.refreshDiscountFromMargin();
+                this.refreshBrandSelects();
+            },
+            initBrandSelect(el, index) {
+                if (!el || !window.CrmSelect2 || !window.jQuery) return;
+
+                const $el = window.jQuery(el);
+                CrmSelect2.destroy(el);
+
+                $el.select2({
+                    width: '100%',
+                    placeholder: $el.data('placeholder') || '— Brand —',
+                    allowClear: true,
+                    dropdownParent: window.jQuery(document.body),
+                    language: {
+                        noResults: () => 'Brand tidak ditemukan',
+                        searching: () => 'Mencari...',
+                    },
+                });
+
+                $el.off('.crmBrand');
+                $el.on('change.crmBrand select2:select.crmBrand select2:clear.crmBrand', () => {
+                    if (!this.products[index]) return;
+                    this.products[index].brand = $el.val() || '';
+                });
+
+                const brand = this.products[index]?.brand || '';
+                if (brand && $el.find('option').filter(function () {
+                    return String(window.jQuery(this).val()) === String(brand);
+                }).length === 0) {
+                    $el.append(new Option(brand, brand, true, true));
+                }
+                $el.val(brand || '').trigger('change.select2');
+                $el.prop('disabled', !!this.purchasingMode).trigger('change.select2');
+            },
+            refreshBrandSelects() {
+                this.$nextTick(() => {
+                    if (!window.CrmSelect2) return;
+                    this.$root.querySelectorAll('select[data-brand-select]').forEach((el) => {
+                        const match = String(el.getAttribute('name') || '').match(/products\[(\d+)\]\[brand\]/);
+                        const index = match ? Number(match[1]) : -1;
+                        if (index < 0) return;
+                        this.initBrandSelect(el, index);
+                    });
+                });
             },
             /** Prospecting + ada nama produk → Qualification (sinkron select Stage). */
             promoteStageFromProducts() {
@@ -1587,6 +1733,7 @@
                         this.products.push(p);
                     });
                     this.refreshDiscountFromMargin();
+                    this.refreshBrandSelects();
                     alert(`${imported.length} produk berhasil diimpor.`);
                 } catch (err) {
                     console.error(err);
@@ -1671,6 +1818,7 @@
                     harga_jual: 'harga_jual_exclude', sell: 'harga_jual_exclude', sell_exclude: 'harga_jual_exclude',
                     diskon: 'diskon_exclude', discount: 'diskon_exclude', discount_exclude: 'diskon_exclude',
                     harga_beli: 'harga_beli_exclude', modal: 'harga_beli_exclude', cost: 'harga_beli_exclude', cost_exclude: 'harga_beli_exclude',
+                    merek: 'brand', brand_name: 'brand',
                 };
                 return aliases[h] || h;
             },
@@ -1692,12 +1840,18 @@
                     name,
                     quantity: this.parseId(map.qty ?? map.quantity ?? 1) || 1,
                     vendor: String(map.vendor ?? '').trim(),
+                    brand: String(map.brand ?? map.merek ?? '').trim(),
                     sell_exclude: this.parseId(map.harga_jual_exclude ?? 0),
                     discount_exclude: this.parseId(map.diskon_exclude ?? 0),
                     cost_exclude: this.parseId(map.harga_beli_exclude ?? 0),
                     tax_category: this.selectedTaxCategory,
                     item_kind: itemKind,
+                    royalty_type: '',
                     has_royalty: false,
+                    image: '',
+                    image_url: '',
+                    image_preview: '',
+                    remove_image: false,
                     margin_percent: 0,
                     _lockMarginPercent: false,
                     cost_foreign: false,
@@ -1745,6 +1899,7 @@
 
                     this.refreshContactSelect();
                     this.syncDiscountPercentFromAmount();
+                    this.refreshBrandSelects();
                     this._accountReady = true;
                 });
             },

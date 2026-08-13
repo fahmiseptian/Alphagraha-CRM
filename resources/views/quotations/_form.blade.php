@@ -1,22 +1,46 @@
 @php
     $isCreate = ! $quotation->exists;
+    $oppProducts = $quotation->opportunity_id
+        ? ($quotation->relationLoaded('opportunity')
+            ? ($quotation->opportunity?->products ?? collect())
+            : (\App\Models\Espo\Opportunity::query()->find($quotation->opportunity_id)?->products ?? collect()))
+        : collect();
     $initialItems = old('items', $quotation->exists
-        ? $quotation->items->map(fn ($i) => [
-            'name' => $i->name, 'description' => $i->description,
-            'quantity' => (float) $i->quantity, 'unit' => $i->unit,
-            // Form menampilkan harga yang ditagihkan (setelah diskon item bila ada).
-            'unit_price' => (float) $i->unit_price,
-            'sell_exclude' => (float) $i->listSellExclude(),
-            'discount_exclude' => (float) ($i->discount_exclude ?? 0),
-            'cost_exclude' => (float) ($i->cost_exclude ?? 0),
-            'tax_category' => $i->tax_category,
-            'item_kind' => $i->item_kind,
-            'has_royalty' => (bool) ($i->has_royalty ?? false),
-            'vendor' => $i->vendor,
-          ])->values()->all()
-        : ($seedItems ?? []));
+        ? $quotation->items->values()->map(function ($i, $idx) use ($oppProducts) {
+            $opp = $oppProducts->values()->get($idx, []);
+            $image = (string) ($i->image ?: ($opp['image'] ?? ''));
+
+            return [
+                'name' => $i->name, 'description' => $i->description,
+                'quantity' => (float) $i->quantity, 'unit' => $i->unit,
+                'unit_price' => (float) $i->unit_price,
+                'sell_exclude' => (float) $i->listSellExclude(),
+                'discount_exclude' => (float) ($i->discount_exclude ?? 0),
+                'cost_exclude' => (float) ($i->cost_exclude ?? 0),
+                'tax_category' => $i->tax_category,
+                'item_kind' => $i->item_kind,
+                'royalty_type' => \App\Support\OpportunityProductPricing::normalizeRoyaltyType(
+                    $i->royalty_type ?? (($i->has_royalty ?? false) ? 'luar' : '')
+                ),
+                'has_royalty' => (bool) ($i->has_royalty ?? false)
+                    || \App\Support\OpportunityProductPricing::normalizeRoyaltyType($i->royalty_type ?? '') !== '',
+                'vendor' => $i->vendor,
+                'brand' => (string) ($i->brand ?: ($opp['brand'] ?? '')),
+                'image' => $image,
+                'image_url' => \App\Models\Espo\Opportunity::productImageUrl($image),
+            ];
+          })->values()->all()
+        : collect($seedItems ?? [])->map(function ($i) {
+            $image = (string) ($i['image'] ?? '');
+
+            return array_merge($i, [
+                'brand' => (string) ($i['brand'] ?? ''),
+                'image' => $image,
+                'image_url' => \App\Models\Espo\Opportunity::productImageUrl($image),
+            ]);
+        })->values()->all());
     if (empty($initialItems)) {
-        $initialItems = [['name' => '', 'description' => '', 'quantity' => 1, 'unit' => '', 'unit_price' => 0, 'sell_exclude' => 0, 'discount_exclude' => 0]];
+        $initialItems = [['name' => '', 'description' => '', 'quantity' => 1, 'unit' => '', 'unit_price' => 0, 'sell_exclude' => 0, 'discount_exclude' => 0, 'brand' => '', 'image' => '', 'image_url' => '']];
     }
     $accountMap = $accounts->mapWithKeys(fn ($a) => [$a->id => [
         'name' => $a->name,
@@ -32,11 +56,14 @@
         'customerName' => old('customer_name', $quotation->customer_name) ?? '',
         'companyName' => old('company_name', $quotation->company_name) ?? '',
         'customerAddress' => old('customer_address', $quotation->customer_address) ?? '',
+        'brandOptions' => collect($brandOptions ?? [])->map(fn ($b) => [
+            'name' => is_array($b) ? (string) ($b['name'] ?? '') : (string) $b,
+        ])->filter(fn ($b) => $b['name'] !== '')->values()->all(),
     ];
     $ppnPercent = $config['taxPercent'];
 @endphp
 
-<form id="quotation-form" method="POST" action="{{ $action }}"
+<form id="quotation-form" method="POST" action="{{ $action }}" enctype="multipart/form-data"
       x-data="quotationForm({{ \Illuminate\Support\Js::from($config) }})">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
@@ -114,14 +141,24 @@
                             <input type="hidden" :name="`items[${index}][cost_exclude]`" x-model.number="item.cost_exclude">
                             <input type="hidden" :name="`items[${index}][tax_category]`" x-model="item.tax_category">
                             <input type="hidden" :name="`items[${index}][item_kind]`" x-model="item.item_kind">
-                            <input type="hidden" :name="`items[${index}][has_royalty]`" :value="item.has_royalty ? 1 : 0">
+                            <input type="hidden" :name="`items[${index}][royalty_type]`" :value="item.royalty_type || ''">
+                            <input type="hidden" :name="`items[${index}][has_royalty]`" :value="item.royalty_type ? 1 : 0">
                             <input type="hidden" :name="`items[${index}][vendor]`" x-model="item.vendor">
                             <div class="grid grid-cols-12 gap-2">
-                                <div class="col-span-12 sm:col-span-5">
+                                <div class="col-span-12 sm:col-span-4">
                                     <input type="text" :name="`items[${index}][name]`" x-model="item.name" placeholder="Product/service name" @if ($isCreate) required @endif
                                            class="w-full rounded-lg border border-slate-300 py-2 px-3 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
                                 </div>
-                                <div class="col-span-4 sm:col-span-2">
+                                <div class="col-span-12 sm:col-span-2">
+                                    <select :name="`items[${index}][brand]`" x-model="item.brand"
+                                            class="w-full rounded-lg border border-slate-300 py-2 px-2 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200">
+                                        <option value="">— Brand —</option>
+                                        @foreach ($brandOptions ?? [] as $brand)
+                                            <option value="{{ is_array($brand) ? ($brand['name'] ?? '') : $brand }}">{{ is_array($brand) ? ($brand['name'] ?? '') : $brand }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="col-span-4 sm:col-span-1">
                                     <input type="text" inputmode="decimal" placeholder="Qty"
                                            x-effect="if (editingField !== `q-${index}`) $el.value = formatId(item.quantity, 2)"
                                            @focus="editingField = `q-${index}`"
@@ -149,6 +186,33 @@
                                 <div class="col-span-12 flex items-center justify-between sm:col-span-1 sm:justify-center">
                                     <span class="text-sm font-medium text-slate-700 sm:hidden" x-text="formatMoney(item.quantity * item.unit_price)"></span>
                                     <button type="button" @click="removeItem(index)" class="rounded-lg p-2 text-red-500 hover:bg-red-50"><i class="bi bi-trash"></i></button>
+                                </div>
+                                <div class="col-span-12 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-2">
+                                    <div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
+                                        <template x-if="item.image_preview || item.image_url">
+                                            <img :src="item.image_preview || item.image_url" alt="" class="h-full w-full object-cover">
+                                        </template>
+                                        <template x-if="!(item.image_preview || item.image_url)">
+                                            <i class="bi bi-image text-lg text-slate-300"></i>
+                                        </template>
+                                    </div>
+                                    <div class="min-w-0 flex-1 space-y-1">
+                                        <label class="block text-[11px] font-medium uppercase tracking-wide text-slate-400">Gambar <span class="normal-case text-slate-400">(opsional)</span></label>
+                                        <input type="file"
+                                               :name="`items[${index}][image_file]`"
+                                               accept="image/png,image/jpeg,image/webp,image/gif"
+                                               class="w-full max-w-xs text-xs file:mr-2 file:rounded file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs file:font-medium file:text-slate-700"
+                                               @change="onItemImageChange(item, $event)">
+                                        <button type="button"
+                                                x-show="item.image_preview || item.image_url || item.image"
+                                                x-cloak
+                                                @click="clearItemImage(item, index)"
+                                                class="text-xs font-medium text-red-600 hover:text-red-700">
+                                            Hapus gambar
+                                        </button>
+                                    </div>
+                                    <input type="hidden" :name="`items[${index}][image]`" :value="item.remove_image ? '' : (item.image || '')">
+                                    <input type="hidden" :name="`items[${index}][remove_image]`" :value="item.remove_image ? 1 : 0">
                                 </div>
                                 <div class="col-span-12">
                                     <label class="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-400">Specification</label>
@@ -333,12 +397,21 @@
             cost_exclude: Number(item.cost_exclude) || 0,
             tax_category: item.tax_category ?? '',
             item_kind: item.item_kind ?? '',
-            has_royalty: !!(item.has_royalty),
+            royalty_type: (item.royalty_type === 'dalam' || item.royalty_type === 'luar')
+                ? item.royalty_type
+                : (item.has_royalty ? 'luar' : ''),
+            has_royalty: !!(item.has_royalty || item.royalty_type),
             vendor: item.vendor ?? '',
+            brand: item.brand ?? '',
+            image: item.image ?? '',
+            image_url: item.image_url ?? '',
+            image_preview: '',
+            remove_image: false,
         }));
 
         return {
             items,
+            brandOptions: config.brandOptions || [],
             editingField: null,
             discount: config.discount,
             taxPercent: config.taxPercent,
@@ -417,7 +490,8 @@
                     _uid: makeUid(),
                     name: '', description: '', quantity: 1, unit: '', unit_price: 0,
                     sell_exclude: 0, discount_exclude: 0, cost_exclude: 0,
-                    tax_category: '', item_kind: '', has_royalty: false, vendor: '',
+                    tax_category: '', item_kind: '', royalty_type: '', has_royalty: false, vendor: '',
+                    brand: '', image: '', image_url: '', image_preview: '', remove_image: false,
                 });
             },
             removeItem(index) {
@@ -425,6 +499,32 @@
                 this.destroyItemSpec(item);
                 this.items.splice(index, 1);
                 if (this.items.length === 0) this.addItem();
+            },
+            onItemImageChange(item, event) {
+                const file = event?.target?.files?.[0] || null;
+                if (item._previewUrl) {
+                    try { URL.revokeObjectURL(item._previewUrl); } catch (e) {}
+                    item._previewUrl = '';
+                }
+                if (!file) {
+                    item.image_preview = '';
+                    return;
+                }
+                item.remove_image = false;
+                item._previewUrl = URL.createObjectURL(file);
+                item.image_preview = item._previewUrl;
+            },
+            clearItemImage(item, index) {
+                if (item._previewUrl) {
+                    try { URL.revokeObjectURL(item._previewUrl); } catch (e) {}
+                    item._previewUrl = '';
+                }
+                item.image_preview = '';
+                item.image_url = '';
+                item.image = '';
+                item.remove_image = true;
+                const input = this.$root?.querySelector?.(`input[name="items[${index}][image_file]"]`);
+                if (input) input.value = '';
             },
             onUnitPriceChange(item) {
                 const price = Number(item.unit_price) || 0;
