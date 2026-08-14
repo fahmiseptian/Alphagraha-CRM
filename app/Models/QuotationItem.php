@@ -13,7 +13,7 @@ class QuotationItem extends Model
     protected $fillable = [
         'quotation_id', 'name', 'description', 'quantity', 'unit',
         'unit_price', 'total', 'sort_order',
-        'tax_category', 'item_kind', 'has_royalty', 'royalty_type', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'vendor', 'brand', 'image',
+        'tax_category', 'item_kind', 'has_royalty', 'royalty_type', 'sell_exclude', 'cost_exclude', 'discount_exclude', 'shipping_exclude', 'vendor', 'brand', 'image',
     ];
 
     protected $casts = [
@@ -23,6 +23,7 @@ class QuotationItem extends Model
         'sell_exclude' => 'decimal:2',
         'cost_exclude' => 'decimal:2',
         'discount_exclude' => 'decimal:2',
+        'shipping_exclude' => 'decimal:2',
         'has_royalty' => 'boolean',
     ];
 
@@ -60,12 +61,14 @@ class QuotationItem extends Model
     {
         $sellExclude = $this->listSellExclude();
         $discountExclude = (float) ($this->discount_exclude ?? 0);
+        $shippingExclude = (float) ($this->shipping_exclude ?? 0);
 
         $enriched = OpportunityProductPricing::enrichRow([
             'quantity' => (float) $this->quantity,
             'sell_exclude' => $sellExclude,
             'cost_exclude' => (float) ($this->cost_exclude ?? 0),
             'discount_exclude' => $discountExclude,
+            'shipping_exclude' => $shippingExclude,
             'tax_category' => $this->tax_category ?? OpportunityProductPricing::TAX_NON_WAPU,
             'item_kind' => $this->item_kind ?? OpportunityProductPricing::KIND_BARANG,
             'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(

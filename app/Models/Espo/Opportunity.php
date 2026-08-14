@@ -35,6 +35,7 @@ class Opportunity extends Model implements HasMedia
         'crm_tax_category', 'crm_item_kind', 'crm_has_royalty', 'crm_royalty_type', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_cost_in_usd', 'crm_cost_fx_code', 'crm_cost_usd', 'crm_cost_usd_rate',
         'crm_item_discount',
+        'crm_item_shipping',
         'crm_won_margin',
         'crm_shipping_cost',
         'crm_has_shipping_charge', 'crm_shipping_sell',
@@ -65,6 +66,7 @@ class Opportunity extends Model implements HasMedia
         'crm_cost_usd' => 'array',
         'crm_cost_usd_rate' => 'array',
         'crm_item_discount' => 'array',
+        'crm_item_shipping' => 'array',
         'crm_won_margin' => 'float',
         'crm_shipping_cost' => 'float',
         'crm_has_shipping_charge' => 'boolean',
@@ -354,12 +356,13 @@ class Opportunity extends Model implements HasMedia
         $costUsds = array_values((array) ($this->crm_cost_usd ?? []));
         $costUsdRates = array_values((array) ($this->crm_cost_usd_rate ?? []));
         $itemDiscounts = array_values((array) ($this->crm_item_discount ?? []));
+        $itemShippings = array_values((array) ($this->crm_item_shipping ?? []));
 
         $count = max(
             count($names), count($qtys), count($prices), count($costs), count($vendors), count($brands), count($images),
             count($taxCategories), count($itemKinds), count($hasRoyaltyFlags), count($royaltyTypes),
             count($sellExcludes), count($costExcludes),
-            count($itemDiscounts), count($costInUsdFlags), count($costFxCodes), count($costUsds), count($costUsdRates)
+            count($itemDiscounts), count($itemShippings), count($costInUsdFlags), count($costFxCodes), count($costUsds), count($costUsdRates)
         );
 
         if ($count === 0) {
@@ -369,7 +372,7 @@ class Opportunity extends Model implements HasMedia
         return collect(range(0, $count - 1))
             ->map(function ($i) use (
                 $names, $qtys, $prices, $costs, $vendors, $brands, $images, $taxCategories, $itemKinds, $hasRoyaltyFlags, $royaltyTypes,
-                $sellExcludes, $costExcludes, $itemDiscounts, $costInUsdFlags, $costFxCodes, $costUsds, $costUsdRates
+                $sellExcludes, $costExcludes, $itemDiscounts, $itemShippings, $costInUsdFlags, $costFxCodes, $costUsds, $costUsdRates
             ) {
                 $priceInclude = (float) ($prices[$i] ?? 0);
                 $costInclude = (float) ($costs[$i] ?? 0);
@@ -381,6 +384,9 @@ class Opportunity extends Model implements HasMedia
                     : OpportunityProductPricing::excludeFromInclude($costInclude);
                 $itemDiscount = isset($itemDiscounts[$i]) && $itemDiscounts[$i] !== ''
                     ? (float) $itemDiscounts[$i]
+                    : 0;
+                $itemShipping = isset($itemShippings[$i]) && $itemShippings[$i] !== ''
+                    ? (float) $itemShippings[$i]
                     : 0;
                 $taxCategory = (string) ($taxCategories[$i] ?? OpportunityProductPricing::TAX_NON_WAPU);
                 $itemKind = (string) ($itemKinds[$i] ?? OpportunityProductPricing::KIND_BARANG);
@@ -409,6 +415,7 @@ class Opportunity extends Model implements HasMedia
                     'sell_exclude' => $sellExclude,
                     'cost_exclude' => $costExclude,
                     'discount_exclude' => $itemDiscount,
+                    'shipping_exclude' => $itemShipping,
                     'cost_foreign' => $costForeign,
                     'cost_in_usd' => $costForeign, // alias legacy
                     'cost_fx_code' => $fxCode,
@@ -498,6 +505,7 @@ class Opportunity extends Model implements HasMedia
         $this->crm_sell_exclude = $rows->map(fn ($p) => (string) ($p['sell_exclude'] ?? 0))->all();
         $this->crm_cost_exclude = $rows->map(fn ($p) => (string) ($p['cost_exclude'] ?? 0))->all();
         $this->crm_item_discount = $rows->map(fn ($p) => (string) ($p['discount_exclude'] ?? 0))->all();
+        $this->crm_item_shipping = $rows->map(fn ($p) => (string) ($p['shipping_exclude'] ?? 0))->all();
         $this->crm_cost_in_usd = $rows->map(fn ($p) => (! empty($p['cost_foreign']) || ! empty($p['cost_in_usd'])) ? '1' : '0')->all();
         $this->crm_cost_fx_code = $rows->map(function ($p) {
             $foreign = ! empty($p['cost_foreign']) || ! empty($p['cost_in_usd']);
@@ -1075,6 +1083,7 @@ class Opportunity extends Model implements HasMedia
                     'sell_exclude' => $list,
                     'cost_exclude' => (float) ($get('cost_exclude', 0) ?: 0),
                     'discount_exclude' => $discount,
+                    'shipping_exclude' => (float) ($get('shipping_exclude', 0) ?: 0),
                 ]);
             })
             ->values();
@@ -1103,6 +1112,10 @@ class Opportunity extends Model implements HasMedia
             $row['cost_usd'] = $row['cost_fx'];
             $row['fx_rate'] = (float) ($prev['fx_rate'] ?? $prev['usd_rate'] ?? 0);
             $row['usd_rate'] = $row['fx_rate'];
+            if ((float) ($row['shipping_exclude'] ?? 0) <= 0 && (float) ($prev['shipping_exclude'] ?? 0) > 0) {
+                $row['shipping_exclude'] = (float) $prev['shipping_exclude'];
+                $row = OpportunityProductPricing::enrichRow($row);
+            }
 
             return $row;
         });
@@ -1253,6 +1266,7 @@ class Opportunity extends Model implements HasMedia
                 'name' => (string) ($p['name'] ?? ''),
                 'sell_exclude' => round((float) ($p['sell_exclude'] ?? 0), 2),
                 'cost_exclude' => round((float) ($p['cost_exclude'] ?? 0), 2),
+                'shipping_exclude' => round((float) ($p['shipping_exclude'] ?? 0), 2),
             ])->values()->all()
         ));
     }

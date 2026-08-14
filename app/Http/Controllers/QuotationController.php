@@ -653,6 +653,7 @@ class QuotationController extends Controller
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
             'items.*.sell_exclude' => ['nullable', 'numeric', 'min:0'],
             'items.*.discount_exclude' => ['nullable', 'numeric', 'min:0'],
+            'items.*.shipping_exclude' => ['nullable', 'numeric', 'min:0'],
             'items.*.cost_exclude' => ['nullable', 'numeric', 'min:0'],
             'items.*.tax_category' => ['nullable', 'string', 'max:20'],
             'items.*.item_kind' => ['nullable', 'string', 'max:20'],
@@ -714,6 +715,7 @@ class QuotationController extends Controller
                 'unit_price' => round((float) $i->unit_price, 2),
                 'sell_exclude' => round((float) ($i->sell_exclude ?? 0), 2),
                 'discount_exclude' => round((float) ($i->discount_exclude ?? 0), 2),
+                'shipping_exclude' => round((float) ($i->shipping_exclude ?? 0), 2),
                 'cost_exclude' => round((float) ($i->cost_exclude ?? 0), 2),
                 'tax_category' => (string) ($i->tax_category ?? ''),
                 'item_kind' => (string) ($i->item_kind ?? ''),
@@ -748,6 +750,9 @@ class QuotationController extends Controller
             $quantity = (float) $item['quantity'];
             $unitPrice = (float) ($item['unit_price'] ?? 0);
             $incomingDiscount = (float) ($item['discount_exclude'] ?? 0);
+            $incomingShipping = isset($item['shipping_exclude']) && $item['shipping_exclude'] !== '' && $item['shipping_exclude'] !== null
+                ? (float) $item['shipping_exclude']
+                : null;
             $incomingList = isset($item['sell_exclude']) && $item['sell_exclude'] !== '' && $item['sell_exclude'] !== null
                 ? (float) $item['sell_exclude']
                 : null;
@@ -764,6 +769,9 @@ class QuotationController extends Controller
                 }
                 if ($incomingDiscount <= 0 && (float) ($opp['discount_exclude'] ?? 0) > 0) {
                     $incomingDiscount = (float) $opp['discount_exclude'];
+                }
+                if ($incomingShipping === null && isset($opp['shipping_exclude'])) {
+                    $incomingShipping = (float) $opp['shipping_exclude'];
                 }
                 if ($incomingCost === null && isset($opp['cost_exclude'])) {
                     $incomingCost = (float) $opp['cost_exclude'];
@@ -817,6 +825,7 @@ class QuotationController extends Controller
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => (float) ($incomingCost ?? 0),
                 'discount_exclude' => $discountExclude,
+                'shipping_exclude' => max(0.0, (float) ($incomingShipping ?? 0)),
             ]);
 
             $billedPrice = $discountExclude > 0 ? $discountExclude : $listPrice;
@@ -835,6 +844,7 @@ class QuotationController extends Controller
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => $enriched['cost_exclude'],
                 'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,
+                'shipping_exclude' => ((float) ($incomingShipping ?? 0)) > 0 ? (float) $incomingShipping : null,
                 'vendor' => $enriched['vendor'] ?: null,
                 'brand' => $brand !== '' ? $brand : null,
                 'image' => $image !== '' ? $image : null,

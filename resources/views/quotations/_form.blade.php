@@ -16,6 +16,7 @@
                 'unit_price' => (float) $i->unit_price,
                 'sell_exclude' => (float) $i->listSellExclude(),
                 'discount_exclude' => (float) ($i->discount_exclude ?? 0),
+                'shipping_exclude' => (float) ($i->shipping_exclude ?? ($opp['shipping_exclude'] ?? 0)),
                 'cost_exclude' => (float) ($i->cost_exclude ?? 0),
                 'tax_category' => $i->tax_category,
                 'item_kind' => $i->item_kind,
@@ -40,7 +41,7 @@
             ]);
         })->values()->all());
     if (empty($initialItems)) {
-        $initialItems = [['name' => '', 'description' => '', 'quantity' => 1, 'unit' => '', 'unit_price' => 0, 'sell_exclude' => 0, 'discount_exclude' => 0, 'brand' => '', 'image' => '', 'image_url' => '']];
+        $initialItems = [['name' => '', 'description' => '', 'quantity' => 1, 'unit' => '', 'unit_price' => 0, 'sell_exclude' => 0, 'discount_exclude' => 0, 'shipping_exclude' => 0, 'brand' => '', 'image' => '', 'image_url' => '']];
     }
     $accountMap = $accounts->mapWithKeys(fn ($a) => [$a->id => [
         'name' => $a->name,
@@ -138,6 +139,7 @@
                         <div class="rounded-lg border border-slate-200 p-3">
                             <input type="hidden" :name="`items[${index}][sell_exclude]`" x-model.number="item.sell_exclude">
                             <input type="hidden" :name="`items[${index}][discount_exclude]`" x-model.number="item.discount_exclude">
+                            <input type="hidden" :name="`items[${index}][shipping_exclude]`" x-model.number="item.shipping_exclude">
                             <input type="hidden" :name="`items[${index}][cost_exclude]`" x-model.number="item.cost_exclude">
                             <input type="hidden" :name="`items[${index}][tax_category]`" x-model="item.tax_category">
                             <input type="hidden" :name="`items[${index}][item_kind]`" x-model="item.item_kind">
@@ -394,6 +396,7 @@
             unit_price: Number(item.unit_price) || 0,
             sell_exclude: Number(item.sell_exclude ?? item.unit_price) || 0,
             discount_exclude: Number(item.discount_exclude) || 0,
+            shipping_exclude: Number(item.shipping_exclude) || 0,
             cost_exclude: Number(item.cost_exclude) || 0,
             tax_category: item.tax_category ?? '',
             item_kind: item.item_kind ?? '',
@@ -489,7 +492,7 @@
                 this.items.push({
                     _uid: makeUid(),
                     name: '', description: '', quantity: 1, unit: '', unit_price: 0,
-                    sell_exclude: 0, discount_exclude: 0, cost_exclude: 0,
+                    sell_exclude: 0, discount_exclude: 0, shipping_exclude: 0, cost_exclude: 0,
                     tax_category: '', item_kind: '', royalty_type: '', has_royalty: false, vendor: '',
                     brand: '', image: '', image_url: '', image_preview: '', remove_image: false,
                 });

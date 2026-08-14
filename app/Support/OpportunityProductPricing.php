@@ -779,6 +779,7 @@ class OpportunityProductPricing
      * Zinit: jual excl − PPH (jasa) − modal excl (Fee Zinit dipotong sekali di opportunity)
      * Non Wapu: basis − PPH − modal exclude
      * + Royalti (opsional, semua kategori): − modal excl × royalty%
+     * + Ongkir per satuan (opsional): − shipping exclude
      */
     public static function margin(
         float $sellExclude,
@@ -787,7 +788,8 @@ class OpportunityProductPricing
         string $itemKind,
         float $itemDiscount = 0,
         float $quantity = 1,
-        mixed $royaltyTypeOrHasRoyalty = false
+        mixed $royaltyTypeOrHasRoyalty = false,
+        float $shippingExclude = 0
     ): float {
         if ($taxCategory === self::TAX_ZINIT) {
             $baseMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $quantity);
@@ -800,8 +802,9 @@ class OpportunityProductPricing
         }
 
         $royalty = self::royalty($costExclude, $royaltyTypeOrHasRoyalty);
+        $shipping = max(0.0, round($shippingExclude, 2));
 
-        return round($baseMargin - $royalty, 2);
+        return round($baseMargin - $royalty - $shipping, 2);
     }
 
     public static function marginPercent(
@@ -842,6 +845,7 @@ class OpportunityProductPricing
         $sellExclude = (float) ($row['sell_exclude'] ?? 0);
         $costExclude = (float) ($row['cost_exclude'] ?? 0);
         $itemDiscount = (float) ($row['discount_exclude'] ?? $row['item_discount'] ?? 0);
+        $shippingExclude = max(0.0, (float) ($row['shipping_exclude'] ?? $row['item_shipping'] ?? 0));
         $qty = (float) ($row['quantity'] ?? 1);
         if ($qty <= 0) {
             $qty = 1;
@@ -868,7 +872,7 @@ class OpportunityProductPricing
         $royalty = self::royalty($costExclude, $royaltyType);
         $grossMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
         $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty, $royaltyType);
+        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty, $royaltyType, $shippingExclude);
         $marginPercent = self::marginPercent($margin, $sellExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
 
         $zinitFeeTotal = (float) ($zinitFees['success_fee'] ?? 0);
@@ -888,6 +892,8 @@ class OpportunityProductPricing
             'cost_exclude' => $costExclude,
             'discount_exclude' => $itemDiscount,
             'item_discount' => $itemDiscount,
+            'shipping_exclude' => $shippingExclude,
+            'shipping_include' => self::includeFromExclude($shippingExclude),
             'effective_sell_exclude' => $effectiveSell,
             'price' => $price,
             'cost' => $costInclude,

@@ -237,6 +237,7 @@ class Quotation extends Model
                 'sell_exclude' => $list,
                 'discount_exclude' => $discount,
                 'cost_exclude' => (float) ($p['cost_exclude'] ?? 0),
+                'shipping_exclude' => (float) ($p['shipping_exclude'] ?? 0),
                 'vendor' => (string) ($p['vendor'] ?? ''),
                 'brand' => (string) ($p['brand'] ?? ''),
                 'image' => (string) ($p['image'] ?? ''),
@@ -256,6 +257,7 @@ class Quotation extends Model
             'sell_exclude' => round((float) ($row['sell_exclude'] ?? 0), 2),
             'discount_exclude' => round((float) ($row['discount_exclude'] ?? 0), 2),
             'cost_exclude' => round((float) ($row['cost_exclude'] ?? 0), 2),
+            'shipping_exclude' => round((float) ($row['shipping_exclude'] ?? 0), 2),
             'tax_category' => (string) ($row['tax_category'] ?? ''),
             'item_kind' => (string) ($row['item_kind'] ?? ''),
             'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
@@ -282,6 +284,7 @@ class Quotation extends Model
             'sell_exclude' => $i->sell_exclude ?? 0,
             'discount_exclude' => $i->discount_exclude ?? 0,
             'cost_exclude' => $i->cost_exclude ?? 0,
+            'shipping_exclude' => $i->shipping_exclude ?? 0,
             'tax_category' => $i->tax_category ?? '',
             'item_kind' => $i->item_kind ?? '',
             'royalty_type' => OpportunityProductPricing::normalizeRoyaltyType(
@@ -311,6 +314,7 @@ class Quotation extends Model
             $quantity = (float) $item['quantity'];
             $listPrice = (float) $item['sell_exclude'];
             $discountExclude = (float) ($item['discount_exclude'] ?? 0);
+            $shippingExclude = (float) ($item['shipping_exclude'] ?? 0);
             $billedPrice = $discountExclude > 0 ? $discountExclude : $listPrice;
 
             $this->items()->create([
@@ -328,6 +332,7 @@ class Quotation extends Model
                 'sell_exclude' => $listPrice,
                 'cost_exclude' => (float) $item['cost_exclude'],
                 'discount_exclude' => $discountExclude > 0 ? $discountExclude : null,
+                'shipping_exclude' => $shippingExclude > 0 ? $shippingExclude : null,
                 'vendor' => $item['vendor'] !== '' ? $item['vendor'] : null,
                 'brand' => ($item['brand'] ?? '') !== '' ? $item['brand'] : null,
                 'image' => ($item['image'] ?? '') !== '' ? $item['image'] : null,

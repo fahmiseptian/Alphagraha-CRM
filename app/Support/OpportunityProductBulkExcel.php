@@ -18,6 +18,7 @@ class OpportunityProductBulkExcel
         'vendor',
         'harga_jual_exclude',
         'diskon_exclude',
+        'ongkir_exclude',
         'harga_beli_exclude',
     ];
 
@@ -29,8 +30,8 @@ class OpportunityProductBulkExcel
     public static function exampleRows(): array
     {
         return [
-            ['barang', 'Contoh Item A', 'Acer', 1, 'Vendor A', 1000000, 0, 800000],
-            ['jasa', 'Contoh Jasa B', 'ABB', 2, 'Vendor B', 500000, 0, 350000],
+            ['barang', 'Contoh Item A', 'Acer', 1, 'Vendor A', 1000000, 0, 0, 800000],
+            ['jasa', 'Contoh Jasa B', 'ABB', 2, 'Vendor B', 500000, 0, 0, 350000],
         ];
     }
 
@@ -161,7 +162,7 @@ XML);
      * Normalisasi baris hasil parse (dari FE SheetJS / CSV) ke struktur produk form.
      *
      * @param  array<string, mixed>  $row
-     * @return array{name: string, quantity: float, vendor: string, sell_exclude: float, discount_exclude: float, cost_exclude: float, item_kind: string}|null
+     * @return array{name: string, quantity: float, vendor: string, sell_exclude: float, discount_exclude: float, shipping_exclude: float, cost_exclude: float, item_kind: string}|null
      */
     public static function normalizeRow(array $row): ?array
     {
@@ -192,6 +193,7 @@ XML);
             'brand' => trim((string) ($map['brand'] ?? $map['merek'] ?? '')),
             'sell_exclude' => self::toNumber($map['harga_jual_exclude'] ?? $map['sell_exclude'] ?? $map['harga_jual'] ?? 0),
             'discount_exclude' => self::toNumber($map['diskon_exclude'] ?? $map['discount_exclude'] ?? $map['diskon'] ?? 0),
+            'shipping_exclude' => self::toNumber($map['ongkir_exclude'] ?? $map['shipping_exclude'] ?? $map['ongkir'] ?? 0),
             'cost_exclude' => self::toNumber($map['harga_beli_exclude'] ?? $map['cost_exclude'] ?? $map['harga_beli'] ?? $map['modal'] ?? 0),
             'item_kind' => $itemKind,
         ];
@@ -208,6 +210,7 @@ XML);
             'quantity', 'jumlah', 'qty.' => 'qty',
             'harga_jual', 'sell', 'sell_exclude', 'harga_jual_excl' => 'harga_jual_exclude',
             'diskon', 'discount', 'discount_exclude', 'diskon_item' => 'diskon_exclude',
+            'ongkir', 'shipping', 'shipping_exclude', 'ongkir_item', 'harga_ongkir' => 'ongkir_exclude',
             'harga_beli', 'modal', 'cost', 'cost_exclude', 'harga_modal' => 'harga_beli_exclude',
             'merek', 'brand_name' => 'brand',
             default => $h,

@@ -6,6 +6,7 @@
             'sell_exclude' => $p['sell_exclude'],
             'cost_exclude' => $p['cost_exclude'],
             'discount_exclude' => $p['discount_exclude'] ?? 0,
+            'shipping_exclude' => $p['shipping_exclude'] ?? 0,
             'vendor' => $p['vendor'],
             'brand' => $p['brand'] ?? '',
             'tax_category' => $p['tax_category'],
@@ -87,8 +88,9 @@
         </div>
     @endif
 
-    <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {{-- Kolom utama --}}
+    <div class="space-y-5">
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {{-- Kolom kiri: data opportunity --}}
         <div class="space-y-5 lg:col-span-2">
             <x-card>
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2" @if($purchasingMode) aria-disabled="true"@endif>
@@ -225,13 +227,48 @@
                     </div>
                 </div>
             </x-card>
+        </div>
 
-            {{-- Line items --}}
+        {{-- Sidebar kanan --}}
+        <div class="space-y-5">
+            <x-card title="Assigned User">
+                @if (auth()->user()->isAdmin() && ! $purchasingMode)
+                    <select name="assigned_user_id" class="select2 w-full" data-placeholder="— Select —">
+                        <option value="">— Select —</option>
+                        @foreach ($salesUsers as $u)
+                            <option value="{{ $u->id }}" @selected(old('assigned_user_id', $opportunity->assigned_user_id) === $u->id)>{{ $u->display_name }}</option>
+                        @endforeach
+                    </select>
+                @else
+                    <p class="text-sm text-slate-700">{{ optional($opportunity->assignedUser)->display_name ?: auth()->user()->display_name }}</p>
+                    <input type="hidden" name="assigned_user_id" value="{{ old('assigned_user_id', $opportunity->assigned_user_id ?: auth()->id()) }}">
+                @endif
+            </x-card>
+
+            @unless ($purchasingMode)
+            <x-card title="Teams">
+                <select name="team_ids[]" multiple class="select2 w-full" data-placeholder="— Select teams —">
+                    @foreach ($teams as $team)
+                        <option value="{{ $team->id }}" @selected(in_array($team->id, $selectedTeamIds))>{{ $team->name }}</option>
+                    @endforeach
+                </select>
+                <p class="mt-1.5 text-xs text-slate-400">Type to search, select one or more teams.</p>
+            </x-card>
+            @endunless
+
+            <div class="flex flex-col gap-2">
+                <x-btn type="submit" class="w-full justify-center" icon="bi-save">Save</x-btn>
+                <x-btn href="{{ $cancelUrl }}" variant="secondary" class="w-full justify-center">Cancel</x-btn>
+            </div>
+        </div>
+        </div>
+
+            {{-- Line items: full width --}}
             <x-card>
                 {{-- Langkah 1: pilih kategori saja --}}
                 <div x-show="!selectedTaxCategory && !purchasingMode" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
                     <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori pajak terlebih dahulu</p>
-                    <div class="mx-auto grid max-w-4xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         <button type="button" @click="selectTaxCategory('non_wapu')"
                                 class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
                             <span class="block text-sm font-semibold text-slate-800">Non Wapu</span>
@@ -306,21 +343,21 @@
                             <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
                         </div>
                         @if (auth()->user()?->isSuperAdmin())
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude atau Include bisa diisi (saling hitung via PPN); % margin (putih) bisa diubah; potongan pajak &amp; nilai margin (kuning) otomatis.</p>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude atau Include bisa diisi (saling hitung via PPN); modal ongkir per satuan mengurangi margin; % margin (putih) bisa diubah; potongan pajak &amp; nilai margin (kuning) otomatis.</p>
                         @endif
                     </div>
 
                     <div class="space-y-4">
                         <template x-for="(p, i) in products" :key="i">
-                            <div class="flex gap-3 rounded-lg border border-slate-200 p-4">
+                            <div class="flex w-full gap-3 rounded-lg border border-slate-200 p-4">
                                 <div class="flex w-8 shrink-0 flex-col items-center pt-6">
                                     <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold tabular-nums text-slate-700"
                                           x-text="i + 1"
                                           :title="'Item ' + (i + 1)"></span>
                                 </div>
-                                <div class="min-w-0 flex-1">
+                                <div class="min-w-0 w-full flex-1">
                                 <input type="hidden" :name="`products[${i}][tax_category]`" :value="p.tax_category">
-                                <div class="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12">
+                                <div class="mb-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-12">
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Barang / Jasa</label>
                                         <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" @change="onItemKindChange(p)" class="crm-field w-full text-sm" :disabled="purchasingMode">
@@ -328,35 +365,11 @@
                                             <option value="jasa">Jasa</option>
                                         </select>
                                     </div>
-                                    <div class="sm:col-span-2">
-                                        <label class="crm-label text-xs">Royalti</label>
-                                        <div class="mt-1.5 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700"
-                                             :class="p.royalty_type ? 'border-brand-300 bg-brand-50' : ''">
-                                            <label class="inline-flex items-center gap-1.5">
-                                                <input type="checkbox"
-                                                       :checked="p.royalty_type === 'dalam'"
-                                                       @change="toggleRoyaltyType(p, 'dalam')"
-                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                                                       :disabled="purchasingMode">
-                                                <span x-text="royaltyDalamPercent + '%'"></span>
-                                            </label>
-                                            <label class="inline-flex items-center gap-1.5">
-                                                <input type="checkbox"
-                                                       :checked="p.royalty_type === 'luar'"
-                                                       @change="toggleRoyaltyType(p, 'luar')"
-                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                                                       :disabled="purchasingMode">
-                                                <span x-text="royaltyLuarPercent + '%'"></span>
-                                            </label>
-                                        </div>
-                                        <input type="hidden" :name="`products[${i}][royalty_type]`" :value="p.royalty_type || ''">
-                                        <input type="hidden" :name="`products[${i}][has_royalty]`" :value="p.royalty_type ? 1 : 0">
-                                    </div>
-                                    <div class="sm:col-span-2">
+                                    <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Item</label>
                                         <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
-                                    <div class="sm:col-span-2">
+                                    <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Brand</label>
                                         <select :name="`products[${i}][brand]`"
                                                 class="select2 select2-search w-full text-sm"
@@ -389,8 +402,8 @@
                                     </div>
                                 </div>
 
-                                <div class="mb-3 flex flex-wrap items-center gap-3">
-                                    <div class="min-w-0 flex-1">
+                                <div class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-12">
+                                    <div class="sm:col-span-6">
                                         <label class="crm-label text-xs">Gambar <span class="font-normal text-slate-400">(opsional)</span></label>
                                         <div class="mt-1.5 flex flex-wrap items-center gap-3">
                                             <div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
@@ -421,10 +434,39 @@
                                         <input type="hidden" :name="`products[${i}][image]`" :value="p.remove_image ? '' : (p.image || '')">
                                         <input type="hidden" :name="`products[${i}][remove_image]`" :value="p.remove_image ? 1 : 0">
                                     </div>
+                                    <div class="sm:col-span-4">
+                                        <label class="crm-label text-xs">Royalti</label>
+                                        <div class="mt-1.5 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700"
+                                             :class="p.royalty_type ? 'border-brand-300 bg-brand-50' : ''">
+                                            <label class="inline-flex items-center gap-1.5">
+                                                <input type="checkbox"
+                                                       :checked="p.royalty_type === 'dalam'"
+                                                       @change="toggleRoyaltyType(p, 'dalam')"
+                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                                       :disabled="purchasingMode">
+                                                <span x-text="royaltyDalamPercent + '%'"></span>
+                                            </label>
+                                            <label class="inline-flex items-center gap-1.5">
+                                                <input type="checkbox"
+                                                       :checked="p.royalty_type === 'luar'"
+                                                       @change="toggleRoyaltyType(p, 'luar')"
+                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                                       :disabled="purchasingMode">
+                                                <span x-text="royaltyLuarPercent + '%'"></span>
+                                            </label>
+                                        </div>
+                                        <input type="hidden" :name="`products[${i}][royalty_type]`" :value="p.royalty_type || ''">
+                                        <input type="hidden" :name="`products[${i}][has_royalty]`" :value="p.royalty_type ? 1 : 0">
+                                    </div>
                                 </div>
 
-                            <div class="overflow-x-auto">
-                                <table class="w-full min-w-[640px] text-sm">
+                            <div class="w-full overflow-x-auto">
+                                <table class="w-full table-fixed text-sm">
+                                    <colgroup>
+                                        <col class="w-[28%]">
+                                        <col class="w-[36%]">
+                                        <col class="w-[36%]">
+                                    </colgroup>
                                     <thead>
                                         <tr class="text-left text-xs uppercase tracking-wider text-slate-400">
                                             <th class="pb-2 pr-3"></th>
@@ -565,6 +607,31 @@
                                                        class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
                                                        :readonly="p.cost_foreign"
                                                        :title="p.cost_foreign ? 'Dihitung dari modal asing × rate' : 'Isi Include → Exclude dihitung otomatis (÷ PPN)'">
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                Modal ongkir
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Per satuan, mengurangi margin</span>
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" inputmode="decimal" placeholder="0"
+                                                       x-effect="if (editingField !== `ship-${i}`) $el.value = formatId(p.shipping_exclude)"
+                                                       @focus="editingField = `ship-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(p.shipping_exclude)"
+                                                       @input="p.shipping_exclude = parseId($event.target.value); onShippingChange(p)"
+                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
+                                                <input type="hidden" :name="`products[${i}][shipping_exclude]`" :value="p.shipping_exclude">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" inputmode="decimal" placeholder="0"
+                                                       x-effect="if (editingField !== `ship-inc-${i}`) $el.value = formatId(shippingInclude(p))"
+                                                       @focus="editingField = `ship-inc-${i}`"
+                                                       @blur="editingField = null; $el.value = formatId(shippingInclude(p))"
+                                                       @input="onShippingIncludeChange(p, parseId($event.target.value))"
+                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       :readonly="purchasingMode"
+                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
@@ -767,40 +834,6 @@
                 </p>
             </div>
             @endunless
-        </div>
-
-        {{-- Sidebar --}}
-        <div class="space-y-5">
-            <x-card title="Assigned User">
-                @if (auth()->user()->isAdmin() && ! $purchasingMode)
-                    <select name="assigned_user_id" class="select2 w-full" data-placeholder="— Select —">
-                        <option value="">— Select —</option>
-                        @foreach ($salesUsers as $u)
-                            <option value="{{ $u->id }}" @selected(old('assigned_user_id', $opportunity->assigned_user_id) === $u->id)>{{ $u->display_name }}</option>
-                        @endforeach
-                    </select>
-                @else
-                    <p class="text-sm text-slate-700">{{ optional($opportunity->assignedUser)->display_name ?: auth()->user()->display_name }}</p>
-                    <input type="hidden" name="assigned_user_id" value="{{ old('assigned_user_id', $opportunity->assigned_user_id ?: auth()->id()) }}">
-                @endif
-            </x-card>
-
-            @unless ($purchasingMode)
-            <x-card title="Teams">
-                <select name="team_ids[]" multiple class="select2 w-full" data-placeholder="— Select teams —">
-                    @foreach ($teams as $team)
-                        <option value="{{ $team->id }}" @selected(in_array($team->id, $selectedTeamIds))>{{ $team->name }}</option>
-                    @endforeach
-                </select>
-                <p class="mt-1.5 text-xs text-slate-400">Type to search, select one or more teams.</p>
-            </x-card>
-            @endunless
-
-    <div class="flex flex-col gap-2">
-                <x-btn type="submit" class="w-full justify-center" icon="bi-save">Save</x-btn>
-                <x-btn href="{{ $cancelUrl }}" variant="secondary" class="w-full justify-center">Cancel</x-btn>
-            </div>
-        </div>
     </div>
 </form>
 
@@ -915,7 +948,7 @@
             return 0;
         }
 
-        function calcNetMargin(base, costExclude, taxCategory, itemKind, quantity = 1, royaltyType = '') {
+        function calcNetMargin(base, costExclude, taxCategory, itemKind, quantity = 1, royaltyType = '', shippingExclude = 0) {
             let net;
             if (taxCategory === 'zinit') {
                 const pphPct = pphPercentLookup(taxCategory, itemKind);
@@ -945,6 +978,10 @@
                 const royalty = Math.round(costExclude * (rate / 100) * 100) / 100;
                 net = Math.round((net - royalty) * 100) / 100;
             }
+            const shipping = Math.max(0, Number(shippingExclude) || 0);
+            if (shipping > 0) {
+                net = Math.round((net - shipping) * 100) / 100;
+            }
             return net;
         }
 
@@ -954,12 +991,13 @@
             const sell = Number(p.sell_exclude) || 0;
             const cost = Number(p.cost_exclude) || 0;
             const discount = Number(p.discount_exclude) || 0;
+            const shipping = Number(p.shipping_exclude) || 0;
             const qty = Number(p.quantity) || 1;
             let royaltyType = (p.royalty_type || '').toString();
             if (!royaltyType && p.has_royalty) royaltyType = 'luar';
             if (royaltyType !== 'dalam' && royaltyType !== 'luar') royaltyType = '';
             const base = discount > 0 ? discount : sell;
-            const margin = calcNetMargin(base, cost, taxCategory, itemKind, qty, royaltyType);
+            const margin = calcNetMargin(base, cost, taxCategory, itemKind, qty, royaltyType, shipping);
             const pphPct = pphPercentLookup(taxCategory, itemKind);
             const pph = pphPct > 0 ? Math.round(base * (pphPct / 100) * 100) / 100 : 0;
             let denom = base;
@@ -978,6 +1016,7 @@
                 sell_exclude: sell,
                 cost_exclude: cost,
                 discount_exclude: discount,
+                shipping_exclude: shipping,
                 vendor: p.vendor ?? '',
                 brand: p.brand ?? '',
                 tax_category: taxCategory,
@@ -1198,6 +1237,9 @@
             discountInclude(p) {
                 return this.round((Number(p.discount_exclude) || 0) * TAX_MULTIPLIER);
             },
+            shippingInclude(p) {
+                return this.round((Number(p.shipping_exclude) || 0) * TAX_MULTIPLIER);
+            },
             costInclude(p) {
                 return this.round((Number(p.cost_exclude) || 0) * TAX_MULTIPLIER);
             },
@@ -1224,6 +1266,10 @@
             onDiscountIncludeChange(p, includeValue) {
                 p.discount_exclude = this.excludeFromInclude(includeValue);
                 this.onDiscountItemChange(p);
+            },
+            onShippingIncludeChange(p, includeValue) {
+                p.shipping_exclude = this.excludeFromInclude(includeValue);
+                this.onShippingChange(p);
             },
             onCostIncludeChange(p, includeValue) {
                 if (p.cost_foreign) return;
@@ -1352,11 +1398,12 @@
                 return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
             marginAmount(p) {
+                const shipping = Math.max(0, Number(p.shipping_exclude) || 0);
                 // Zinit: GP per baris tanpa fee; Fee Zinit dipotong sekali di Total Margin (Fix GP).
                 if (this.appliesZinit(p)) {
-                    return this.round(this.effectiveSellExclude(p) - this.pphAmount(p) - this.royaltyAmount(p) - (Number(p.cost_exclude) || 0));
+                    return this.round(this.effectiveSellExclude(p) - this.pphAmount(p) - this.royaltyAmount(p) - (Number(p.cost_exclude) || 0) - shipping);
                 }
-                return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p) - this.royaltyAmount(p));
+                return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p) - this.royaltyAmount(p) - shipping);
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
@@ -1375,26 +1422,27 @@
                 return Number(p.margin_percent) || 0;
             },
             marginLabel(p) {
+                const shippingBit = (Number(p.shipping_exclude) || 0) > 0 ? ' − Modal ongkir' : '';
                 if (this.appliesZinit(p)) {
                     let s = 'Jual';
                     if (this.appliesPph(p)) s += ' − PPH';
                     if (this.appliesRoyalty(p)) s += ' − Royalti';
                     s += ' − Modal';
-                    return s;
+                    return s + shippingBit;
                 }
                 const hasItemDiscount = (Number(p.discount_exclude) || 0) > 0;
                 const head = hasItemDiscount ? 'Diskon' : 'Jual Exclude';
                 const royaltyBit = this.appliesRoyalty(p) ? ' − Royalti' : '';
                 if ((p.tax_category || 'non_wapu') === 'wapu') {
-                    return head + ' − PPH − Modal Include' + royaltyBit;
+                    return head + ' − PPH − Modal Include' + royaltyBit + shippingBit;
                 }
                 if (this.appliesPph29(p)) {
-                    return head + ' − PPH − PNBP − PPH29 − Modal Include' + royaltyBit;
+                    return head + ' − PPH − PNBP − PPH29 − Modal Include' + royaltyBit + shippingBit;
                 }
                 if (this.appliesPph(p)) {
-                    return head + ' − PPH − Modal' + royaltyBit;
+                    return head + ' − PPH − Modal' + royaltyBit + shippingBit;
                 }
-                return (hasItemDiscount ? 'Diskon − Modal' : 'Jual Exclude − Beli Exclude') + royaltyBit;
+                return (hasItemDiscount ? 'Diskon − Modal' : 'Jual Exclude − Beli Exclude') + royaltyBit + shippingBit;
             },
             /**
              * Dari % margin target (net) + modal → hitung harga basis.
@@ -1404,6 +1452,7 @@
             sellFromMarginPercent(p) {
                 const pct = Number(p.margin_percent) || 0;
                 const cost = Number(p.cost_exclude) || 0;
+                const shipping = Math.max(0, Number(p.shipping_exclude) || 0);
                 if (cost <= 0 || pct <= 0) {
                     return this.effectiveSellExclude(p);
                 }
@@ -1418,19 +1467,19 @@
                     if (denom <= 0) {
                         return this.effectiveSellExclude(p);
                     }
-                    return this.round(costInclude / denom);
+                    return this.round((costInclude + shipping) / denom);
                 }
 
                 if (!this.appliesPph29(p)) {
                     const denom = 1 - pctDec;
                     if (denom <= 0) return this.effectiveSellExclude(p);
-                    return this.round(cost / denom);
+                    return this.round((cost + shipping) / denom);
                 }
 
                 const r29 = (Number(this.pph29Percent) || 0) / 100;
                 let base = this.effectiveSellExclude(p) || cost;
 
-                // net = (base−PPH−modalIncl) − PNBP − r29*(base−modalExcl)
+                // net = (base−PPH−modalIncl) − PNBP − r29*(base−modalExcl) − ongkir
                 // % terhadap (base − PPH); PNBP berjenjang → iterasi.
                 for (let i = 0; i < 10; i++) {
                     const pnbp = calcPnbpFromInclude(this.round(base * TAX_MULTIPLIER));
@@ -1438,7 +1487,7 @@
                     if (coeff <= 0) {
                         return this.effectiveSellExclude(p);
                     }
-                    const next = this.round((costInclude - r29 * cost + pnbp) / coeff);
+                    const next = this.round((costInclude - r29 * cost + pnbp + shipping) / coeff);
                     if (Math.abs(next - base) < 0.5) {
                         return next;
                     }
@@ -1463,6 +1512,15 @@
             onDiscountItemChange(p) {
                 p._lockMarginPercent = false;
                 p.margin_percent = this.calcMarginPercent(p);
+                this.refreshDiscountFromMargin();
+            },
+            onShippingChange(p) {
+                if ((Number(p.shipping_exclude) || 0) < 0) p.shipping_exclude = 0;
+                if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0) {
+                    this.applyMarginPercentToPrice(p);
+                } else {
+                    p.margin_percent = this.calcMarginPercent(p);
+                }
                 this.refreshDiscountFromMargin();
             },
             onCostChange(p) {
@@ -1601,6 +1659,7 @@
                     sell_exclude: 0,
                     cost_exclude: 0,
                     discount_exclude: 0,
+                    shipping_exclude: 0,
                     vendor: '',
                     brand: '',
                     tax_category: this.selectedTaxCategory,
@@ -1817,6 +1876,8 @@
                     quantity: 'qty', jumlah: 'qty',
                     harga_jual: 'harga_jual_exclude', sell: 'harga_jual_exclude', sell_exclude: 'harga_jual_exclude',
                     diskon: 'diskon_exclude', discount: 'diskon_exclude', discount_exclude: 'diskon_exclude',
+                    ongkir: 'ongkir_exclude', shipping: 'ongkir_exclude', shipping_exclude: 'ongkir_exclude',
+                    ongkir_item: 'ongkir_exclude', harga_ongkir: 'ongkir_exclude',
                     harga_beli: 'harga_beli_exclude', modal: 'harga_beli_exclude', cost: 'harga_beli_exclude', cost_exclude: 'harga_beli_exclude',
                     merek: 'brand', brand_name: 'brand',
                 };
@@ -1843,6 +1904,7 @@
                     brand: String(map.brand ?? map.merek ?? '').trim(),
                     sell_exclude: this.parseId(map.harga_jual_exclude ?? 0),
                     discount_exclude: this.parseId(map.diskon_exclude ?? 0),
+                    shipping_exclude: this.parseId(map.ongkir_exclude ?? 0),
                     cost_exclude: this.parseId(map.harga_beli_exclude ?? 0),
                     tax_category: this.selectedTaxCategory,
                     item_kind: itemKind,

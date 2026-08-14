@@ -597,6 +597,7 @@
                                 <th class="text-right">Jual Incl</th>
                                 <th class="text-right">Beli Excl</th>
                                 <th class="text-right">Beli Incl</th>
+                                <th class="text-right">Modal ongkir</th>
                                 <th class="text-right">Potongan</th>
                                 <th class="text-right">Margin</th>
                                 <th class="text-right">%</th>
@@ -645,6 +646,13 @@
                                         @endif
                                     </td>
                                     <td class="text-right text-slate-400">{{ money($p['cost_include'], $opportunity->amount_currency ?: 'IDR') }}</td>
+                                    <td class="text-right text-slate-600">
+                                        @if (($p['shipping_exclude'] ?? 0) > 0)
+                                            {{ money($p['shipping_exclude'], $opportunity->amount_currency ?: 'IDR') }}
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
                                     <td class="text-right text-slate-600">
                                         @if (! empty($p['zinit_applicable']))
                                             @if ($p['pph_applicable'] ?? false)
@@ -697,7 +705,7 @@
                         </tbody>
                         <tfoot>
                             <tr class="bg-slate-50">
-                                <td class="font-semibold text-slate-700" colspan="14">Total</td>
+                                <td class="font-semibold text-slate-700" colspan="15">Total</td>
                                 <td class="text-right font-bold text-slate-900">{{ money($products->sum('subtotal'), $opportunity->amount_currency ?: 'IDR') }}</td>
                             </tr>
                             @php
@@ -706,11 +714,11 @@
                             @endphp
                             @if ($hasZinitProducts)
                                 <tr class="bg-amber-50/60">
-                                    <td class="text-slate-600" colspan="14">Fee Zinit (dari grand total include)</td>
+                                    <td class="text-slate-600" colspan="15">Fee Zinit (dari grand total include)</td>
                                     <td class="text-right font-semibold text-amber-800">{{ money($zinitDealFee, $opportunity->amount_currency ?: 'IDR') }}</td>
                                 </tr>
                                 <tr class="bg-green-50/60">
-                                    <td class="text-slate-600" colspan="14">Total Margin (Fix GP)</td>
+                                    <td class="text-slate-600" colspan="15">Total Margin (Fix GP)</td>
                                     <td class="text-right font-semibold text-green-800">{{ money($opportunity->totalProductsMargin(), $opportunity->amount_currency ?: 'IDR') }}</td>
                                 </tr>
                             @endif
