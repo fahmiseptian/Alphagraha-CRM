@@ -346,8 +346,8 @@
                                                     @endif
                                                 @endforeach
                                                 @if ($opp->stage === 'Negotiation' && ! $opp->canMoveToClosedWon())
-                                                    <p class="px-3 py-1.5 text-[11px] text-amber-700">
-                                                        <i class="bi bi-lock"></i> Closed Won terkunci
+                                                    <p class="px-3 py-1.5 text-[11px] leading-snug text-amber-700" title="{{ $opp->closedWonBlockReason() }}">
+                                                        <i class="bi bi-lock"></i> {{ $opp->closedWonBlockReason() }}
                                                     </p>
                                                 @endif
                                             @endif

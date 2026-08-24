@@ -559,7 +559,15 @@
                     </div>
                 @endif
                 @if ($opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE && $opportunity->crm_won_margin !== null)
-                    <div><dt class="text-slate-400">Won Margin</dt><dd class="mt-0.5 font-semibold text-green-700">{{ money($opportunity->crm_won_margin, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
+                    <div>
+                        <dt class="text-slate-400">Won Margin</dt>
+                        <dd class="mt-0.5 font-semibold text-green-700">
+                            {{ money($opportunity->crm_won_margin, $opportunity->amount_currency ?: 'IDR') }}
+                            @if ($opportunity->wonMarginPercent() !== null)
+                                <span class="font-medium">({{ number_format($opportunity->wonMarginPercent(), 2, ',', '.') }}%)</span>
+                            @endif
+                        </dd>
+                    </div>
                 @endif
                 <div><dt class="text-slate-400">Probability</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->probability !== null ? $opportunity->probability . '%' : '—' }}</dd></div>
                 <div><dt class="text-slate-400">Close Date</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->translatedFormat('d M Y') : '—' }}</dd></div>
@@ -619,6 +627,13 @@
                                             @endif
                                             <span>{{ $p['name'] }}</span>
                                         </div>
+                                        @if (! empty($p['sku']) || ! empty($p['category']))
+                                            <p class="mt-0.5 text-[11px] text-slate-400">
+                                                @if (! empty($p['sku'])) SKU {{ $p['sku'] }} @endif
+                                                @if (! empty($p['sku']) && ! empty($p['category'])) · @endif
+                                                @if (! empty($p['category'])) {{ $p['category'] }} @endif
+                                            </p>
+                                        @endif
                                     </td>
                                     <td class="text-slate-600">{{ $p['brand'] ?: '—' }}</td>
                                     <td class="text-right text-slate-600">{{ rtrim(rtrim(number_format($p['quantity'], 2, ',', '.'), '0'), ',') }}</td>
@@ -757,7 +772,7 @@
                     <p class="px-5 pt-3 text-xs text-slate-500">Pilih hasil akhir deal:</p>
                     @if (! $opportunity->canMoveToClosedWon())
                         <p class="px-5 pt-2 text-xs text-amber-700">
-                            <i class="bi bi-lock"></i> Closed Won terkunci sampai approval margin/diskon selesai.
+                            <i class="bi bi-lock"></i> {{ $opportunity->closedWonBlockReason() }}
                         </p>
                     @endif
                 @endif
@@ -997,6 +1012,8 @@
                 </div>
             @endif
         </x-card>
+
+        @include('opportunities._sales_orders')
     </div>
 </div>
 @endsection

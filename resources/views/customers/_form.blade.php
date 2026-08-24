@@ -58,6 +58,7 @@
             <label class="crm-label">Street Address</label>
             <textarea name="billing_address_street" rows="3" class="crm-field"
                       placeholder="Jl. ...">{{ old('billing_address_street', $account->billing_address_street) }}</textarea>
+            <p class="mt-1 text-xs text-slate-400">Alamat utama (default billing). Tambahan alamat cabang/gudang dikelola di halaman detail customer.</p>
         </div>
         <div>
             <label class="crm-label">Provinsi</label>

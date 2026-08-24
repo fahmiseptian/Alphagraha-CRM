@@ -14,6 +14,7 @@ class OpportunityProductBulkExcel
         'jenis',
         'nama',
         'brand',
+        'category',
         'qty',
         'vendor',
         'harga_jual_exclude',
@@ -30,8 +31,8 @@ class OpportunityProductBulkExcel
     public static function exampleRows(): array
     {
         return [
-            ['barang', 'Contoh Item A', 'Acer', 1, 'Vendor A', 1000000, 0, 0, 800000],
-            ['jasa', 'Contoh Jasa B', 'ABB', 2, 'Vendor B', 500000, 0, 0, 350000],
+            ['barang', 'Contoh Item A', 'Acer', 'Laptop', 1, 'Vendor A', 1000000, 0, 0, 800000],
+            ['jasa', 'Contoh Jasa B', 'ABB', 'Service', 2, 'Vendor B', 500000, 0, 0, 350000],
         ];
     }
 
@@ -191,6 +192,7 @@ XML);
             'quantity' => self::toNumber($map['qty'] ?? $map['quantity'] ?? $map['jumlah'] ?? 1),
             'vendor' => trim((string) ($map['vendor'] ?? '')),
             'brand' => trim((string) ($map['brand'] ?? $map['merek'] ?? '')),
+            'category' => trim((string) ($map['category'] ?? $map['kategori'] ?? '')),
             'sell_exclude' => self::toNumber($map['harga_jual_exclude'] ?? $map['sell_exclude'] ?? $map['harga_jual'] ?? 0),
             'discount_exclude' => self::toNumber($map['diskon_exclude'] ?? $map['discount_exclude'] ?? $map['diskon'] ?? 0),
             'shipping_exclude' => self::toNumber($map['ongkir_exclude'] ?? $map['shipping_exclude'] ?? $map['ongkir'] ?? 0),
@@ -213,6 +215,7 @@ XML);
             'ongkir', 'shipping', 'shipping_exclude', 'ongkir_item', 'harga_ongkir' => 'ongkir_exclude',
             'harga_beli', 'modal', 'cost', 'cost_exclude', 'harga_modal' => 'harga_beli_exclude',
             'merek', 'brand_name' => 'brand',
+            'kategori', 'category_name' => 'category',
             default => $h,
         };
     }

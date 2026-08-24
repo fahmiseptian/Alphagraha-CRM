@@ -84,6 +84,43 @@ class CustomerTop
     }
 
     /**
+     * Nilai payment untuk API AGC: cash → top0, TOP 30 hari → top30.
+     */
+    public static function apiValue(?string $value): string
+    {
+        return 'top'.self::days($value);
+    }
+
+    /**
+     * Opsi TOP yang boleh dipilih: tidak melebihi TOP customer.
+     *
+     * @return array<string, string>
+     */
+    public static function optionsAllowedFor(?string $customerTop): array
+    {
+        $maxDays = self::days($customerTop);
+        $out = [];
+        foreach (self::LABELS as $value => $label) {
+            if (self::days($value) <= $maxDays) {
+                $out[$value] = $label;
+            }
+        }
+
+        return $out !== [] ? $out : [self::CASH => self::LABELS[self::CASH]];
+    }
+
+    /**
+     * Pakai TOP yang diminta jika masih dalam batas customer, selain itu TOP customer.
+     */
+    public static function clamp(?string $value, ?string $customerTop): string
+    {
+        $allowed = self::optionsAllowedFor($customerTop);
+        $normalized = self::normalize($value);
+
+        return isset($allowed[$normalized]) ? $normalized : self::normalize($customerTop);
+    }
+
+    /**
      * Minimal margin (%) berdasarkan jenis TOP customer.
      */
     public static function minMarginPercent(?string $top): float

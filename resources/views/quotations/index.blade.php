@@ -2,11 +2,7 @@
 @section('title', 'Quotations')
 
 @section('content')
-<x-page-header title="Quotations" :description="number_format($quotations->total()) . ' quotations'">
-    <x-slot:actions>
-        <x-btn href="{{ route('quotations.create') }}" icon="bi-plus-lg">New Quotation</x-btn>
-    </x-slot:actions>
-</x-page-header>
+<x-page-header title="Quotations" :description="number_format($quotations->total()) . ' quotations'" />
 
 <x-card class="mb-4" :padding="false">
     <form method="GET" action="{{ route('quotations.index') }}" class="crm-filter-form">

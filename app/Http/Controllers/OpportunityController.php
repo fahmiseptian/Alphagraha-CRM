@@ -12,7 +12,7 @@ use App\Support\CustomerTop;
 use App\Support\OpportunityProductBulkExcel;
 use App\Support\OpportunityProductPricing;
 use App\Support\PaymentLevel;
-use App\Services\AgcApiService;
+use App\Services\CatalogService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -139,7 +139,7 @@ class OpportunityController extends Controller
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.items']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.items', 'salesOrders.creator']);
 
         // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
         if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {
@@ -615,6 +615,8 @@ class OpportunityController extends Controller
             'products.*.shipping_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.brand' => ['nullable', 'string', 'max:255'],
+            'products.*.sku' => ['nullable', 'string', 'max:100'],
+            'products.*.category' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
         ]);
@@ -636,6 +638,8 @@ class OpportunityController extends Controller
                 'quantity' => $prev['quantity'] ?? ($p['quantity'] ?? 1),
                 'vendor' => $normalized['vendor'] ?? '',
                 'brand' => (string) ($prev['brand'] ?? ''),
+                'sku' => (string) ($prev['sku'] ?? ''),
+                'category' => (string) ($prev['category'] ?? ''),
                 'image' => (string) ($prev['image'] ?? ''),
                 'tax_category' => $prev['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                 'item_kind' => $prev['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
@@ -758,6 +762,11 @@ class OpportunityController extends Controller
             }
         }
 
+        if ($data['stage'] === Opportunity::WON_STAGE) {
+            return redirect()->route('opportunities.show', $opportunity)
+                ->with('success', 'Stage dipindahkan ke Closed Won. Lanjutkan dengan membuat Sales Order.');
+        }
+
         return redirect()->to($this->opportunitiesIndexUrl())
             ->with('success', 'Stage dipindahkan ke '.$data['stage'].'.');
     }
@@ -844,6 +853,8 @@ class OpportunityController extends Controller
             'products.*.shipping_exclude' => ['nullable', 'numeric', 'min:0'],
             'products.*.vendor' => ['nullable', 'string', 'max:255'],
             'products.*.brand' => ['nullable', 'string', 'max:255'],
+            'products.*.sku' => ['nullable', 'string', 'max:100'],
+            'products.*.category' => ['nullable', 'string', 'max:255'],
             'products.*.tax_category' => ['nullable', Rule::in(OpportunityProductPricing::taxCategories())],
             'products.*.item_kind' => ['nullable', Rule::in([OpportunityProductPricing::KIND_BARANG, OpportunityProductPricing::KIND_JASA])],
             'products.*.has_royalty' => ['nullable'],
@@ -969,6 +980,7 @@ class OpportunityController extends Controller
                         return null;
                     }
 
+                    $existing = $opportunity->products->values()->get($index, []);
                     $normalized = Opportunity::normalizeProductInput($p);
                     $image = $this->resolveProductImagePath($request, $opportunity, $index, $p);
 
@@ -977,6 +989,8 @@ class OpportunityController extends Controller
                         'quantity' => $normalized['quantity'] ?? 1,
                         'vendor' => $normalized['vendor'] ?? '',
                         'brand' => trim((string) ($normalized['brand'] ?? '')),
+                        'sku' => trim((string) ($normalized['sku'] ?? ($existing['sku'] ?? ''))),
+                        'category' => trim((string) ($normalized['category'] ?? ($existing['category'] ?? ''))),
                         'image' => $image,
                         'tax_category' => $normalized['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU,
                         'item_kind' => $normalized['item_kind'] ?? OpportunityProductPricing::KIND_BARANG,
@@ -1171,14 +1185,15 @@ class OpportunityController extends Controller
             ]];
         })->all();
 
-        $brands = app(AgcApiService::class)->brands();
+        $catalog = app(CatalogService::class);
 
         return [
             'accounts' => $accounts,
             'accountMarginMeta' => $accountMarginMeta,
             'topOptions' => CustomerTop::LABELS,
             'topMargins' => CustomerTop::allMinMargins(),
-            'brandOptions' => $brands,
+            'brandOptions' => $catalog->brandOptions(),
+            'categoryOptions' => $catalog->categoryOptions(),
             'marginNominalUmum' => PaymentLevel::marginNominalUmum(),
             'marginNominalOngkirPribadi' => PaymentLevel::marginNominalOngkirPribadi(),
             'marginMaxPercent' => PaymentLevel::maxMarginPercent(),

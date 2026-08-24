@@ -105,6 +105,9 @@
                     $nav[] = ['leads.index', 'Leads', 'bi-funnel'];
                 }
                 $nav[] = ['opportunities.index', 'Opportunities', 'bi-briefcase'];
+                if ($user->canCreateSalesOrder()) {
+                    $nav[] = ['sales-orders.index', 'SO', 'bi-receipt'];
+                }
                 if (! $user->isPurchasing() && ! $user->isFinance()) {
                     $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
                 }
@@ -139,6 +142,18 @@
                           {{ request()->routeIs('contacts.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
                     <i class="bi bi-person-lines-fill shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Contacts</span>
+                </a>
+                <a href="{{ route('brands.index') }}" title="Brands"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('brands.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-tags shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Brands</span>
+                </a>
+                <a href="{{ route('categories.index') }}" title="Categories"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('categories.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-folder shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Categories</span>
                 </a>
                 <a href="{{ route('templates.index') }}" title="Quotation Templates"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition

@@ -4,6 +4,7 @@ namespace App\Models\Espo;
 
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\OpportunityNote;
+use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Support\CustomerTop;
@@ -31,12 +32,14 @@ class Opportunity extends Model implements HasMedia
     protected $fillable = [
         'name', 'account_id', 'crm_top', 'company', 'stage', 'type', 'amount', 'amount_currency',
         'close_date', 'probability', 'lead_source', 'description', 'crm_lost_reason', 'assigned_user_id',
-        'contact_id', 'vendor', 'crm_item_brand', 'crm_item_image',
+        'contact_id', 'vendor', 'crm_item_brand', 'crm_item_sku', 'crm_item_category', 'crm_item_image',
         'crm_tax_category', 'crm_item_kind', 'crm_has_royalty', 'crm_royalty_type', 'crm_sell_exclude', 'crm_cost_exclude',
         'crm_cost_in_usd', 'crm_cost_fx_code', 'crm_cost_usd', 'crm_cost_usd_rate',
         'crm_item_discount',
         'crm_item_shipping',
         'crm_won_margin',
+        'crm_sales_order_id',
+        'crm_sales_order_no',
         'crm_shipping_cost',
         'crm_has_shipping_charge', 'crm_shipping_sell',
         'crm_has_discount', 'crm_discount_amount', 'crm_discount_status',
@@ -54,6 +57,8 @@ class Opportunity extends Model implements HasMedia
         'cost' => 'array',
         'vendor' => 'array',
         'crm_item_brand' => 'array',
+        'crm_item_sku' => 'array',
+        'crm_item_category' => 'array',
         'crm_item_image' => 'array',
         'crm_tax_category' => 'array',
         'crm_item_kind' => 'array',
@@ -68,6 +73,7 @@ class Opportunity extends Model implements HasMedia
         'crm_item_discount' => 'array',
         'crm_item_shipping' => 'array',
         'crm_won_margin' => 'float',
+        'crm_sales_order_id' => 'integer',
         'crm_shipping_cost' => 'float',
         'crm_has_shipping_charge' => 'boolean',
         'crm_shipping_sell' => 'float',
@@ -184,9 +190,37 @@ class Opportunity extends Model implements HasMedia
         return ! $this->hasPendingApprovals();
     }
 
+    /**
+     * Produk tanpa brand atau category (wajib sebelum membuat Sales Order).
+     *
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    public function productsMissingBrandOrCategory()
+    {
+        return $this->products->values()->filter(function ($p) {
+            return trim((string) ($p['brand'] ?? '')) === ''
+                || trim((string) ($p['category'] ?? '')) === '';
+        });
+    }
+
+    public function brandAndCategoryBlockReason(): ?string
+    {
+        $missing = $this->productsMissingBrandOrCategory();
+        if ($missing->isEmpty()) {
+            return null;
+        }
+
+        $names = $missing
+            ->map(fn ($p) => trim((string) ($p['name'] ?? '')) ?: 'item tanpa nama')
+            ->take(5)
+            ->implode(', ');
+
+        return 'Setiap produk wajib punya Brand dan Category sebelum membuat Sales Order. Lengkapi: '.$names.'.';
+    }
+
     public function closedWonBlockReason(): ?string
     {
-        if ($this->skipsApproval() || $this->canMoveToClosedWon()) {
+        if ($this->canMoveToClosedWon()) {
             return null;
         }
 
@@ -198,7 +232,9 @@ class Opportunity extends Model implements HasMedia
             $reasons[] = 'diskon tambahan masih menunggu approval Superadmin';
         }
 
-        return 'Opportunity tidak bisa Closed Won: '.implode(' dan ', $reasons).'.';
+        return $reasons === []
+            ? 'Opportunity belum bisa Closed Won.'
+            : 'Closed Won terkunci: '.implode(' dan ', $reasons).'.';
     }
 
     /** Jenis pengadaan EspoCRM (kolom type). */
@@ -288,6 +324,126 @@ class Opportunity extends Model implements HasMedia
         return $this->belongsTo(Contact::class, 'contact_id');
     }
 
+    /**
+     * Email pelanggan untuk API AGC: Account, Contact opportunity, lalu PIC account.
+     */
+    public function customerEmail(): ?string
+    {
+        $this->loadMissing(['account.emailAddresses', 'contact.emailAddresses', 'account.contacts.emailAddresses']);
+
+        $candidates = [];
+        $account = $this->account;
+        if ($account) {
+            $candidates[] = $account->email;
+            $candidates[] = $this->entityPrimaryEmail('Account', (string) $account->id);
+        }
+        if ($this->contact) {
+            $candidates[] = $this->contact->email;
+            $candidates[] = $this->entityPrimaryEmail('Contact', (string) $this->contact->id);
+        }
+        if ($account) {
+            foreach ($account->contacts as $contact) {
+                $candidates[] = $contact->email;
+            }
+        }
+
+        foreach ($candidates as $email) {
+            $email = strtolower(trim((string) $email));
+            if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $email;
+            }
+        }
+
+        return null;
+    }
+
+    public function customerPhone(): ?string
+    {
+        $this->loadMissing(['account.phoneNumbers', 'contact.phoneNumbers', 'account.contacts.phoneNumbers']);
+
+        $candidates = [];
+        if ($this->account) {
+            $candidates[] = $this->account->phone;
+        }
+        if ($this->contact) {
+            $candidates[] = $this->contact->phone;
+        }
+        if ($this->account) {
+            foreach ($this->account->contacts as $contact) {
+                $candidates[] = $contact->phone;
+            }
+        }
+
+        foreach ($candidates as $phone) {
+            $phone = trim((string) $phone);
+            if ($phone !== '') {
+                return $phone;
+            }
+        }
+
+        return null;
+    }
+
+    protected function entityPrimaryEmail(string $entityType, string $entityId): ?string
+    {
+        $emailId = \Illuminate\Support\Facades\DB::table('entity_email_address')
+            ->where('entity_type', $entityType)
+            ->where('entity_id', $entityId)
+            ->where('deleted', 0)
+            ->orderByDesc('primary')
+            ->value('email_address_id');
+
+        if (! $emailId) {
+            return null;
+        }
+
+        $name = \Illuminate\Support\Facades\DB::table('email_address')
+            ->where('id', $emailId)
+            ->value('name');
+
+        return is_string($name) ? $name : null;
+    }
+
+    /**
+     * Terapkan hasil lookup SKU ke baris produk opportunity (nama, brand, harga, kategori).
+     *
+     * @param  array{sku?: string, name?: string, brand?: string, category?: string, sell_exclude?: float|null}  $catalog
+     * @return array<string, mixed>|null
+     */
+    public function applyCatalogSkuToProduct(int $index, array $catalog): ?array
+    {
+        $rows = $this->products->values();
+        if (! $rows->has($index)) {
+            return null;
+        }
+
+        $row = $rows->get($index);
+        $row['sku'] = trim((string) ($catalog['sku'] ?? $row['sku'] ?? ''));
+        if (! empty($catalog['name'])) {
+            $row['name'] = trim((string) $catalog['name']);
+        }
+        if (array_key_exists('brand', $catalog) && trim((string) $catalog['brand']) !== '') {
+            $row['brand'] = trim((string) $catalog['brand']);
+        }
+        if (array_key_exists('category', $catalog)) {
+            $row['category'] = trim((string) ($catalog['category'] ?? ''));
+        }
+        if (isset($catalog['sell_exclude']) && $catalog['sell_exclude'] !== null && $catalog['sell_exclude'] !== '') {
+            $row['sell_exclude'] = (float) $catalog['sell_exclude'];
+        }
+
+        $row = OpportunityProductPricing::enrichRow($row);
+        $rows->put($index, $row);
+        $this->applyProductRows($rows->values());
+
+        $this->amount = $rows->isNotEmpty()
+            ? $rows->sum(fn ($p) => (float) ($p['subtotal'] ?? ((float) ($p['quantity'] ?? 1) * (float) ($p['price'] ?? 0))))
+            : $this->amount;
+        $this->syncWonMargin();
+
+        return $row;
+    }
+
     public function teams(): BelongsToMany
     {
         return $this->belongsToMany(Team::class, 'entity_team', 'entity_id', 'team_id')
@@ -327,6 +483,14 @@ class Opportunity extends Model implements HasMedia
         return $this->hasMany(PurchaseOrder::class, 'opportunity_id')->latest();
     }
 
+    /**
+     * Sales Order AGC — 1 opportunity : banyak SO (histori).
+     */
+    public function salesOrders(): HasMany
+    {
+        return $this->hasMany(OpportunitySalesOrder::class, 'opportunity_id')->latest();
+    }
+
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('documents')->useDisk('public');
@@ -344,6 +508,8 @@ class Opportunity extends Model implements HasMedia
         $costs = array_values((array) ($this->cost ?? []));
         $vendors = array_values((array) ($this->vendor ?? []));
         $brands = array_values((array) ($this->crm_item_brand ?? []));
+        $skus = array_values((array) ($this->crm_item_sku ?? []));
+        $categories = array_values((array) ($this->crm_item_category ?? []));
         $images = array_values((array) ($this->crm_item_image ?? []));
         $taxCategories = array_values((array) ($this->crm_tax_category ?? []));
         $itemKinds = array_values((array) ($this->crm_item_kind ?? []));
@@ -359,7 +525,7 @@ class Opportunity extends Model implements HasMedia
         $itemShippings = array_values((array) ($this->crm_item_shipping ?? []));
 
         $count = max(
-            count($names), count($qtys), count($prices), count($costs), count($vendors), count($brands), count($images),
+            count($names), count($qtys), count($prices), count($costs), count($vendors), count($brands), count($skus), count($categories), count($images),
             count($taxCategories), count($itemKinds), count($hasRoyaltyFlags), count($royaltyTypes),
             count($sellExcludes), count($costExcludes),
             count($itemDiscounts), count($itemShippings), count($costInUsdFlags), count($costFxCodes), count($costUsds), count($costUsdRates)
@@ -371,7 +537,7 @@ class Opportunity extends Model implements HasMedia
 
         return collect(range(0, $count - 1))
             ->map(function ($i) use (
-                $names, $qtys, $prices, $costs, $vendors, $brands, $images, $taxCategories, $itemKinds, $hasRoyaltyFlags, $royaltyTypes,
+                $names, $qtys, $prices, $costs, $vendors, $brands, $skus, $categories, $images, $taxCategories, $itemKinds, $hasRoyaltyFlags, $royaltyTypes,
                 $sellExcludes, $costExcludes, $itemDiscounts, $itemShippings, $costInUsdFlags, $costFxCodes, $costUsds, $costUsdRates
             ) {
                 $priceInclude = (float) ($prices[$i] ?? 0);
@@ -407,6 +573,8 @@ class Opportunity extends Model implements HasMedia
                     'quantity' => (float) ($qtys[$i] ?? 1),
                     'vendor' => (string) ($vendors[$i] ?? ''),
                     'brand' => (string) ($brands[$i] ?? ''),
+                    'sku' => (string) ($skus[$i] ?? ''),
+                    'category' => (string) ($categories[$i] ?? ''),
                     'image' => $image,
                     'tax_category' => $taxCategory,
                     'item_kind' => $itemKind,
@@ -487,6 +655,8 @@ class Opportunity extends Model implements HasMedia
         $this->cost = $rows->map(fn ($p) => (string) ($p['cost'] ?? 0))->all();
         $this->vendor = $rows->map(fn ($p) => (string) ($p['vendor'] ?? ''))->all();
         $this->crm_item_brand = $rows->map(fn ($p) => (string) ($p['brand'] ?? ''))->all();
+        $this->crm_item_sku = $rows->map(fn ($p) => trim((string) ($p['sku'] ?? '')))->all();
+        $this->crm_item_category = $rows->map(fn ($p) => trim((string) ($p['category'] ?? '')))->all();
         $this->crm_item_image = $rows->map(fn ($p) => trim((string) ($p['image'] ?? '')))->all();
         $this->crm_tax_category = $rows->pluck('tax_category')->all();
         $this->crm_item_kind = $rows->pluck('item_kind')->all();
@@ -767,6 +937,23 @@ class Opportunity extends Model implements HasMedia
         }
 
         return round(($this->totalProductsMargin() / $denom) * 100, 2);
+    }
+
+    /**
+     * Persentase Won Margin (margin setelah diskon) terhadap jual exclude.
+     */
+    public function wonMarginPercent(): ?float
+    {
+        if ($this->stage !== self::WON_STAGE || $this->crm_won_margin === null) {
+            return null;
+        }
+
+        $denom = $this->totalMarginPercentDenominator();
+        if ($denom <= 0) {
+            return null;
+        }
+
+        return round(((float) $this->crm_won_margin / $denom) * 100, 2);
     }
 
     /**

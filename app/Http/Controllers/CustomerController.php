@@ -8,6 +8,7 @@ use App\Models\Espo\EspoUser;
 use App\Models\WilayahDistrict;
 use App\Models\WilayahProvince;
 use App\Models\WilayahRegency;
+use App\Services\CustomerAddressService;
 use App\Services\EspoEntityWriter;
 use App\Support\CustomerTop;
 use App\Support\PaymentLevel;
@@ -20,7 +21,8 @@ class CustomerController extends Controller
     use ScopesToUser;
 
     public function __construct(
-        protected EspoEntityWriter $writer
+        protected EspoEntityWriter $writer,
+        protected CustomerAddressService $addresses
     ) {}
 
     public function index(Request $request)
@@ -92,6 +94,7 @@ class CustomerController extends Controller
 
         $this->writer->syncPrimaryEmail($account->id, 'Account', $data['email'] ?? null);
         $this->writer->syncPrimaryPhone($account->id, 'Account', $data['phone'] ?? null);
+        $this->addresses->upsertPrimaryFromAccount($account->fresh());
 
         return redirect()->route('customers.show', $account->id)
             ->with('success', 'Customer created successfully.');
@@ -117,6 +120,7 @@ class CustomerController extends Controller
 
         $this->writer->syncPrimaryEmail($account->id, 'Account', $data['email'] ?? null);
         $this->writer->syncPrimaryPhone($account->id, 'Account', $data['phone'] ?? null);
+        $this->addresses->upsertPrimaryFromAccount($account->fresh());
 
         return redirect()->route('customers.show', $account->id)
             ->with('success', 'Customer updated successfully.');
@@ -153,6 +157,8 @@ class CustomerController extends Controller
             ->findOrFail($id);
 
         $contacts = $account->contacts()->with(['emailAddresses', 'phoneNumbers'])->get();
+        $addresses = $account->addresses()->get();
+        $provinces = WilayahProvince::query()->orderBy('name')->get(['code', 'name']);
 
         $opportunities = $account->opportunities()
             ->with('assignedUser')
@@ -168,7 +174,7 @@ class CustomerController extends Controller
             ->limit(30)
             ->get();
 
-        return view('customers.show', compact('account', 'contacts', 'opportunities', 'quotations', 'activities'));
+        return view('customers.show', compact('account', 'contacts', 'addresses', 'provinces', 'opportunities', 'quotations', 'activities'));
     }
 
     protected function validateData(Request $request): array

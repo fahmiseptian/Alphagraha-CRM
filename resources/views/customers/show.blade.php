@@ -38,7 +38,7 @@
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-telephone mr-1"></i>Phone</dt><dd class="text-slate-700">{{ $account->phone ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-globe mr-1"></i>Website</dt><dd class="text-slate-700">{{ $account->website ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-building mr-1"></i>Industry</dt><dd class="text-slate-700">{{ $account->industry ?: '—' }}</dd></div>
-                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}@if (($addresses ?? collect())->count() > 1) <span class="text-xs text-slate-400">({{ $addresses->count() }} alamat)</span>@endif</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-person mr-1"></i>Sales</dt><dd class="text-slate-700">{{ optional($account->assignedUser)->display_name ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-cash-coin mr-1"></i>Level</dt><dd class="text-slate-700">{{ $account->paymentLevelLabel() }}@if ($account->minMarginPercent() !== null) <span class="text-xs text-slate-400">(min margin {{ number_format($account->minMarginPercent(), 0) }}%)</span>@endif</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-calendar2-check mr-1"></i>TOP</dt><dd class="text-slate-700">{{ $account->topLabel() }} <span class="text-xs text-slate-400">(min {{ number_format($account->topMinMarginPercent(), 0) }}%)</span></dd></div>
@@ -75,6 +75,8 @@
                 @endif
             </div>
         </x-card>
+
+        @include('customers._addresses')
 
         <x-card title="Contact Persons (PIC)">
         @if ($contacts->count())
@@ -277,3 +279,224 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+function customerAddressManager(cfg) {
+    const emptyForm = () => ({
+        label: '',
+        contact_name: '',
+        phone: '',
+        street: '',
+        postal_code: '',
+        country: 'Indonesia',
+        is_default_billing: false,
+        is_default_shipping: false,
+    });
+
+    return {
+        formOpen: !!cfg.openOnError,
+        editingId: cfg.editingId ? String(cfg.editingId) : '',
+        form: Object.assign(emptyForm(), {
+            label: @js(old('label', '')),
+            contact_name: @js(old('contact_name', '')),
+            phone: @js(old('phone', '')),
+            street: @js(old('street', '')),
+            postal_code: @js(old('postal_code', '')),
+            country: @js(old('country', 'Indonesia')),
+            is_default_billing: @js((bool) old('is_default_billing')),
+            is_default_shipping: @js((bool) old('is_default_shipping')),
+        }),
+        provinceCode: cfg.provinceCode || '',
+        regencyCode: cfg.regencyCode || '',
+        districtCode: cfg.districtCode || '',
+        provinces: cfg.initialProvinces || [],
+        regencies: [],
+        districts: [],
+        loadingRegencies: false,
+        loadingDistricts: false,
+        districtError: '',
+        _syncingSelects: false,
+        cfg,
+
+        get formAction() {
+            if (this.editingId) {
+                return (cfg.updateUrlTemplate || '').replace('__ID__', this.editingId);
+            }
+            return cfg.storeUrl;
+        },
+
+        async init() {
+            if (!this.provinces.length) {
+                try {
+                    const res = await fetch(cfg.provincesUrl, { headers: { Accept: 'application/json' } });
+                    const json = await res.json();
+                    this.provinces = json.data || [];
+                } catch (e) {}
+            }
+            if (this.formOpen) {
+                await this.hydrateWilayah();
+            }
+        },
+
+        async startCreate() {
+            this.editingId = '';
+            this.form = emptyForm();
+            this.provinceCode = '';
+            this.regencyCode = '';
+            this.districtCode = '';
+            this.regencies = [];
+            this.districts = [];
+            this.formOpen = true;
+            await this.hydrateWilayah();
+        },
+
+        async startEdit(id) {
+            const row = (cfg.addresses || []).find((a) => String(a.id) === String(id));
+            if (!row) return;
+            this.editingId = String(row.id);
+            this.form = {
+                label: row.label || '',
+                contact_name: row.contact_name || '',
+                phone: row.phone || '',
+                street: row.street || '',
+                postal_code: row.postal_code || '',
+                country: row.country || 'Indonesia',
+                is_default_billing: !!row.is_default_billing,
+                is_default_shipping: !!row.is_default_shipping,
+            };
+            this.provinceCode = row.province_code || '';
+            this.regencyCode = row.regency_code || '';
+            this.districtCode = row.district_code || '';
+            this.formOpen = true;
+            await this.hydrateWilayah();
+        },
+
+        cancelForm() {
+            this.formOpen = false;
+            this.editingId = '';
+            this.form = emptyForm();
+        },
+
+        async hydrateWilayah() {
+            if (this.provinceCode) {
+                await this.fetchRegencies();
+            }
+            if (this.regencyCode) {
+                await this.fetchDistricts();
+            }
+            await this.$nextTick();
+            if (!window.CrmSelect2) return;
+            this._syncingSelects = true;
+            this.refreshProvinceSelect();
+            this.refreshRegencySelect();
+            this.refreshDistrictSelect();
+            this._syncingSelects = false;
+        },
+
+        provinceEl() { return this.$root.querySelector('[name="crm_province_code"]'); },
+        regencyEl() { return this.$root.querySelector('[name="crm_regency_code"]'); },
+        districtEl() { return this.$root.querySelector('[name="crm_district_code"]'); },
+
+        refreshProvinceSelect() {
+            const el = this.provinceEl();
+            if (!el || !window.CrmSelect2) return;
+            CrmSelect2.setOptions(
+                el,
+                this.provinces.map((p) => ({ id: p.code, name: p.name })),
+                this.provinceCode,
+                '— Pilih provinsi —'
+            );
+            CrmSelect2.bindAlpine(el, this, 'provinceCode', () => {
+                if (this._syncingSelects) return;
+                this.onProvinceChange();
+            });
+        },
+        refreshRegencySelect() {
+            const el = this.regencyEl();
+            if (!el || !window.CrmSelect2) return;
+            el.disabled = !this.provinceCode || this.loadingRegencies;
+            CrmSelect2.setOptions(
+                el,
+                this.regencies.map((r) => ({ id: r.code, name: r.name })),
+                this.regencyCode,
+                this.provinceCode ? '— Pilih kota/kab —' : '— Pilih provinsi dulu —'
+            );
+            CrmSelect2.bindAlpine(el, this, 'regencyCode', () => {
+                if (this._syncingSelects) return;
+                this.onRegencyChange();
+            });
+        },
+        refreshDistrictSelect() {
+            const el = this.districtEl();
+            if (!el || !window.CrmSelect2) return;
+            el.disabled = !this.regencyCode || this.loadingDistricts;
+            CrmSelect2.setOptions(
+                el,
+                this.districts.map((d) => ({ id: d.code, name: d.name })),
+                this.districtCode,
+                this.regencyCode ? '— Pilih kecamatan —' : '— Pilih kota/kab dulu —'
+            );
+            CrmSelect2.bindAlpine(el, this, 'districtCode');
+        },
+        async onProvinceChange() {
+            this.regencyCode = '';
+            this.districtCode = '';
+            this.regencies = [];
+            this.districts = [];
+            this.districtError = '';
+            this.refreshRegencySelect();
+            this.refreshDistrictSelect();
+            if (this.provinceCode) {
+                await this.fetchRegencies();
+                this.refreshRegencySelect();
+            }
+        },
+        async onRegencyChange() {
+            this.districtCode = '';
+            this.districts = [];
+            this.districtError = '';
+            this.refreshDistrictSelect();
+            if (this.regencyCode) {
+                await this.fetchDistricts();
+                this.refreshDistrictSelect();
+            }
+        },
+        async fetchRegencies() {
+            this.loadingRegencies = true;
+            try {
+                const url = cfg.regenciesUrl + '?province=' + encodeURIComponent(this.provinceCode);
+                const res = await fetch(url, { headers: { Accept: 'application/json' } });
+                const json = await res.json();
+                this.regencies = json.data || [];
+            } catch (e) {
+                this.regencies = [];
+            } finally {
+                this.loadingRegencies = false;
+            }
+        },
+        async fetchDistricts() {
+            this.loadingDistricts = true;
+            this.districtError = '';
+            try {
+                const url = cfg.districtsUrl + '?regency=' + encodeURIComponent(this.regencyCode);
+                const res = await fetch(url, { headers: { Accept: 'application/json' } });
+                const json = await res.json();
+                if (!res.ok) {
+                    this.districtError = json.error || 'Gagal memuat kecamatan';
+                    this.districts = [];
+                } else {
+                    this.districts = json.data || [];
+                }
+            } catch (e) {
+                this.districts = [];
+                this.districtError = 'Gagal memuat kecamatan';
+            } finally {
+                this.loadingDistricts = false;
+            }
+        },
+    };
+}
+</script>
+@endpush
+

@@ -11,13 +11,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Base URL API Alpha Graha (katalog brand, dll.)
-    |--------------------------------------------------------------------------
-    */
-    'agc_url' => env('AGC_URL', 'https://alphagraha.co.id'),
-
-    /*
-    |--------------------------------------------------------------------------
     | Salt password EspoCRM
     |--------------------------------------------------------------------------
     | Diambil dari data/config.php (passwordSalt) instalasi EspoCRM.
@@ -100,13 +93,25 @@ return [
     | Format nomor penawaran otomatis
     |--------------------------------------------------------------------------
     | Contoh: 0002/KA/QO/VII/26
-    | - sequence unik per tahun
-    | - sales_code dari profil user (diisi admin)
-    | - revisi setelah status sent: 0002-R1/KA/QO/VII/26
     */
     'quotation_number' => [
         'prefix' => 'QO',
         'sequence_pad' => 4,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Format nomor Sales Order otomatis
+    |--------------------------------------------------------------------------
+    | No SO:  SO26081800001  (prefix + YYMMDD + 5 digit urutan harian)
+    | PSO:    PSO26081800001
+    | Nomor ref: 0001/DP/SO/VIII/26 (atau /PSO/)
+    */
+    'sales_order_number' => [
+        'prefix' => 'SO',
+        'pso_prefix' => 'PSO',
+        'sequence_pad' => 5,
+        'ref_sequence_pad' => 4,
     ],
 
     /*

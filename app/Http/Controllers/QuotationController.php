@@ -8,7 +8,7 @@ use App\Models\Espo\Opportunity;
 use App\Models\Quotation;
 use App\Models\QuotationRevision;
 use App\Models\QuotationTemplate;
-use App\Services\AgcApiService;
+use App\Services\CatalogService;
 use App\Services\NotificationService;
 use App\Support\OpportunityProductPricing;
 use App\Services\QuotationService;
@@ -1112,7 +1112,7 @@ class QuotationController extends Controller
             'templates' => $templates,
             'statuses' => Quotation::STATUSES,
             'templateCompany' => $company,
-            'brandOptions' => app(AgcApiService::class)->brands(),
+            'brandOptions' => app(CatalogService::class)->brandOptions(),
         ];
     }
 

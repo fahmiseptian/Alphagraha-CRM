@@ -9,6 +9,8 @@
             'shipping_exclude' => $p['shipping_exclude'] ?? 0,
             'vendor' => $p['vendor'],
             'brand' => $p['brand'] ?? '',
+            'sku' => $p['sku'] ?? '',
+            'category' => $p['category'] ?? '',
             'tax_category' => $p['tax_category'],
             'item_kind' => $p['item_kind'],
             'has_royalty' => ! empty($p['has_royalty']),
@@ -357,6 +359,7 @@
                                 </div>
                                 <div class="min-w-0 w-full flex-1">
                                 <input type="hidden" :name="`products[${i}][tax_category]`" :value="p.tax_category">
+                                <input type="hidden" :name="`products[${i}][sku]`" :value="p.sku || ''">
                                 <div class="mb-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-12">
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Barang / Jasa</label>
@@ -369,7 +372,7 @@
                                         <label class="crm-label text-xs">Item</label>
                                         <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
-                                    <div class="sm:col-span-3">
+                                    <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Brand</label>
                                         <select :name="`products[${i}][brand]`"
                                                 class="select2 select2-search w-full text-sm"
@@ -383,6 +386,20 @@
                                             @endforeach
                                         </select>
                                     </div>
+                                    <div class="sm:col-span-2">
+                                        <label class="crm-label text-xs">Category</label>
+                                        <select :name="`products[${i}][category]`"
+                                                class="select2 select2-search w-full text-sm"
+                                                data-placeholder="— Category —"
+                                                data-category-select
+                                                :disabled="purchasingMode"
+                                                x-init="$nextTick(() => initCategorySelect($el, i))">
+                                            <option value="">— Category —</option>
+                                            @foreach ($categoryOptions ?? [] as $category)
+                                                <option value="{{ $category['name'] }}">{{ $category['name'] }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
                                     <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Qty</label>
                                         <input type="text" inputmode="decimal"
@@ -393,7 +410,7 @@
                                                class="crm-field w-full min-w-[4.5rem] text-right tabular-nums" :readonly="purchasingMode">
                                         <input type="hidden" :name="`products[${i}][quantity]`" :value="p.quantity">
                                     </div>
-                                    <div class="sm:col-span-2">
+                                    <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Vendor</label>
                                         <input type="text" :name="`products[${i}][vendor]`" x-model="p.vendor" placeholder="Vendor" class="crm-field w-full">
                                     </div>
@@ -1019,6 +1036,8 @@
                 shipping_exclude: shipping,
                 vendor: p.vendor ?? '',
                 brand: p.brand ?? '',
+                sku: p.sku ?? '',
+                category: p.category ?? '',
                 tax_category: taxCategory,
                 item_kind: itemKind,
                 royalty_type: royaltyType,
@@ -1662,6 +1681,8 @@
                     shipping_exclude: 0,
                     vendor: '',
                     brand: '',
+                    sku: '',
+                    category: '',
                     tax_category: this.selectedTaxCategory,
                     item_kind: 'barang',
                     royalty_type: '',
@@ -1678,15 +1699,21 @@
                     fx_rate: 0,
                 });
                 this.refreshBrandSelects();
+                this.refreshCategorySelects();
             },
             removeProduct(i) {
-                const el = this.$root.querySelector(`select[name="products[${i}][brand]"]`);
-                if (el && window.CrmSelect2) {
-                    CrmSelect2.destroy(el);
+                const brandEl = this.$root.querySelector(`select[name="products[${i}][brand]"]`);
+                if (brandEl && window.CrmSelect2) {
+                    CrmSelect2.destroy(brandEl);
+                }
+                const catEl = this.$root.querySelector(`select[name="products[${i}][category]"]`);
+                if (catEl && window.CrmSelect2) {
+                    CrmSelect2.destroy(catEl);
                 }
                 this.products.splice(i, 1);
                 this.refreshDiscountFromMargin();
                 this.refreshBrandSelects();
+                this.refreshCategorySelects();
             },
             initBrandSelect(el, index) {
                 if (!el || !window.CrmSelect2 || !window.jQuery) return;
@@ -1728,6 +1755,49 @@
                         const index = match ? Number(match[1]) : -1;
                         if (index < 0) return;
                         this.initBrandSelect(el, index);
+                    });
+                });
+            },
+            initCategorySelect(el, index) {
+                if (!el || !window.CrmSelect2 || !window.jQuery) return;
+
+                const $el = window.jQuery(el);
+                CrmSelect2.destroy(el);
+
+                $el.select2({
+                    width: '100%',
+                    placeholder: $el.data('placeholder') || '— Category —',
+                    allowClear: true,
+                    dropdownParent: window.jQuery(document.body),
+                    language: {
+                        noResults: () => 'Category tidak ditemukan',
+                        searching: () => 'Mencari...',
+                    },
+                });
+
+                $el.off('.crmCategory');
+                $el.on('change.crmCategory select2:select.crmCategory select2:clear.crmCategory', () => {
+                    if (!this.products[index]) return;
+                    this.products[index].category = $el.val() || '';
+                });
+
+                const category = this.products[index]?.category || '';
+                if (category && $el.find('option').filter(function () {
+                    return String(window.jQuery(this).val()) === String(category);
+                }).length === 0) {
+                    $el.append(new Option(category, category, true, true));
+                }
+                $el.val(category || '').trigger('change.select2');
+                $el.prop('disabled', !!this.purchasingMode).trigger('change.select2');
+            },
+            refreshCategorySelects() {
+                this.$nextTick(() => {
+                    if (!window.CrmSelect2) return;
+                    this.$root.querySelectorAll('select[data-category-select]').forEach((el) => {
+                        const match = String(el.getAttribute('name') || '').match(/products\[(\d+)\]\[category\]/);
+                        const index = match ? Number(match[1]) : -1;
+                        if (index < 0) return;
+                        this.initCategorySelect(el, index);
                     });
                 });
             },
@@ -1793,6 +1863,7 @@
                     });
                     this.refreshDiscountFromMargin();
                     this.refreshBrandSelects();
+                    this.refreshCategorySelects();
                     alert(`${imported.length} produk berhasil diimpor.`);
                 } catch (err) {
                     console.error(err);
@@ -1880,6 +1951,7 @@
                     ongkir_item: 'ongkir_exclude', harga_ongkir: 'ongkir_exclude',
                     harga_beli: 'harga_beli_exclude', modal: 'harga_beli_exclude', cost: 'harga_beli_exclude', cost_exclude: 'harga_beli_exclude',
                     merek: 'brand', brand_name: 'brand',
+                    kategori: 'category', category_name: 'category',
                 };
                 return aliases[h] || h;
             },
@@ -1902,6 +1974,8 @@
                     quantity: this.parseId(map.qty ?? map.quantity ?? 1) || 1,
                     vendor: String(map.vendor ?? '').trim(),
                     brand: String(map.brand ?? map.merek ?? '').trim(),
+                    sku: '',
+                    category: String(map.category ?? map.kategori ?? '').trim(),
                     sell_exclude: this.parseId(map.harga_jual_exclude ?? 0),
                     discount_exclude: this.parseId(map.diskon_exclude ?? 0),
                     shipping_exclude: this.parseId(map.ongkir_exclude ?? 0),
@@ -1962,6 +2036,7 @@
                     this.refreshContactSelect();
                     this.syncDiscountPercentFromAmount();
                     this.refreshBrandSelects();
+                    this.refreshCategorySelects();
                     this._accountReady = true;
                 });
             },

@@ -146,6 +146,11 @@ class User extends Authenticatable
         return in_array($this->role, [self::ROLE_SUPERADMIN, self::ROLE_ADMIN, self::ROLE_SALES], true);
     }
 
+    public function canCreateSalesOrder(): bool
+    {
+        return $this->canEditOpportunityFully();
+    }
+
     public function canApproveDiscount(): bool
     {
         return $this->isSuperAdmin();
@@ -197,6 +202,15 @@ class User extends Authenticatable
     public function canDeleteCustomerContact(): bool
     {
         return $this->isSuperAdmin();
+    }
+
+    public function canManageCustomerAddresses(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+        ], true);
     }
 
     public function canDeleteCustomer(): bool

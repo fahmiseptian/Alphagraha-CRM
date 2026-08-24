@@ -9,6 +9,7 @@
         'period' => $period,
         'leaderboard_period' => $leaderboardPeriod,
         'leaderboard_sort' => $leaderboardSort,
+        'catalog_sort' => $catalogSort ?? null,
         'sales' => $selectedSalesId,
     ], fn ($v) => filled($v));
 @endphp
@@ -32,6 +33,7 @@
         <form method="GET" action="{{ route('dashboard') }}" class="flex items-center gap-2">
             @if ($leaderboardPeriod)<input type="hidden" name="leaderboard_period" value="{{ $leaderboardPeriod }}">@endif
             @if ($leaderboardSort)<input type="hidden" name="leaderboard_sort" value="{{ $leaderboardSort }}">@endif
+            @if (! empty($catalogSort))<input type="hidden" name="catalog_sort" value="{{ $catalogSort }}">@endif
             @if ($selectedSalesId)<input type="hidden" name="sales" value="{{ $selectedSalesId }}">@endif
             <label class="text-xs font-medium text-slate-500">Periode</label>
             <select name="period" onchange="this.form.submit()"
@@ -59,6 +61,7 @@
             <input type="hidden" name="period" value="{{ $period }}">
             @if ($leaderboardPeriod)<input type="hidden" name="leaderboard_period" value="{{ $leaderboardPeriod }}">@endif
             @if ($leaderboardSort)<input type="hidden" name="leaderboard_sort" value="{{ $leaderboardSort }}">@endif
+            @if (! empty($catalogSort))<input type="hidden" name="catalog_sort" value="{{ $catalogSort }}">@endif
             @if ($selectedSalesId)<input type="hidden" name="sales" value="{{ $selectedSalesId }}">@endif
 
             <div>
@@ -158,6 +161,7 @@
                 <form method="GET" action="{{ route('dashboard') }}" class="flex flex-nowrap items-center justify-end gap-1.5">
                     <input type="hidden" name="period" value="{{ $period }}">
                     @if ($selectedSalesId)<input type="hidden" name="sales" value="{{ $selectedSalesId }}">@endif
+                    @if (! empty($catalogSort))<input type="hidden" name="catalog_sort" value="{{ $catalogSort }}">@endif
                     @if (auth()->user()->isAdmin())
                         <select name="leaderboard_sort" onchange="this.form.submit()"
                                 class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">
@@ -199,6 +203,7 @@
                                     'period' => $period,
                                     'leaderboard_period' => $leaderboardPeriod,
                                     'leaderboard_sort' => $leaderboardSort,
+                                    'catalog_sort' => $catalogSort ?? null,
                                 ]),
                                 $isSelected ? [] : ['sales' => $entry['user_id']]
                             ));
@@ -278,7 +283,7 @@
             </div>
             @if ($selectedSalesId && ! auth()->user()->isSales())
                 <div class="border-t border-slate-100 px-4 py-2">
-                    <a href="{{ route('dashboard', array_filter(['period' => $period, 'leaderboard_period' => $leaderboardPeriod, 'leaderboard_sort' => $leaderboardSort])) }}"
+                    <a href="{{ route('dashboard', array_filter(['period' => $period, 'leaderboard_period' => $leaderboardPeriod, 'leaderboard_sort' => $leaderboardSort, 'catalog_sort' => $catalogSort ?? null])) }}"
                        class="text-xs font-medium text-brand-600 hover:text-brand-700">
                         <i class="bi bi-x-circle"></i> Reset filter sales
                     </a>
@@ -396,6 +401,27 @@
         @endif
     </x-card>
 </div>
+
+@if (auth()->user()->isSuperAdmin())
+    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        @include('dashboard._catalog-leaderboard', [
+            'title' => 'Leaderboard Brand',
+            'icon' => 'bi-tags',
+            'type' => 'brand',
+            'nameLabel' => 'Brand',
+            'entries' => $brandLeaderboard,
+            'emptyMessage' => 'Belum ada data brand Closed Won di periode ini.',
+        ])
+        @include('dashboard._catalog-leaderboard', [
+            'title' => 'Leaderboard Category',
+            'icon' => 'bi-grid-3x3-gap',
+            'type' => 'category',
+            'nameLabel' => 'Category',
+            'entries' => $categoryLeaderboard,
+            'emptyMessage' => 'Belum ada data category Closed Won di periode ini.',
+        ])
+    </div>
+@endif
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
     {{-- Upcoming activities --}}

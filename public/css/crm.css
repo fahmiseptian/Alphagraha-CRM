@@ -890,9 +890,27 @@ textarea.crm-field {
     padding-bottom: 0.625rem;
 }
 
+a.crm-leaderboard-table__row {
+    color: inherit;
+    text-decoration: none;
+}
+
+a.crm-leaderboard-table__row:hover {
+    background: #f8fafc;
+}
+
+a.crm-leaderboard-table__row:hover .crm-leaderboard-table__sales p:first-child {
+    color: #1d4ed8;
+}
+
 .crm-leaderboard-table--sales .crm-leaderboard-table__head,
 .crm-leaderboard-table--sales .crm-leaderboard-table__row {
     grid-template-columns: 1.375rem minmax(0, 1fr) 4rem;
+}
+
+.crm-leaderboard-table--catalog .crm-leaderboard-table__head,
+.crm-leaderboard-table--catalog .crm-leaderboard-table__row {
+    grid-template-columns: 1.375rem minmax(0, 1fr) 5.25rem 4.5rem;
 }
 
 .crm-leaderboard-table__sales p:first-child {

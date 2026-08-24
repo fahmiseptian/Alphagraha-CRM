@@ -2,12 +2,15 @@
 
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActivityMediaController;
+use App\Http\Controllers\Admin\BrandController;
+use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\TemplateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\WilayahController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerContactController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
@@ -17,6 +20,7 @@ use App\Http\Controllers\OpportunityController;
 use App\Http\Controllers\OpportunityDocumentController;
 use App\Http\Controllers\OpportunityNoteController;
 use App\Http\Controllers\OpportunityPurchaseOrderController;
+use App\Http\Controllers\OpportunitySalesOrderController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\WilayahLookupController;
@@ -35,6 +39,9 @@ Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth')->
 // Aplikasi (butuh login)
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/dashboard/catalog', [DashboardController::class, 'catalog'])
+        ->middleware('role:superadmin')
+        ->name('dashboard.catalog');
 
     // Notifikasi
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
@@ -53,6 +60,9 @@ Route::middleware('auth')->group(function () {
     Route::delete('/customers/{id}', [CustomerController::class, 'destroy'])->name('customers.destroy');
     Route::post('/customers/{account}/contacts', [CustomerContactController::class, 'store'])->name('customers.contacts.store');
     Route::put('/customers/{account}/contacts/{contact}', [CustomerContactController::class, 'update'])->name('customers.contacts.update');
+    Route::post('/customers/{account}/addresses', [CustomerAddressController::class, 'store'])->name('customers.addresses.store');
+    Route::put('/customers/{account}/addresses/{address}', [CustomerAddressController::class, 'update'])->name('customers.addresses.update');
+    Route::delete('/customers/{account}/addresses/{address}', [CustomerAddressController::class, 'destroy'])->name('customers.addresses.destroy');
 
     // Lookup wilayah (DB; kecamatan lazy-sync dari API bila kosong)
     Route::get('/wilayah/provinces', [WilayahLookupController::class, 'provinces'])->name('wilayah.provinces');
@@ -103,6 +113,15 @@ Route::middleware('auth')->group(function () {
     Route::delete('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'destroy'])->name('opportunities.purchase-orders.destroy');
     Route::put('/opportunities/{opportunity}/shipping-cost', [OpportunityPurchaseOrderController::class, 'updateShipping'])->name('opportunities.shipping-cost.update');
 
+    Route::get('/sales-orders', [OpportunitySalesOrderController::class, 'index'])->name('sales-orders.index');
+    Route::get('/opportunities/{opportunity}/sales-orders/create', [OpportunitySalesOrderController::class, 'create'])->name('opportunities.sales-orders.create');
+    Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'show'])->name('opportunities.sales-orders.show')->whereNumber('salesOrder');
+    Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/preview', [OpportunitySalesOrderController::class, 'preview'])->name('opportunities.sales-orders.preview')->whereNumber('salesOrder');
+    Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/pdf', [OpportunitySalesOrderController::class, 'pdf'])->name('opportunities.sales-orders.pdf')->whereNumber('salesOrder');
+    Route::put('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'update'])->name('opportunities.sales-orders.update')->whereNumber('salesOrder');
+    Route::delete('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'destroy'])->name('opportunities.sales-orders.destroy')->whereNumber('salesOrder');
+    Route::post('/opportunities/{opportunity}/sales-orders', [OpportunitySalesOrderController::class, 'store'])->name('opportunities.sales-orders.store');
+
     // Aktivitas & Task
     Route::resource('activities', ActivityController::class)->except(['show']);
     Route::patch('/activities/{activity}/complete', [ActivityController::class, 'complete'])->name('activities.complete');
@@ -127,6 +146,14 @@ Route::middleware('auth')->group(function () {
 
     // Area administrator (Superadmin only)
     Route::middleware('role:superadmin')->group(function () {
+        Route::get('/brands/export', [BrandController::class, 'export'])->name('brands.export');
+        Route::get('/brands/template', [BrandController::class, 'template'])->name('brands.template');
+        Route::post('/brands/import', [BrandController::class, 'import'])->name('brands.import');
+        Route::resource('brands', BrandController::class)->except(['show']);
+        Route::get('/categories/export', [CategoryController::class, 'export'])->name('categories.export');
+        Route::get('/categories/template', [CategoryController::class, 'template'])->name('categories.template');
+        Route::post('/categories/import', [CategoryController::class, 'import'])->name('categories.import');
+        Route::resource('categories', CategoryController::class)->except(['show']);
         Route::resource('templates', TemplateController::class);
         Route::resource('users', UserController::class)->except(['show']);
         Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');

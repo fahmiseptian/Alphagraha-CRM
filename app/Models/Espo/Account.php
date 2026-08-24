@@ -3,6 +3,7 @@
 namespace App\Models\Espo;
 
 use App\Models\Activity;
+use App\Models\CustomerAddress;
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\Quotation;
 use App\Support\PaymentLevel;
@@ -94,6 +95,14 @@ class Account extends Model
     public function contacts(): HasMany
     {
         return $this->hasMany(Contact::class, 'account_id');
+    }
+
+    public function addresses(): HasMany
+    {
+        return $this->hasMany(CustomerAddress::class, 'account_id')
+            ->orderByDesc('is_default_billing')
+            ->orderBy('sort_order')
+            ->orderBy('id');
     }
 
     public function opportunities(): HasMany
