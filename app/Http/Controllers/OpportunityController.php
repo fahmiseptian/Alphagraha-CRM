@@ -33,6 +33,10 @@ class OpportunityController extends Controller
 
     public function index(Request $request)
     {
+        if (! auth()->user()?->canViewOpportunities()) {
+            abort(403, 'Anda tidak memiliki akses ke Opportunities.');
+        }
+
         $kanbanStages = Opportunity::KANBAN_STAGES;
         $view = $request->get('view') === 'list' ? 'list' : 'kanban';
         $selectedUserId = $this->resolveAssignedUserFilter($request);
@@ -48,6 +52,10 @@ class OpportunityController extends Controller
         $companyFilter = trim((string) $request->get('company', ''));
         if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
             $companyFilter = '';
+        }
+        $accountId = trim((string) $request->get('account_id', ''));
+        if ($accountId !== '' && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
+            $accountId = '';
         }
 
         $this->rememberOpportunitiesIndexQuery($request);
@@ -66,17 +74,23 @@ class OpportunityController extends Controller
         }
 
         $this->applyPeriodToOpportunityQuery($query, $periodRange);
-        $this->applyOpportunityIndexFilters($query, $search, $stageFilter, $companyFilter);
+        $this->applyOpportunityIndexFilters($query, $search, $stageFilter, $companyFilter, $accountId);
 
         $salesUsers = $this->isAdmin()
             ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
             : collect();
+
+        $filterAccounts = $this->scopeAssigned(Account::query())
+            ->orderBy('name')
+            ->get(['id', 'name']);
 
         $filterState = [
             'view' => $view,
             'search' => $search,
             'stageFilter' => $stageFilter,
             'companyFilter' => $companyFilter,
+            'accountId' => $accountId,
+            'filterAccounts' => $filterAccounts,
             'selectedUserId' => $selectedUserId,
             'period' => $period,
             'periodLabel' => $periodLabel,
@@ -117,14 +131,20 @@ class OpportunityController extends Controller
     }
 
     /**
-     * Filter tambahan index: nama deal, stage, nama perusahaan/customer.
+     * Filter tambahan index: nama deal, stage, nama perusahaan, customer.
      */
-    protected function applyOpportunityIndexFilters($query, string $search, string $stage, string $company): void
+    protected function applyOpportunityIndexFilters($query, string $search, string $stage, string $company, string $accountId = ''): void
     {
         $table = $query->getModel()->getTable();
 
         if ($search !== '') {
-            $query->where($table.'.name', 'like', '%'.$search.'%');
+            $like = '%'.$search.'%';
+            $query->where(function ($q) use ($table, $like) {
+                $q->where($table.'.name', 'like', $like)
+                    ->orWhereHas('account', function ($accountQuery) use ($like) {
+                        $accountQuery->where('name', 'like', $like);
+                    });
+            });
         }
 
         if ($stage !== '') {
@@ -134,12 +154,16 @@ class OpportunityController extends Controller
         if ($company !== '') {
             $query->where($table.'.company', $company);
         }
+
+        if ($accountId !== '') {
+            $query->where($table.'.account_id', $accountId);
+        }
     }
 
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.items', 'salesOrders.creator']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.vendor', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator']);
 
         // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
         if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {
@@ -798,7 +822,7 @@ class OpportunityController extends Controller
     protected function rememberOpportunitiesIndexQuery(Request $request): void
     {
         $query = array_filter(
-            $request->only(['view', 'q', 'stage', 'company', 'assigned_user_id', 'period', 'page']),
+            $request->only(['view', 'q', 'stage', 'company', 'account_id', 'assigned_user_id', 'period', 'page']),
             fn ($value) => $value !== null && $value !== ''
         );
 
@@ -1194,6 +1218,7 @@ class OpportunityController extends Controller
             'topMargins' => CustomerTop::allMinMargins(),
             'brandOptions' => $catalog->brandOptions(),
             'categoryOptions' => $catalog->categoryOptions(),
+            'vendorOptions' => $catalog->vendorOptions(),
             'marginNominalUmum' => PaymentLevel::marginNominalUmum(),
             'marginNominalOngkirPribadi' => PaymentLevel::marginNominalOngkirPribadi(),
             'marginMaxPercent' => PaymentLevel::maxMarginPercent(),
@@ -1231,6 +1256,10 @@ class OpportunityController extends Controller
             }
 
             return;
+        }
+
+        if ($user->isProduct() || $user->isEkspedisi()) {
+            abort(403, 'Anda tidak memiliki akses ke Opportunities.');
         }
 
         if ($user->isSales() && $opportunity->assigned_user_id === $user->id) {
@@ -1348,16 +1377,21 @@ class OpportunityController extends Controller
         $lostCount = $lost->count();
         $closedCount = $wonCount + $lostCount;
 
+        $wonValue = (float) $won->sum('amount');
+        $wonMargin = (float) $won->sum('crm_won_margin');
+
         return [
             'total' => $opportunities->count(),
             'total_value' => (float) $opportunities->sum('amount'),
             'open_count' => $open->count(),
             'open_value' => (float) $open->sum('amount'),
             'won_count' => $wonCount,
-            'won_value' => (float) $won->sum('amount'),
+            'won_value' => $wonValue,
+            'won_margin' => $wonMargin,
             'lost_count' => $lostCount,
             'lost_value' => (float) $lost->sum('amount'),
             'win_rate' => $closedCount > 0 ? (int) round(($wonCount / $closedCount) * 100) : null,
+            'margin_rate' => $wonValue > 0 ? (int) round(($wonMargin / $wonValue) * 100) : null,
             'stage_stats' => $stageStats,
         ];
     }

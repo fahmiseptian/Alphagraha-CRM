@@ -189,6 +189,9 @@
                             <div class="sm:col-span-5">
                                 <label class="crm-label text-xs">Harga jual (exclude)</label>
                                 <input type="text" class="crm-field bg-slate-50" readonly :value="formatMoney(item.sell_exclude)">
+                                <p class="mt-1 text-[11px] text-slate-400" x-show="item.has_item_discount" x-cloak>
+                                    Pakai Diskon Item (list <span x-text="formatMoney(item.list_sell_exclude)"></span>)
+                                </p>
                             </div>
                         </div>
                     </div>

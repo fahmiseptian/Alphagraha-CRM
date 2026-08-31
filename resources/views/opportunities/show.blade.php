@@ -102,7 +102,17 @@
                         @endif
                     </p>
                     @if ($opportunity->crm_discount_note)
-                        <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_discount_note }}</p>
+                        @if ($isRejected)
+                            <div class="mt-3 flex items-start gap-3 rounded-lg border-2 border-red-500 bg-white px-4 py-3 text-red-800 shadow-sm">
+                                <i class="bi bi-exclamation-triangle-fill mt-0.5 shrink-0 text-2xl text-red-600"></i>
+                                <div class="min-w-0">
+                                    <p class="text-xs font-bold uppercase tracking-wider text-red-500">Catatan penolakan</p>
+                                    <p class="mt-1 text-base font-bold leading-snug text-red-800">{{ $opportunity->crm_discount_note }}</p>
+                                </div>
+                            </div>
+                        @else
+                            <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_discount_note }}</p>
+                        @endif
                     @endif
                     @if ($opportunity->discountRequesterName() || $opportunity->crm_discount_requested_at)
                         <p class="mt-1 text-xs opacity-80">
@@ -434,7 +444,17 @@
                     <p class="mt-1 text-xs opacity-80">Kota customer bukan free ongkir — threshold: Nominal Umum + Ongkir Pribadi.</p>
                 @endif
                 @if ($opportunity->crm_margin_note)
-                    <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_margin_note }}</p>
+                    @if ($isMarginRejected)
+                        <div class="mt-3 flex items-start gap-3 rounded-lg border-2 border-red-500 bg-white px-4 py-3 text-red-800 shadow-sm">
+                            <i class="bi bi-exclamation-triangle-fill mt-0.5 shrink-0 text-2xl text-red-600"></i>
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold uppercase tracking-wider text-red-500">Catatan penolakan</p>
+                                <p class="mt-1 text-base font-bold leading-snug text-red-800">{{ $opportunity->crm_margin_note }}</p>
+                            </div>
+                        </div>
+                    @else
+                        <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_margin_note }}</p>
+                    @endif
                 @endif
                 @if (($isMarginApproved || $isMarginRejected) && ($opportunity->marginReviewerName() || $opportunity->crm_margin_reviewed_at))
                     <p class="mt-1 text-xs opacity-80">
@@ -591,7 +611,7 @@
                 <span class="text-xs text-slate-400">{{ $products->count() }} item</span>
             </div>
             @if ($products->count())
-                <div class="mt-3 overflow-x-auto">
+                <div class="mt-3 crm-table-wrap crm-table-wrap--freeze">
                     <table class="crm-table min-w-[1080px]">
                         <thead>
                             <tr>

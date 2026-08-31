@@ -113,10 +113,54 @@ class CatalogExcel
 
     /**
      * @param  list<list<string|int|float>>  $rows
+     * @param  list<string>  $merges  Rentang merge, contoh: ['A2:A4', 'B2:B4']
      */
-    protected static function download(string $filename, array $rows, string $sheetName): StreamedResponse
+    public static function downloadCustom(string $filename, array $headers, array $rows, string $sheetName = 'Data', array $merges = []): StreamedResponse
     {
-        $binary = self::buildXlsx($rows, $sheetName);
+        return self::download($filename, $rows, $sheetName, $headers, $merges);
+    }
+
+    /**
+     * @return list<array<string, string>>
+     */
+    public static function parseToMaps(UploadedFile $file): array
+    {
+        $matrix = self::parseMatrix($file);
+        if ($matrix === []) {
+            return [];
+        }
+
+        $headerRow = array_shift($matrix);
+        $keys = [];
+        foreach ($headerRow as $i => $header) {
+            $normalized = self::normalizeHeader((string) $header);
+            if ($normalized !== '') {
+                $keys[$i] = $normalized;
+            }
+        }
+
+        $out = [];
+        foreach ($matrix as $row) {
+            $map = [];
+            foreach ($keys as $i => $key) {
+                $map[$key] = trim((string) ($row[$i] ?? ''));
+            }
+            if ($map === []) {
+                continue;
+            }
+            $out[] = $map;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  list<list<string|int|float>>  $rows
+     * @param  list<string>  $merges
+     */
+    protected static function download(string $filename, array $rows, string $sheetName, ?array $headers = null, array $merges = []): StreamedResponse
+    {
+        $binary = self::buildXlsx($rows, $sheetName, $headers, $merges);
 
         return response()->streamDownload(function () use ($binary) {
             echo $binary;
@@ -127,11 +171,13 @@ class CatalogExcel
 
     /**
      * @param  list<list<string|int|float>>  $rows
+     * @param  list<string>|null  $headers
+     * @param  list<string>  $merges
      */
-    protected static function buildXlsx(array $rows, string $sheetName): string
+    protected static function buildXlsx(array $rows, string $sheetName, ?array $headers = null, array $merges = []): string
     {
-        $sheetRows = array_merge([self::HEADERS], $rows);
-        $sheetXml = self::sheetXml($sheetRows);
+        $sheetRows = array_merge([$headers ?: self::HEADERS], $rows);
+        $sheetXml = self::sheetXml($sheetRows, $merges);
         $safeName = htmlspecialchars($sheetName !== '' ? $sheetName : 'Data', ENT_XML1 | ENT_QUOTES, 'UTF-8');
 
         $tmp = tempnam(sys_get_temp_dir(), 'catxlsx');
@@ -194,8 +240,9 @@ XML);
 
     /**
      * @param  list<list<string|int|float>>  $rows
+     * @param  list<string>  $merges
      */
-    protected static function sheetXml(array $rows): string
+    protected static function sheetXml(array $rows, array $merges = []): string
     {
         $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
@@ -205,6 +252,9 @@ XML);
             $xml .= '<row r="'.$rowNum.'">';
             foreach (array_values($row) as $cIndex => $value) {
                 $col = self::columnLetter($cIndex).$rowNum;
+                if ($value === '' || $value === null) {
+                    continue;
+                }
                 if (is_int($value) || is_float($value) || (is_string($value) && is_numeric($value) && ! preg_match('/^0\d+/', $value))) {
                     $xml .= '<c r="'.$col.'"><v>'.self::xml($value).'</v></c>';
                 } else {
@@ -214,7 +264,18 @@ XML);
             $xml .= '</row>';
         }
 
-        $xml .= '</sheetData></worksheet>';
+        $xml .= '</sheetData>';
+
+        $mergeRefs = array_values(array_filter($merges, fn ($ref) => is_string($ref) && preg_match('/^[A-Z]+\d+:[A-Z]+\d+$/', $ref)));
+        if ($mergeRefs !== []) {
+            $xml .= '<mergeCells count="'.count($mergeRefs).'">';
+            foreach ($mergeRefs as $ref) {
+                $xml .= '<mergeCell ref="'.self::xml($ref).'"/>';
+            }
+            $xml .= '</mergeCells>';
+        }
+
+        $xml .= '</worksheet>';
 
         return $xml;
     }
@@ -224,46 +285,36 @@ XML);
      */
     protected static function parseFile(UploadedFile $file): array
     {
+        $maps = self::parseToMaps($file);
+        $out = [];
+        foreach ($maps as $map) {
+            $name = trim((string) ($map['nama'] ?? $map['name'] ?? $map['nama_perusahaan'] ?? ''));
+            $out[] = [
+                'name' => $name,
+                'is_active' => self::parseActive($map['aktif'] ?? $map['is_active'] ?? 'ya'),
+                'sort_order' => self::parseSort($map['urutan'] ?? $map['sort_order'] ?? $map['order'] ?? 0),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    protected static function parseMatrix(UploadedFile $file): array
+    {
         $ext = strtolower((string) $file->getClientOriginalExtension());
         $path = $file->getRealPath();
         if ($path === false) {
             throw new \RuntimeException('File tidak dapat dibaca.');
         }
 
-        $matrix = match ($ext) {
+        return match ($ext) {
             'csv' => self::parseCsv($path),
             'xlsx' => self::parseXlsx($path),
             default => throw new \RuntimeException('Format file harus .xlsx atau .csv.'),
         };
-
-        if ($matrix === []) {
-            return [];
-        }
-
-        $headerRow = array_shift($matrix);
-        $keys = [];
-        foreach ($headerRow as $i => $header) {
-            $normalized = self::normalizeHeader((string) $header);
-            if ($normalized !== '') {
-                $keys[$i] = $normalized;
-            }
-        }
-
-        $out = [];
-        foreach ($matrix as $row) {
-            $map = [];
-            foreach ($keys as $i => $key) {
-                $map[$key] = $row[$i] ?? '';
-            }
-            $name = trim((string) ($map['nama'] ?? $map['name'] ?? ''));
-            $out[] = [
-                'name' => $name,
-                'is_active' => self::parseActive($map['aktif'] ?? $map['is_active'] ?? $map['status'] ?? 'ya'),
-                'sort_order' => self::parseSort($map['urutan'] ?? $map['sort_order'] ?? $map['order'] ?? 0),
-            ];
-        }
-
-        return $out;
     }
 
     /**
@@ -504,13 +555,23 @@ XML);
 
     protected static function normalizeHeader(string $header): string
     {
-        $h = Str::lower(trim($header));
+        $h = Str::lower(trim(preg_replace('/\s+/u', ' ', $header) ?? $header));
         $h = str_replace([' ', '-'], '_', $h);
 
         return match ($h) {
-            'name', 'brand', 'category', 'kategori', 'merek' => 'nama',
-            'is_active', 'status', 'active' => 'aktif',
+            'name', 'brand', 'category', 'kategori', 'merek', 'vendor', 'pemasok',
+            'nama_vendor', 'perusahaan', 'company', 'company_name' => 'nama',
+            'nama_perusahaan' => 'nama_perusahaan',
+            'status_perusahaan', 'company_status', 'status_vendor' => 'status_perusahaan',
+            'top', 'tempo', 'terms_of_payment', 'term_of_payment', 'payment_term', 'payment_terms' => 'top',
+            'nama_pic', 'pic', 'pic_name', 'contact', 'contact_name', 'contact_person',
+            'nama_kontak', 'nama_cp', 'person_in_charge', 'person', 'cp' => 'nama_pic',
+            'job_role', 'jabatan', 'role', 'posisi', 'job', 'title' => 'job_role',
+            'no_telp', 'no_telepon', 'telp', 'telepon', 'phone', 'hp', 'no_hp', 'no._telp' => 'no_telp',
+            'email', 'e_mail', 'mail' => 'email',
+            'is_active', 'active' => 'aktif',
             'sort_order', 'order', 'urut' => 'urutan',
+            'no', 'nomor', '#' => 'no',
             default => $h,
         };
     }

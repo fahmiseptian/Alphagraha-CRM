@@ -3,11 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ScopesToUser;
+use App\Models\Espo\Account;
+use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
 use App\Models\OpportunitySalesOrder;
+use App\Models\SalesOrderLog;
 use App\Services\CustomerAddressService;
 use App\Services\SalesOrderService;
 use App\Support\CustomerTop;
+use App\Support\OpportunityProductPricing;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -37,11 +41,11 @@ class OpportunitySalesOrderController extends Controller
 
         abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
 
-        $salesOrder->delete();
+        $this->salesOrders->archive($salesOrder, $opportunity, $user);
 
         return redirect()
             ->route('sales-orders.index')
-            ->with('success', 'Sales Order berhasil dihapus.');
+            ->with('success', 'Sales Order diarsipkan. Data tetap ada di Log SO (Superadmin).');
     }
 
     public function index(Request $request): View
@@ -49,26 +53,61 @@ class OpportunitySalesOrderController extends Controller
         /** @var \App\Models\User|null $user */
         $user = auth()->user();
 
-        if (! $user?->canCreateSalesOrder()) {
+        if (! $user?->canViewSalesOrders()) {
             abort(403);
         }
 
         $search = trim((string) $request->get('q', ''));
+        $accountId = trim((string) $request->get('account_id', ''));
+        if ($accountId !== '' && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
+            $accountId = '';
+        }
+        $companyFilter = trim((string) $request->get('company', ''));
+        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
+            $companyFilter = '';
+        }
+        $selectedUserId = $this->resolveAssignedUserFilter($request);
+        $period = $this->resolvePeriodFilter($request);
+        $periodRange = $this->periodDateRange($period);
+        $periodLabel = $this->periodLabel($period);
 
         $query = OpportunitySalesOrder::query()
-            ->with(['opportunity.account', 'creator'])
-            ->whereHas('opportunity', function ($q) use ($user) {
-                if ($user->canViewAllOpportunities()) {
-                    if ($user->isPurchasing() || $user->isFinance()) {
+            ->with(['opportunity.account', 'opportunity.purchaseOrders', 'creator'])
+            ->whereHas('opportunity', function ($q) use ($user, $accountId, $companyFilter, $selectedUserId) {
+                if ($user->canViewAllOpportunities()
+                    || $user->isProduct()
+                    || $user->isEkspedisi()) {
+                    if ($user->isPurchasing()
+                        || $user->isFinance()
+                        || $user->isProduct()
+                        || $user->isEkspedisi()) {
                         $q->where('stage', Opportunity::WON_STAGE);
                     }
-
-                    return;
+                } else {
+                    $q->where('assigned_user_id', $user->id);
                 }
 
-                $q->where('assigned_user_id', $user->id);
+                if ($accountId !== '') {
+                    $q->where('account_id', $accountId);
+                }
+
+                if ($companyFilter !== '') {
+                    $q->where('company', $companyFilter);
+                }
+
+                if ($selectedUserId !== null) {
+                    $q->where('assigned_user_id', $selectedUserId);
+                }
             })
             ->orderByDesc('created_at');
+
+        if ($periodRange !== null) {
+            [$start, $end] = $periodRange;
+            $query->whereBetween(
+                (new OpportunitySalesOrder)->getTable().'.created_at',
+                [$start, $end]
+            );
+        }
 
         if ($search !== '') {
             $this->applySalesOrderSearch($query, $search);
@@ -76,10 +115,92 @@ class OpportunitySalesOrderController extends Controller
 
         $salesOrders = $query->paginate(20)->withQueryString();
 
+        $filterAccounts = $this->scopeAssigned(Account::query())
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $salesUsers = $this->isAdmin()
+            ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
+            : collect();
+
         return view('sales-orders.index', [
             'salesOrders' => $salesOrders,
             'search' => $search,
+            'accountId' => $accountId,
+            'companyFilter' => $companyFilter,
+            'filterAccounts' => $filterAccounts,
+            'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $periodLabel,
+            'salesUsers' => $salesUsers,
+            'companies' => Opportunity::COMPANIES,
         ]);
+    }
+
+    /**
+     * @return string|null null = semua sales (hanya admin).
+     */
+    protected function resolveAssignedUserFilter(Request $request): ?string
+    {
+        if (! $this->isAdmin()) {
+            return null;
+        }
+
+        $raw = $request->input('assigned_user_id');
+
+        if (is_array($raw)) {
+            $raw = $raw[0] ?? '';
+        }
+
+        $id = trim((string) $raw);
+
+        if ($id === '') {
+            return null;
+        }
+
+        $exists = EspoUser::query()->activeSales()->where('id', $id)->exists();
+
+        return $exists ? $id : null;
+    }
+
+    protected function resolvePeriodFilter(Request $request): string
+    {
+        $period = (string) $request->get('period', 'year');
+
+        if (! in_array($period, ['year', 'month', '3months', '6months', 'alltime'], true)) {
+            return 'year';
+        }
+
+        return $period;
+    }
+
+    /**
+     * @return array{0: Carbon, 1: Carbon}|null
+     */
+    protected function periodDateRange(string $period): ?array
+    {
+        $now = Carbon::now();
+
+        return match ($period) {
+            'month' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+            '3months' => [$now->copy()->subMonthsNoOverflow(3)->startOfDay(), $now->copy()->endOfDay()],
+            '6months' => [$now->copy()->subMonthsNoOverflow(6)->startOfDay(), $now->copy()->endOfDay()],
+            'year' => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+            'alltime' => null,
+            default => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+        };
+    }
+
+    protected function periodLabel(string $period): string
+    {
+        return match ($period) {
+            'month' => 'bulan ini',
+            '3months' => '3 bulan terakhir',
+            '6months' => '6 bulan terakhir',
+            'year' => 'tahun ini',
+            'alltime' => 'semua waktu',
+            default => 'tahun ini',
+        };
     }
 
     protected function applySalesOrderSearch($query, string $search): void
@@ -197,7 +318,8 @@ class OpportunitySalesOrderController extends Controller
                 'name' => $product['name'] ?? null,
                 'brand' => $product['brand'] ?? '',
                 'category' => $product['category'] ?? '',
-                'sell_exclude' => (float) ($product['sell_exclude'] ?? 0),
+                'sell_exclude' => $this->soUnitExclude($product),
+                'discount_exclude' => (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0),
             ];
         })->values()->all();
 
@@ -256,6 +378,11 @@ class OpportunitySalesOrderController extends Controller
             return back()->withInput()->with('error', $e->getMessage());
         }
 
+        $this->salesOrders->recordLog($record, SalesOrderLog::ACTION_CREATED);
+
+        app(\App\Services\NotificationService::class)
+            ->notifySalesOrderCreated($record->loadMissing('creator'), $opportunity);
+
         $message = 'Sales Order berhasil dibuat ('.$record->number.').';
 
         if ($request->expectsJson()) {
@@ -274,19 +401,23 @@ class OpportunitySalesOrderController extends Controller
         $this->authorizeView($opportunity);
         abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
 
-        $opportunity->loadMissing(['account', 'quotation', 'contact']);
+        $opportunity->loadMissing(['account', 'quotation', 'contact', 'purchaseOrders']);
         $salesOrder->loadMissing('creator');
         $detail = $this->salesOrders->present($salesOrder, $opportunity);
 
         /** @var \App\Models\User|null $user */
         $user = auth()->user();
-        $canEdit = $user?->canCreateSalesOrder() && $opportunity->stage === Opportunity::WON_STAGE;
+        $canEdit = (bool) ($user?->canUpdateSalesOrderFields() && $opportunity->stage === Opportunity::WON_STAGE);
+        $canEditInvoice = (bool) ($user?->canEditSalesOrderInvoice() && $opportunity->stage === Opportunity::WON_STAGE);
+        $canEditDelivery = (bool) ($user?->canEditSalesOrderDelivery() && $opportunity->stage === Opportunity::WON_STAGE);
 
         return view('opportunities.sales-orders.show', [
             'opportunity' => $opportunity,
             'salesOrder' => $salesOrder,
             'detail' => $detail,
             'canEdit' => $canEdit,
+            'canEditInvoice' => $canEditInvoice,
+            'canEditDelivery' => $canEditDelivery,
             'editForm' => [
                 'updateUrl' => route('opportunities.sales-orders.update', [$opportunity, $salesOrder]),
                 'email' => (string) ($detail['email'] ?? ''),
@@ -345,7 +476,7 @@ class OpportunitySalesOrderController extends Controller
 
     public function update(Request $request, Opportunity $opportunity, OpportunitySalesOrder $salesOrder): JsonResponse|RedirectResponse
     {
-        $this->authorizeCreate($opportunity);
+        $this->authorizeUpdate($opportunity);
         abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
 
         $data = $request->validate([
@@ -372,11 +503,17 @@ class OpportunitySalesOrderController extends Controller
         if (filled($data['po_agc'] ?? null) && ! ($user?->isSuperAdmin() ?? false)) {
             abort(403, 'Hanya Superadmin yang boleh mengubah PO AGC.');
         }
-        if (array_key_exists('invoice_no', $data) && ! ($user?->isSuperAdmin() ?? false)) {
-            abort(403, 'Hanya Superadmin yang boleh mengubah Invoice.');
+        if ((array_key_exists('invoice_no', $data) || filled($data['invoice_dt'] ?? null))
+            && ! ($user?->canEditSalesOrderInvoice() ?? false)) {
+            abort(403, 'Anda tidak boleh mengubah Invoice.');
         }
-        if (filled($data['invoice_dt'] ?? null) && ! ($user?->isSuperAdmin() ?? false)) {
-            abort(403, 'Hanya Superadmin yang boleh mengubah Invoice Date.');
+        if ((array_key_exists('no_resi', $data)
+                || array_key_exists('shipping_method', $data)
+                || $request->hasFile('file_do_file')
+                || $request->boolean('mark_complete'))
+            && ! ($user?->canEditSalesOrderDelivery() ?? false)
+            && ! ($user?->canCreateSalesOrder() ?? false)) {
+            abort(403, 'Anda tidak boleh mengubah data DO / pengiriman.');
         }
 
         $snap = is_array($salesOrder->agc_payload) ? $salesOrder->agc_payload : [];
@@ -466,6 +603,11 @@ class OpportunitySalesOrderController extends Controller
         }
 
         $this->salesOrders->mergeSnapshot($salesOrder, $payload);
+        $this->salesOrders->recordLog(
+            $salesOrder->fresh(),
+            SalesOrderLog::ACTION_UPDATED,
+            array_keys($payload)
+        );
         $detail = $this->salesOrders->present($salesOrder->fresh(), $opportunity);
 
         if ($request->expectsJson()) {
@@ -487,6 +629,9 @@ class OpportunitySalesOrderController extends Controller
     protected function formPayload(Opportunity $opportunity): array
     {
         $items = $opportunity->products->values()->map(function ($p, $i) {
+            $list = (float) ($p['sell_exclude'] ?? 0);
+            $discount = (float) ($p['discount_exclude'] ?? $p['item_discount'] ?? 0);
+
             return [
                 'index' => $i,
                 'name' => (string) ($p['name'] ?? ''),
@@ -495,7 +640,9 @@ class OpportunitySalesOrderController extends Controller
                 'qty_origin' => (float) ($p['quantity'] ?? 1),
                 'brand' => (string) ($p['brand'] ?? ''),
                 'category' => (string) ($p['category'] ?? ''),
-                'sell_exclude' => (float) ($p['sell_exclude'] ?? 0),
+                'sell_exclude' => $this->soUnitExclude($p),
+                'list_sell_exclude' => $list,
+                'has_item_discount' => $discount > 0,
             ];
         })->all();
 
@@ -559,6 +706,21 @@ class OpportunitySalesOrderController extends Controller
         }
     }
 
+    protected function authorizeUpdate(Opportunity $opportunity): void
+    {
+        $this->authorizeView($opportunity);
+
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+        if (! $user?->canUpdateSalesOrderFields()) {
+            abort(403, 'Anda tidak dapat mengubah Sales Order.');
+        }
+
+        if ($opportunity->stage !== Opportunity::WON_STAGE) {
+            abort(403, 'Sales Order hanya untuk opportunity Closed Won.');
+        }
+    }
+
     protected function authorizeView(Opportunity $opportunity): void
     {
         $this->authorizeAccess($opportunity);
@@ -576,7 +738,10 @@ class OpportunitySalesOrderController extends Controller
             return;
         }
 
-        if ($user->isPurchasing() || $user->isFinance()) {
+        if ($user->isPurchasing()
+            || $user->isFinance()
+            || $user->isProduct()
+            || $user->isEkspedisi()) {
             if ($opportunity->stage !== Opportunity::WON_STAGE) {
                 abort(403, 'Akses hanya untuk deal Closed Won.');
             }
@@ -589,5 +754,18 @@ class OpportunitySalesOrderController extends Controller
         }
 
         abort(403, 'You do not have access to this opportunity.');
+    }
+
+    /**
+     * Harga exclude untuk SO: Diskon Item jika ada, selain itu Jual Excl.
+     *
+     * @param  array<string, mixed>  $product
+     */
+    protected function soUnitExclude(array $product): float
+    {
+        return OpportunityProductPricing::effectiveSellExclude(
+            (float) ($product['sell_exclude'] ?? 0),
+            (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0)
+        );
     }
 }

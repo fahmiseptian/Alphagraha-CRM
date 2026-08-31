@@ -9,7 +9,7 @@
 </x-page-header>
 
 <div class="mb-4 flex flex-wrap items-center gap-2">
-    @php $filters = ['upcoming'=>'Upcoming','overdue'=>'Overdue','completed'=>'Completed','all'=>'All']; @endphp
+    @php $filters = ['upcoming'=>'Upcoming','overdue'=>'Overdue','pending'=>'Menunggu approval','completed'=>'Completed','all'=>'All']; @endphp
     @foreach ($filters as $key => $label)
         <a href="{{ route('activities.index', ['filter' => $key, 'type' => $type]) }}"
            class="rounded-full px-4 py-1.5 text-sm font-medium transition {{ $filter === $key ? 'bg-brand-600 text-white shadow-sm' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50' }}">
@@ -39,6 +39,9 @@
                         <div class="flex flex-wrap items-center gap-2">
                             <p class="font-medium text-slate-800">{{ $activity->subject }}</p>
                             <x-badge :color="$activity->priority === 'high' ? 'red' : ($activity->priority === 'low' ? 'slate' : 'amber')">{{ ucfirst($activity->priority) }}</x-badge>
+                            @if ($activity->isEventTraining() && $activity->approvalLabel())
+                                <x-badge :color="$activity->approvalBadgeColor()">{{ $activity->approvalLabel() }}</x-badge>
+                            @endif
                         </div>
                         <p class="mt-0.5 text-xs text-slate-400">
                             {{ $activity->typeLabel() }}

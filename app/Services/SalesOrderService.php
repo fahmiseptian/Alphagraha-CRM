@@ -5,11 +5,14 @@ namespace App\Services;
 use App\Models\Espo\Opportunity;
 use App\Models\CustomerAddress;
 use App\Models\OpportunitySalesOrder;
+use App\Models\SalesOrderLog;
 use App\Models\User;
 use App\Support\CustomerTop;
 use App\Support\OpportunityProductPricing;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Sales Order lokal CRM (tanpa API AGC).
@@ -155,7 +158,9 @@ class SalesOrderService
         $itemTotal = 0.0;
         foreach ($items as $item) {
             $qty = (float) ($item['qty'] ?? 0);
-            $price = (float) ($item['sell_exclude'] ?? $item['price'] ?? 0);
+            $listPrice = (float) ($item['sell_exclude'] ?? $item['price'] ?? 0);
+            $itemDiscount = (float) ($item['discount_exclude'] ?? $item['item_discount'] ?? 0);
+            $price = OpportunityProductPricing::effectiveSellExclude($listPrice, $itemDiscount);
             $subtotal = $qty * $price;
             $itemTotal += $subtotal;
             $mappedItems[] = [
@@ -244,8 +249,15 @@ class SalesOrderService
                 'subtotal' => $subtotal,
                 'price_display' => (float) ($item['price_display'] ?? $price),
                 'amount_display' => (float) ($item['amount_display'] ?? $subtotal),
+                'index' => (int) ($item['index'] ?? $item['qty_origin'] ?? count($mappedItems)),
+                'description' => '',
+                'description_html' => '',
+                'image' => '',
+                'image_src' => null,
             ];
         }
+
+        $mappedItems = $this->attachQuotationSpecs($mappedItems, $opportunity);
 
         $itemTotal = (float) ($snap['total_price_item'] ?? collect($mappedItems)->sum('subtotal'));
         $ppnPercent = (float) ($snap['ppn_percent'] ?? OpportunityProductPricing::ppnPercent());
@@ -320,6 +332,106 @@ class SalesOrderService
     }
 
     /**
+     * Spek + gambar produk di SO diambil dari item Quotation (cocokkan nama, lalu index).
+     *
+     * @param  list<array<string, mixed>>  $mappedItems
+     * @return list<array<string, mixed>>
+     */
+    protected function attachQuotationSpecs(array $mappedItems, Opportunity $opportunity): array
+    {
+        $opportunity->loadMissing(['quotation.items']);
+        $qoItems = $opportunity->quotation?->items;
+        if (! $qoItems || $qoItems->isEmpty()) {
+            return $mappedItems;
+        }
+
+        $byName = [];
+        foreach ($qoItems as $qi) {
+            $key = mb_strtolower(trim((string) $qi->name));
+            if ($key !== '' && ! isset($byName[$key])) {
+                $byName[$key] = $qi;
+            }
+        }
+
+        $qoList = $qoItems->values();
+        $oppProducts = $opportunity->products->values();
+
+        foreach ($mappedItems as $i => $item) {
+            $nameKey = mb_strtolower(trim((string) ($item['name'] ?? '')));
+            $index = (int) ($item['index'] ?? $i);
+            $qo = $byName[$nameKey] ?? $qoList->get($index) ?? $qoList->get($i);
+            if (! $qo) {
+                continue;
+            }
+
+            $oppRow = $oppProducts->get($index) ?? $oppProducts->get($i) ?? [];
+            $oppImage = trim((string) (is_array($oppRow) ? ($oppRow['image'] ?? '') : ''));
+            $image = trim((string) ($qo->image ?? '')) ?: $oppImage;
+
+            $mappedItems[$i]['description'] = (string) ($qo->description ?? '');
+            $mappedItems[$i]['description_html'] = $this->sanitizeSpecHtml($qo->description);
+            $mappedItems[$i]['image'] = $image;
+            $mappedItems[$i]['image_src'] = $this->productImageDataUri($image);
+            if (($mappedItems[$i]['brand'] ?? '') === '') {
+                $mappedItems[$i]['brand'] = trim((string) ($qo->brand ?? ''));
+            }
+        }
+
+        return $mappedItems;
+    }
+
+    protected function sanitizeSpecHtml(?string $description): string
+    {
+        $description = trim((string) $description);
+        if ($description === '' || $description === '<p><br></p>' || $description === '<br>') {
+            return '';
+        }
+
+        if (strip_tags($description) !== $description) {
+            $clean = strip_tags(
+                $description,
+                '<p><br><br/><b><strong><i><em><u><ul><ol><li><a><span><div>'
+            );
+
+            return str_replace(
+                ['<ul>', '<ol>', '<li>'],
+                [
+                    '<ul style="margin:4px 0 6px 18px;padding-left:14px;list-style-type:disc;">',
+                    '<ol style="margin:4px 0 6px 18px;padding-left:14px;list-style-type:decimal;">',
+                    '<li style="margin:2px 0;display:list-item;">',
+                ],
+                $clean
+            );
+        }
+
+        return nl2br(e($description));
+    }
+
+    protected function productImageDataUri(?string $path): ?string
+    {
+        $path = trim((string) $path);
+        if ($path === '') {
+            return null;
+        }
+        if (str_starts_with($path, 'data:')) {
+            return $path;
+        }
+
+        $relative = preg_replace('#^/?storage/#', '', $path) ?: $path;
+        $absolute = Storage::disk('public')->path($relative);
+        if (! is_file($absolute)) {
+            $absolute = public_path(ltrim($path, '/'));
+        }
+        if (! is_file($absolute)) {
+            return null;
+        }
+
+        $mime = mime_content_type($absolute) ?: 'image/png';
+
+        return 'data:'.$mime.';base64,'.base64_encode((string) file_get_contents($absolute));
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      */
     public function mergeSnapshot(OpportunitySalesOrder $salesOrder, array $payload): void
@@ -350,6 +462,52 @@ class SalesOrderService
         }
 
         $salesOrder->save();
+    }
+
+    /**
+     * Catat aksi SO untuk log Superadmin.
+     *
+     * @param  array<string, mixed>|null  $changes
+     */
+    public function recordLog(OpportunitySalesOrder $salesOrder, string $action, ?array $changes = null, ?User $actor = null): SalesOrderLog
+    {
+        $actor ??= auth()->user();
+
+        return SalesOrderLog::query()->create([
+            'sales_order_id' => $salesOrder->id,
+            'opportunity_id' => $salesOrder->opportunity_id,
+            'action' => $action,
+            'number' => $salesOrder->displayNumber(),
+            'actor_id' => $actor?->id,
+            'actor_name' => $actor?->display_name,
+            'snapshot' => $salesOrder->toLogSnapshot(),
+            'changes' => $changes,
+            'ip_address' => request()?->ip(),
+            'created_at' => now(),
+        ]);
+    }
+
+    /**
+     * Arsipkan SO (soft delete). Nomor SO tidak dipakai ulang.
+     */
+    public function archive(OpportunitySalesOrder $salesOrder, Opportunity $opportunity, ?User $actor = null): void
+    {
+        $actor ??= auth()->user();
+
+        DB::transaction(function () use ($salesOrder, $opportunity, $actor) {
+            $salesOrder->deleted_by = $actor?->id;
+            $salesOrder->save();
+
+            $this->recordLog($salesOrder, SalesOrderLog::ACTION_DELETED, null, $actor);
+            $salesOrder->delete();
+
+            $latest = $opportunity->salesOrders()->latest('id')->first();
+            $opportunity->crm_sales_order_id = $latest?->id;
+            $opportunity->crm_sales_order_no = $latest?->number;
+            $opportunity->modified_at = now()->format('Y-m-d H:i:s');
+            $opportunity->modified_by_id = $actor?->id;
+            $opportunity->save();
+        });
     }
 
     public function storeDocument(?UploadedFile $file, OpportunitySalesOrder $salesOrder, string $kind): ?string
@@ -443,6 +601,7 @@ class SalesOrderService
     {
         $needle = $prefix.$ymd;
         $query = OpportunitySalesOrder::query()
+            ->withTrashed()
             ->where('number', 'like', $needle.'%');
 
         if ($lock) {
@@ -465,6 +624,7 @@ class SalesOrderService
     protected function nextRefYearlySequence(string $prefix, int $year, string $yy, bool $lock = true): int
     {
         $query = OpportunitySalesOrder::query()
+            ->withTrashed()
             ->where(function ($q) use ($year, $yy) {
                 $q->whereYear('created_at', $year)
                     ->orWhere('nomor_ref', 'like', '%/'.$yy)

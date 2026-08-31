@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Activity;
 use App\Models\CrmNotification;
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunitySalesOrder;
 use App\Models\Quotation;
 use App\Models\User;
 use Carbon\Carbon;
@@ -554,6 +555,12 @@ class NotificationService
             'quotation_id',
             'margin_request:'
         );
+        $this->dedupePendingByDataKey(
+            $userId,
+            CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
+            'activity_id',
+            'event_approval:'
+        );
     }
 
     protected function dedupePendingByDataKey(
@@ -792,7 +799,9 @@ class NotificationService
                 CrmNotification::TYPE_DISCOUNT_REQUESTED,
                 CrmNotification::TYPE_MARGIN_REQUESTED,
                 CrmNotification::TYPE_ACTIVITY_DUE,
+                CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
                 CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
+                CrmNotification::TYPE_SALES_ORDER_CREATED,
             ])
             ->update([
                 'read_at' => now(),
@@ -836,12 +845,13 @@ class NotificationService
         string $uniqueKey,
         ?string $opportunityId = null,
         int|string|null $quotationId = null,
+        int|string|null $activityId = null,
     ): void {
         CrmNotification::query()
             ->where('user_id', $userId)
-            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId) {
+            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId, $activityId) {
                 $q->where('unique_key', $uniqueKey)
-                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId) {
+                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId, $activityId) {
                         $q2->where('type', $type)
                             ->whereNull('read_at');
 
@@ -850,6 +860,9 @@ class NotificationService
                         }
                         if ($quotationId) {
                             $q2->where('data->quotation_id', $quotationId);
+                        }
+                        if ($activityId) {
+                            $q2->where('data->activity_id', $activityId);
                         }
                     });
             })
@@ -919,6 +932,115 @@ class NotificationService
         ]);
     }
 
+    public function notifyEventApprovalRequested(Activity $activity): void
+    {
+        if (! $activity->isEventApprovalPending()) {
+            return;
+        }
+
+        $requesterId = $activity->assigned_to ?: $activity->created_by;
+        $requester = $requesterId
+            ? User::query()->whereKey($requesterId)->first()
+            : null;
+        $requesterName = $requester?->display_name ?? 'Sales';
+        $dueLabel = $activity->due_at
+            ? $activity->due_at->translatedFormat('d M Y H:i')
+            : 'tanpa tanggal';
+
+        $link = route('activities.edit', $activity);
+        $title = 'Approval Event/Training';
+        $body = $requesterName.' mengajukan Event/Training "'.$activity->subject.'" ('.$dueLabel.').';
+
+        $superAdminIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SUPERADMIN))
+            ->pluck('id')
+            ->filter(fn ($id) => $id !== $requesterId)
+            ->values();
+
+        foreach ($superAdminIds as $userId) {
+            $uniqueKey = 'event_approval:'.$activity->id;
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
+                $uniqueKey,
+                activityId: $activity->id,
+            );
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey,
+                data: [
+                    'activity_id' => $activity->id,
+                    'sales_user_id' => $requesterId,
+                    'requested_by' => $requesterId,
+                ],
+            );
+        }
+    }
+
+    public function notifyEventApproved(Activity $activity, ?string $note = null): void
+    {
+        $userId = $activity->assigned_to ?: $activity->created_by;
+        if (! $userId) {
+            return;
+        }
+
+        $actor = $this->actorName($activity->approved_by ?: auth()->id());
+        $body = 'Event/Training "'.$activity->subject.'" telah disetujui oleh '.$actor.'.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notify(
+            $userId,
+            CrmNotification::TYPE_EVENT_APPROVED,
+            'Event/Training disetujui',
+            $body,
+            route('activities.edit', $activity),
+            showPopup: true,
+            uniqueKey: 'event_approved:'.$activity->id.':'.uniqid('', true),
+            data: array_merge(
+                ['activity_id' => $activity->id],
+                $this->actorPayload($activity->approved_by ?: auth()->id())
+            ),
+        );
+    }
+
+    public function notifyEventRejected(Activity $activity, ?string $note = null): void
+    {
+        $userId = $activity->assigned_to ?: $activity->created_by;
+        if (! $userId) {
+            return;
+        }
+
+        $actor = $this->actorName($activity->approved_by ?: auth()->id());
+        $body = 'Event/Training "'.$activity->subject.'" ditolak oleh '.$actor.'.';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notify(
+            $userId,
+            CrmNotification::TYPE_EVENT_REJECTED,
+            'Event/Training ditolak',
+            $body,
+            route('activities.edit', $activity),
+            showPopup: true,
+            uniqueKey: 'event_rejected:'.$activity->id.':'.uniqid('', true),
+            data: array_merge(
+                ['activity_id' => $activity->id],
+                $this->actorPayload($activity->approved_by ?: auth()->id())
+            ),
+        );
+    }
+
     public function markActivityDueActioned(Activity $activity): void
     {
         $this->markActioned(CrmNotification::TYPE_ACTIVITY_DUE, [
@@ -926,10 +1048,70 @@ class NotificationService
         ]);
     }
 
+    public function markEventApprovalActioned(int|string $activityId): void
+    {
+        $this->markActioned(CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED, [
+            'activity_id' => $activityId,
+        ]);
+    }
+
     public function markOpportunityDeadlineActioned(Opportunity $opportunity): void
     {
         $this->markActioned(CrmNotification::TYPE_OPPORTUNITY_DEADLINE, [
             'opportunity_id' => $opportunity->id,
+        ]);
+    }
+
+    /**
+     * Notifikasi ke Purchasing saat Sales membuat SO,
+     * agar proses PO / kelanjutan deal bisa dilanjutkan.
+     * Superadmin tidak menerima notifikasi ini.
+     */
+    public function notifySalesOrderCreated(OpportunitySalesOrder $salesOrder, Opportunity $opportunity): void
+    {
+        $creator = $salesOrder->creator
+            ?? ($salesOrder->created_by ? User::query()->whereKey($salesOrder->created_by)->first() : null);
+        $creatorName = $creator?->display_name ?: 'Sales';
+        $soNumber = $salesOrder->displayNumber();
+        $oppName = $opportunity->name ?: $opportunity->id;
+
+        $title = 'Sales Order baru — lanjutkan proses';
+        $body = $creatorName.' membuat SO '.$soNumber.' untuk Opportunity "'.$oppName.'". Silakan lanjutkan proses pembelian (PO / modal & vendor).';
+        $link = route('opportunities.purchase-orders.index', $opportunity);
+        $uniqueKey = 'sales_order_created:'.$salesOrder->id;
+
+        $recipientIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_PURCHASING))
+            ->pluck('id')
+            ->filter(fn ($id) => (string) $id !== (string) $salesOrder->created_by)
+            ->values();
+
+        foreach ($recipientIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_SALES_ORDER_CREATED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey.':'.$userId,
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'sales_order_id' => $salesOrder->id,
+                    'sales_order_number' => $soNumber,
+                    'created_by' => $salesOrder->created_by,
+                    'created_by_name' => $creatorName,
+                ],
+            );
+        }
+    }
+
+    public function markSalesOrderCreatedActioned(int|string $salesOrderId): void
+    {
+        $this->markActioned(CrmNotification::TYPE_SALES_ORDER_CREATED, [
+            'sales_order_id' => $salesOrderId,
         ]);
     }
 

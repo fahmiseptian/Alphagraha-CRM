@@ -6,6 +6,7 @@ use App\Support\OpportunityProductPricing;
 use App\Support\PurchaseOrderPricing;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseOrderItem extends Model
 {
@@ -13,7 +14,10 @@ class PurchaseOrderItem extends Model
 
     protected $fillable = [
         'purchase_order_id',
+        'opportunity_product_name',
+        'opportunity_product_key',
         'product_name',
+        'brand',
         'quantity',
         'description',
         'note',
@@ -31,6 +35,20 @@ class PurchaseOrderItem extends Model
     public function purchaseOrder(): BelongsTo
     {
         return $this->belongsTo(PurchaseOrder::class);
+    }
+
+    public function vendorQuotes(): HasMany
+    {
+        return $this->hasMany(PurchaseOrderItemVendor::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function selectedVendorQuote(): ?PurchaseOrderItemVendor
+    {
+        $quotes = $this->relationLoaded('vendorQuotes')
+            ? $this->vendorQuotes
+            : $this->vendorQuotes()->get();
+
+        return $quotes->firstWhere('is_selected', true) ?? $quotes->first();
     }
 
     /**

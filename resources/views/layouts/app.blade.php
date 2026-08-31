@@ -100,15 +100,31 @@
                 $nav = [
                     ['dashboard', 'Dashboard', 'bi-grid-1x2'],
                 ];
-                if (! $user->isPurchasing() && ! $user->isFinance()) {
+                if ($user->canViewCustomers()) {
                     $nav[] = ['customers.index', 'Customers', 'bi-people'];
+                }
+                if ($user->canCreateOpportunity() || ($user->canViewOpportunities() && ! $user->isPurchasing() && ! $user->isFinance())) {
                     $nav[] = ['leads.index', 'Leads', 'bi-funnel'];
                 }
-                $nav[] = ['opportunities.index', 'Opportunities', 'bi-briefcase'];
-                if ($user->canCreateSalesOrder()) {
+                if ($user->canViewOpportunities() && ! $user->isFinance()) {
+                    $nav[] = ['opportunities.index', 'Opportunities', 'bi-briefcase'];
+                }
+                if ($user->canViewSalesOrders()) {
                     $nav[] = ['sales-orders.index', 'SO', 'bi-receipt'];
                 }
-                if (! $user->isPurchasing() && ! $user->isFinance()) {
+                if ($user->canManageVendorStocks()) {
+                    $nav[] = ['vendor-stocks.index', 'Ketersediaan Vendor', 'bi-boxes'];
+                }
+                if ($user->canManageVendors() && ! $user->canAccessAdministration()) {
+                    $nav[] = ['vendors.index', 'Vendors', 'bi-truck'];
+                }
+                if ($user->canManageBrands() && ! $user->canAccessAdministration()) {
+                    $nav[] = ['brands.index', 'Brands', 'bi-tags'];
+                }
+                if ($user->canManageCategories() && ! $user->canAccessAdministration()) {
+                    $nav[] = ['categories.index', 'Categories', 'bi-folder'];
+                }
+                if ($user->canCreateOpportunity() || $user->isAdmin()) {
                     $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
                 }
                 if ($user->canCreateQuotation()) {
@@ -154,6 +170,18 @@
                           {{ request()->routeIs('categories.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
                     <i class="bi bi-folder shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Categories</span>
+                </a>
+                <a href="{{ route('vendors.index') }}" title="Vendors"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('vendors.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-truck shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Vendors</span>
+                </a>
+                <a href="{{ route('sales-order-logs.index') }}" title="Log SO"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('sales-order-logs.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-journal-text shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Log SO</span>
                 </a>
                 <a href="{{ route('templates.index') }}" title="Quotation Templates"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
@@ -322,7 +350,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 <script src="{{ asset('js/crm-number.js') }}"></script>
-<script src="{{ asset('js/crm-select2.js') }}"></script>
+<script src="{{ asset('js/crm-select2.js') }}?v=20260826b"></script>
 @stack('scripts')
 </body>
 </html>

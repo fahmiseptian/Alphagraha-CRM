@@ -3,6 +3,7 @@
     'templateRoute',
     'importRoute',
     'label' => 'data',
+    'hint' => 'Kolom: nama, aktif (ya/tidak), urutan. Nama yang sama akan diperbarui.',
 ])
 
 <div class="flex flex-wrap items-center gap-2">
@@ -19,4 +20,4 @@
         </label>
     </form>
 </div>
-<p class="mt-1 text-[11px] text-slate-400">Kolom: nama, aktif (ya/tidak), urutan. Nama yang sama akan diperbarui.</p>
+<p class="mt-1 text-[11px] text-slate-400">{{ $hint }}</p>

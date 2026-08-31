@@ -25,16 +25,22 @@ class User extends Authenticatable
 
     public const ROLE_SALES = 'sales';
 
+    public const ROLE_PRODUCT = 'product';
+
     public const ROLE_PURCHASING = 'purchasing';
 
     public const ROLE_FINANCE = 'finance';
+
+    public const ROLE_EKSPEDISI = 'ekspedisi';
 
     public const ROLES = [
         self::ROLE_SUPERADMIN => 'Superadmin',
         self::ROLE_ADMIN => 'Admin',
         self::ROLE_SALES => 'Sales',
+        self::ROLE_PRODUCT => 'Product',
         self::ROLE_PURCHASING => 'Purchasing',
         self::ROLE_FINANCE => 'Finance',
+        self::ROLE_EKSPEDISI => 'Ekspedisi',
     ];
 
     protected $table = 'user';
@@ -102,6 +108,11 @@ class User extends Authenticatable
         return $this->role === self::ROLE_SALES;
     }
 
+    public function isProduct(): bool
+    {
+        return $this->role === self::ROLE_PRODUCT;
+    }
+
     public function isPurchasing(): bool
     {
         return $this->role === self::ROLE_PURCHASING;
@@ -112,9 +123,49 @@ class User extends Authenticatable
         return $this->role === self::ROLE_FINANCE;
     }
 
+    public function isEkspedisi(): bool
+    {
+        return $this->role === self::ROLE_EKSPEDISI;
+    }
+
     public function canAccessAdministration(): bool
     {
         return $this->isSuperAdmin();
+    }
+
+    /** Brand master: Superadmin, Product */
+    public function canManageBrands(): bool
+    {
+        return $this->isSuperAdmin() || $this->isProduct();
+    }
+
+    /** Kategori master: Superadmin, Product */
+    public function canManageCategories(): bool
+    {
+        return $this->isSuperAdmin() || $this->isProduct();
+    }
+
+    /** Vendor master: Superadmin, Product, Purchasing */
+    public function canManageVendors(): bool
+    {
+        return $this->isSuperAdmin() || $this->isProduct() || $this->isPurchasing();
+    }
+
+    /** Customer: Sales/Admin/Superadmin + Purchasing + Finance */
+    public function canViewCustomers(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+            self::ROLE_PURCHASING,
+            self::ROLE_FINANCE,
+        ], true);
+    }
+
+    public function canViewOpportunities(): bool
+    {
+        return ! $this->isProduct() && ! $this->isEkspedisi();
     }
 
     public function canCreateOpportunity(): bool
@@ -151,12 +202,55 @@ class User extends Authenticatable
         return $this->canEditOpportunityFully();
     }
 
+    public function canViewSalesOrders(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+            self::ROLE_PRODUCT,
+            self::ROLE_PURCHASING,
+            self::ROLE_FINANCE,
+            self::ROLE_EKSPEDISI,
+        ], true);
+    }
+
+    /** Invoice di SO: Finance + Superadmin */
+    public function canEditSalesOrderInvoice(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin();
+    }
+
+    /** DO / resi / file DO: Finance + Ekspedisi + Superadmin */
+    public function canEditSalesOrderDelivery(): bool
+    {
+        return $this->isFinance() || $this->isEkspedisi() || $this->isSuperAdmin();
+    }
+
+    /** Boleh update field SO (invoice/DO/dll) tanpa harus bisa create SO */
+    public function canUpdateSalesOrderFields(): bool
+    {
+        return $this->canCreateSalesOrder()
+            || $this->canEditSalesOrderInvoice()
+            || $this->canEditSalesOrderDelivery();
+    }
+
+    public function canViewSalesOrderLogs(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     public function canApproveDiscount(): bool
     {
         return $this->isSuperAdmin();
     }
 
     public function canApproveMargin(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canApproveEventTraining(): bool
     {
         return $this->isSuperAdmin();
     }
@@ -176,6 +270,23 @@ class User extends Authenticatable
         return $this->isPurchasing() || $this->isSuperAdmin();
     }
 
+    /** Lihat PO (read-only): sales, admin, finance, purchasing, superadmin — Closed Won. */
+    public function canViewPurchaseOrders(): bool
+    {
+        return in_array($this->role, [
+            self::ROLE_SUPERADMIN,
+            self::ROLE_ADMIN,
+            self::ROLE_SALES,
+            self::ROLE_PURCHASING,
+            self::ROLE_FINANCE,
+        ], true);
+    }
+
+    public function canManageVendorStocks(): bool
+    {
+        return $this->canManagePurchaseOrders();
+    }
+
     public function canViewWonFinance(): bool
     {
         return $this->isFinance() || $this->isSuperAdmin() || $this->isAdmin();
@@ -187,16 +298,14 @@ class User extends Authenticatable
             self::ROLE_SUPERADMIN,
             self::ROLE_ADMIN,
             self::ROLE_SALES,
+            self::ROLE_PURCHASING,
+            self::ROLE_FINANCE,
         ], true);
     }
 
     public function canEditCustomerContact(): bool
     {
-        return in_array($this->role, [
-            self::ROLE_SUPERADMIN,
-            self::ROLE_ADMIN,
-            self::ROLE_SALES,
-        ], true);
+        return $this->canCreateCustomerContact();
     }
 
     public function canDeleteCustomerContact(): bool
@@ -210,6 +319,8 @@ class User extends Authenticatable
             self::ROLE_SUPERADMIN,
             self::ROLE_ADMIN,
             self::ROLE_SALES,
+            self::ROLE_PURCHASING,
+            self::ROLE_FINANCE,
         ], true);
     }
 

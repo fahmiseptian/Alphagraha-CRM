@@ -197,3 +197,67 @@
         </td>
     </tr>
 </table>
+
+@php
+    $specItems = collect($detail['items'] ?? []);
+    $hasQuotationSpecs = $specItems->contains(fn ($item) => filled($item['description_html'] ?? '') || filled($item['image_src'] ?? ''));
+@endphp
+@if ($hasQuotationSpecs)
+<div class="so-page-break"></div>
+
+<table style="width: 100%; border-collapse: collapse; border-bottom: 1px solid #424242; margin-bottom: 6px;">
+    <tr>
+        <td style="vertical-align: top; padding: 4px 0 8px;">
+            @if ($kopBase64)
+                <img src="{{ $kopBase64 }}" style="width: 420px; height: auto;">
+            @endif
+        </td>
+        <td style="vertical-align: top; text-align: right; padding: 4px 0 8px;">
+            <span style="font-size: 16px; font-weight: 700;">{{ $docTitle }}</span><br>
+            <span>Nr</span><br>
+            <span style="font-size: 14px; border-bottom: 1px solid #000000;">{{ $soCode }}</span>
+        </td>
+    </tr>
+</table>
+
+<p style="font-size: 13px; font-weight: 700; margin: 8px 0 10px; text-transform: uppercase;">Spesifikasi Produk</p>
+
+<table style="width: 100%; border-collapse: collapse; border: 1px solid #424242;">
+    <thead>
+        <tr>
+            <th style="border: 0.5px solid #424242; padding: 5px; width: 36px;">No.</th>
+            <th style="border: 0.5px solid #424242; padding: 5px;">Spesifikasi</th>
+            <th style="border: 0.5px solid #424242; padding: 5px; width: 90px;">Gambar</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach ($specItems as $i => $item)
+            <tr>
+                <td style="border: 0.5px solid #424242; padding: 6px; text-align: center; vertical-align: top;">{{ $i + 1 }}</td>
+                <td style="border: 0.5px solid #424242; padding: 6px; vertical-align: top;">
+                    @if (! empty($item['brand']))
+                        <strong>{{ $item['brand'] }} - </strong>{{ $item['name'] ?? '—' }}
+                    @else
+                        <strong>{{ $item['name'] ?? '—' }}</strong>
+                    @endif
+                    @if (! empty($item['category']))
+                        <span style="display: block; font-size: 10px; color: #444;">{{ $item['category'] }}</span>
+                    @endif
+                    @if (! empty($item['description_html']))
+                        <div class="so-spec-html" style="margin-top: 6px; font-size: 10px; line-height: 1.35;">
+                            {!! $item['description_html'] !!}
+                        </div>
+                    @endif
+                </td>
+                <td style="border: 0.5px solid #424242; padding: 6px; text-align: center; vertical-align: middle;">
+                    @if (! empty($item['image_src']))
+                        <img src="{{ $item['image_src'] }}" alt="" style="max-height: 90px; max-width: 80px; object-fit: contain;">
+                    @else
+                        —
+                    @endif
+                </td>
+            </tr>
+        @endforeach
+    </tbody>
+</table>
+@endif

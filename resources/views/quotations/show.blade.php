@@ -78,7 +78,17 @@
                     / <strong>{{ money($quotation->crm_margin_nominal_threshold) }}</strong>
                 </p>
                 @if ($quotation->crm_margin_note)
-                    <p class="mt-1 text-xs text-slate-500">Catatan: {{ $quotation->crm_margin_note }}</p>
+                    @if ($quotation->crm_margin_status === 'rejected')
+                        <div class="mt-3 flex items-start gap-3 rounded-lg border-2 border-red-500 bg-white px-4 py-3 text-red-800 shadow-sm">
+                            <i class="bi bi-exclamation-triangle-fill mt-0.5 shrink-0 text-2xl text-red-600"></i>
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold uppercase tracking-wider text-red-500">Catatan penolakan</p>
+                                <p class="mt-1 text-base font-bold leading-snug text-red-800">{{ $quotation->crm_margin_note }}</p>
+                            </div>
+                        </div>
+                    @else
+                        <p class="mt-1 text-xs text-slate-500">Catatan: {{ $quotation->crm_margin_note }}</p>
+                    @endif
                 @endif
                 @if (in_array($quotation->crm_margin_status, [\App\Models\Quotation::MARGIN_APPROVED, \App\Models\Quotation::MARGIN_REJECTED], true)
                     && ($quotation->marginReviewerName() || $quotation->crm_margin_reviewed_at))

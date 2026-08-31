@@ -23,3 +23,22 @@ small {
     font-size: 10px;
     line-height: 1.3;
 }
+
+.so-page-break {
+    page-break-before: always;
+    break-before: page;
+}
+
+.so-spec-html p {
+    margin: 0 0 4px;
+}
+
+.so-spec-html ul,
+.so-spec-html ol {
+    margin: 4px 0 6px 18px;
+    padding-left: 14px;
+}
+
+.so-spec-html li {
+    margin: 2px 0;
+}

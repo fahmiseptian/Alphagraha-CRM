@@ -216,3 +216,86 @@
 
 .bootstrap-table .float-left { float: none; }
 .bootstrap-table .float-right { float: none; }
+
+.bootstrap-table th.detail,
+.bootstrap-table td.detail {
+    width: 2.5rem !important;
+    min-width: 2.5rem;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.bootstrap-table .detail-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 0.375rem;
+    color: #334155;
+    background: #f1f5f9;
+    text-decoration: none;
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.bootstrap-table .detail-icon:hover {
+    background: #e2e8f0;
+    color: #2563eb;
+}
+
+.bootstrap-table .detail-view > td {
+    background: #f8fafc;
+    padding: 0;
+}
+
+.bootstrap-table tr.detail-view:hover {
+    background: transparent;
+}
+
+.vendor-pic-detail {
+    padding: 0.75rem 1.25rem 1rem 3rem;
+}
+
+.vendor-pic-empty {
+    margin: 0;
+    padding: 0.75rem 1.25rem 1rem 3rem;
+    font-size: 0.8125rem;
+    color: #94a3b8;
+}
+
+.vendor-pic-detail table {
+    width: 100%;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: #fff;
+    font-size: 0.8125rem;
+}
+
+.vendor-pic-detail th {
+    padding: 0.5rem 0.75rem;
+    background: #f8fafc;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+    text-align: left;
+}
+
+.vendor-pic-detail td {
+    padding: 0.55rem 0.75rem;
+    color: #475569;
+    border-top: 1px solid #f1f5f9;
+    vertical-align: middle;
+}
+
+.vendor-pic-detail a {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.vendor-pic-detail a:hover {
+    text-decoration: underline;
+}

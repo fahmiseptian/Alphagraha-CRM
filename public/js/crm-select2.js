@@ -78,7 +78,7 @@
     window.CrmSelect2 = {
         init(root) {
             const $scope = root ? $(root) : $(document);
-            $scope.find('select.select2').not('[data-brand-select]').each(function () {
+            $scope.find('select.select2').not('[data-brand-select], [data-category-select], [data-vendor-select], [data-po-vendor-select], [data-po-select2]').each(function () {
                 window.CrmSelect2.initElement(this);
             });
         },
@@ -161,10 +161,52 @@
         },
     };
 
+    function initPoSelect2(el) {
+        const $el = $(el);
+        if (!$el.length || $el.hasClass('select2-hidden-accessible')) {
+            return;
+        }
+
+        $el.select2({
+            width: '100%',
+            placeholder: $el.data('placeholder') || $el.find('option[value=""]').first().text() || '— Pilih —',
+            allowClear: true,
+            minimumResultsForSearch: 0,
+            dropdownParent: $(document.body),
+            language: {
+                noResults: () => 'Tidak ditemukan',
+                searching: () => 'Mencari...',
+            },
+        });
+
+        $el.on('select2:select.crmPoDyn select2:clear.crmPoDyn', function () {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+
+    function scanPoSelect2() {
+        document.querySelectorAll('select[data-po-select2]').forEach(initPoSelect2);
+    }
+
     $(function () {
         const main = document.querySelector('main');
         if (main) {
             window.CrmSelect2.init(main);
         }
+
+        let poSelect2Timer = null;
+        const schedulePoSelect2 = function () {
+            window.clearTimeout(poSelect2Timer);
+            poSelect2Timer = window.setTimeout(scanPoSelect2, 40);
+        };
+
+        scanPoSelect2();
+        if (document.body) {
+            const observer = new MutationObserver(schedulePoSelect2);
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+        document.addEventListener('alpine:initialized', schedulePoSelect2);
+        document.addEventListener('alpine:init', schedulePoSelect2);
     });
 })(jQuery);

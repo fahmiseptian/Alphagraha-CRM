@@ -4,9 +4,11 @@ use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActivityMediaController;
 use App\Http\Controllers\Admin\BrandController;
 use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Admin\SalesOrderLogController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\TemplateController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Admin\VendorController;
 use App\Http\Controllers\Admin\WilayahController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ContactController;
@@ -22,6 +24,7 @@ use App\Http\Controllers\OpportunityNoteController;
 use App\Http\Controllers\OpportunityPurchaseOrderController;
 use App\Http\Controllers\OpportunitySalesOrderController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\VendorStockController;
 use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\WilayahLookupController;
 use Illuminate\Support\Facades\Artisan;
@@ -106,12 +109,20 @@ Route::middleware('auth')->group(function () {
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
     Route::post('/opportunities/{opportunity}/notes', [OpportunityNoteController::class, 'store'])->name('opportunities.notes.store');
     Route::delete('/opportunities/{opportunity}/notes/{note}', [OpportunityNoteController::class, 'destroy'])->name('opportunities.notes.destroy');
+    Route::get('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'index'])->name('opportunities.purchase-orders.index');
     Route::get('/opportunities/{opportunity}/purchase-orders/preview', [OpportunityPurchaseOrderController::class, 'preview'])->name('opportunities.purchase-orders.preview');
     Route::get('/opportunities/{opportunity}/purchase-orders/pdf', [OpportunityPurchaseOrderController::class, 'pdf'])->name('opportunities.purchase-orders.pdf');
     Route::post('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'store'])->name('opportunities.purchase-orders.store');
     Route::put('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'update'])->name('opportunities.purchase-orders.update');
     Route::delete('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'destroy'])->name('opportunities.purchase-orders.destroy');
     Route::put('/opportunities/{opportunity}/shipping-cost', [OpportunityPurchaseOrderController::class, 'updateShipping'])->name('opportunities.shipping-cost.update');
+
+    Route::get('/vendor-stocks', [VendorStockController::class, 'index'])->name('vendor-stocks.index');
+    Route::get('/vendor-stocks/create', [VendorStockController::class, 'create'])->name('vendor-stocks.create');
+    Route::post('/vendor-stocks', [VendorStockController::class, 'store'])->name('vendor-stocks.store');
+    Route::get('/vendor-stocks/{vendorStock}/edit', [VendorStockController::class, 'edit'])->name('vendor-stocks.edit');
+    Route::put('/vendor-stocks/{vendorStock}', [VendorStockController::class, 'update'])->name('vendor-stocks.update');
+    Route::delete('/vendor-stocks/{vendorStock}', [VendorStockController::class, 'destroy'])->name('vendor-stocks.destroy');
 
     Route::get('/sales-orders', [OpportunitySalesOrderController::class, 'index'])->name('sales-orders.index');
     Route::get('/opportunities/{opportunity}/sales-orders/create', [OpportunitySalesOrderController::class, 'create'])->name('opportunities.sales-orders.create');
@@ -125,6 +136,8 @@ Route::middleware('auth')->group(function () {
     // Aktivitas & Task
     Route::resource('activities', ActivityController::class)->except(['show']);
     Route::patch('/activities/{activity}/complete', [ActivityController::class, 'complete'])->name('activities.complete');
+    Route::post('/activities/{activity}/approve', [ActivityController::class, 'approve'])->name('activities.approve');
+    Route::post('/activities/{activity}/reject', [ActivityController::class, 'reject'])->name('activities.reject');
     Route::post('/activities/{activity}/media', [ActivityMediaController::class, 'store'])->name('activities.media.store');
     Route::delete('/activities/{activity}/media/{media}', [ActivityMediaController::class, 'destroy'])->name('activities.media.destroy');
 
@@ -146,14 +159,8 @@ Route::middleware('auth')->group(function () {
 
     // Area administrator (Superadmin only)
     Route::middleware('role:superadmin')->group(function () {
-        Route::get('/brands/export', [BrandController::class, 'export'])->name('brands.export');
-        Route::get('/brands/template', [BrandController::class, 'template'])->name('brands.template');
-        Route::post('/brands/import', [BrandController::class, 'import'])->name('brands.import');
-        Route::resource('brands', BrandController::class)->except(['show']);
-        Route::get('/categories/export', [CategoryController::class, 'export'])->name('categories.export');
-        Route::get('/categories/template', [CategoryController::class, 'template'])->name('categories.template');
-        Route::post('/categories/import', [CategoryController::class, 'import'])->name('categories.import');
-        Route::resource('categories', CategoryController::class)->except(['show']);
+        Route::get('/sales-order-logs', [SalesOrderLogController::class, 'index'])->name('sales-order-logs.index');
+        Route::get('/sales-order-logs/{log}', [SalesOrderLogController::class, 'show'])->name('sales-order-logs.show');
         Route::resource('templates', TemplateController::class);
         Route::resource('users', UserController::class)->except(['show']);
         Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');
@@ -172,6 +179,26 @@ Route::middleware('auth')->group(function () {
         Route::post('/settings/wilayah/provinces', [WilayahController::class, 'storeProvince'])->name('settings.wilayah.provinces.store');
         Route::post('/settings/wilayah/regencies', [WilayahController::class, 'storeRegency'])->name('settings.wilayah.regencies.store');
         Route::post('/settings/wilayah/districts', [WilayahController::class, 'storeDistrict'])->name('settings.wilayah.districts.store');
+    });
+
+    // Brand & Kategori: Superadmin + Product
+    Route::middleware('role:superadmin,product')->group(function () {
+        Route::get('/brands/export', [BrandController::class, 'export'])->name('brands.export');
+        Route::get('/brands/template', [BrandController::class, 'template'])->name('brands.template');
+        Route::post('/brands/import', [BrandController::class, 'import'])->name('brands.import');
+        Route::resource('brands', BrandController::class)->except(['show']);
+        Route::get('/categories/export', [CategoryController::class, 'export'])->name('categories.export');
+        Route::get('/categories/template', [CategoryController::class, 'template'])->name('categories.template');
+        Route::post('/categories/import', [CategoryController::class, 'import'])->name('categories.import');
+        Route::resource('categories', CategoryController::class)->except(['show']);
+    });
+
+    // Vendor master: Superadmin + Product + Purchasing
+    Route::middleware('role:superadmin,product,purchasing')->group(function () {
+        Route::get('/vendors/export', [VendorController::class, 'export'])->name('vendors.export');
+        Route::get('/vendors/template', [VendorController::class, 'template'])->name('vendors.template');
+        Route::post('/vendors/import', [VendorController::class, 'import'])->name('vendors.import');
+        Route::resource('vendors', VendorController::class)->except(['show']);
     });
 });
 

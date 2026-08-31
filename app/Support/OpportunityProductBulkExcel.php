@@ -177,11 +177,6 @@ XML);
             return null;
         }
 
-        // Lewati baris contoh bawaan template.
-        if (in_array(Str::lower($name), ['contoh item a', 'contoh jasa b'], true)) {
-            return null;
-        }
-
         $kindRaw = Str::lower(trim((string) ($map['jenis'] ?? $map['item_kind'] ?? $map['barang_jasa'] ?? 'barang')));
         $itemKind = str_contains($kindRaw, 'jasa')
             ? OpportunityProductPricing::KIND_JASA

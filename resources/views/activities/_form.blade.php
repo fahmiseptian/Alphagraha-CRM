@@ -7,11 +7,14 @@
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
                 <label class="crm-label">Activity Type <span class="text-red-500">*</span></label>
-                <select name="type" class="select2 w-full">
+                <select name="type" class="select2 w-full" id="activity-type">
                     @foreach ($types as $key => $label)
                         <option value="{{ $key }}" @selected(old('type', $activity->type) === $key)>{{ $label }}</option>
                     @endforeach
                 </select>
+                <p id="event-approval-hint" class="mt-1 hidden text-xs text-amber-600">
+                    Event/Training memerlukan approval Superadmin. Jika tanggal sudah lewat, status otomatis Approved.
+                </p>
             </div>
             <div>
                 <label class="crm-label">Priority</label>
@@ -85,6 +88,25 @@
         </div>
     </form>
 </x-card>
+
+<script>
+(function () {
+    const select = document.getElementById('activity-type');
+    const hint = document.getElementById('event-approval-hint');
+    if (!select || !hint) return;
+
+    const sync = function () {
+        hint.classList.toggle('hidden', select.value !== 'event_training');
+    };
+
+    sync();
+    if (window.jQuery) {
+        window.jQuery(select).on('change', sync);
+    } else {
+        select.addEventListener('change', sync);
+    }
+})();
+</script>
 
 @if ($isCreate)
 <script>

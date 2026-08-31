@@ -142,6 +142,7 @@
             <tr>
                 <th rowspan="2" class="col-no">NO</th>
                 <th rowspan="2" class="col-po">PO</th>
+                <th rowspan="2" class="col-vendor">VENDOR</th>
                 <th>HARGA EXCL</th>
                 <th>TAMBAHAN</th>
                 <th>JUMLAH</th>
@@ -163,6 +164,7 @@
                 <tr>
                     <td class="col-no">{{ $row['no'] }}</td>
                     <td class="col-po">{{ $row['number'] }}</td>
+                    <td class="col-vendor">{{ $row['vendor'] ?? '—' }}</td>
                     <td class="num">{{ $fmt($row['harga_exclude']) }}</td>
                     <td class="num">{{ $fmt($row['extra_exclude']) }}</td>
                     <td class="num">{{ $fmt($row['jumlah_exclude']) }}</td>
@@ -172,19 +174,19 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="8" class="empty">Belum ada Purchase Order</td>
+                    <td colspan="9" class="empty">Belum ada Purchase Order</td>
                 </tr>
             @endforelse
         </tbody>
         <tfoot>
             <tr>
-                <td colspan="2" class="total-label">TOTAL EXCLUDE PPN</td>
+                <td colspan="3" class="total-label">TOTAL EXCLUDE PPN</td>
                 <td colspan="2"></td>
                 <td class="num total-val">{{ $fmt($report['po_total_exclude']) }}</td>
                 <td colspan="3"></td>
             </tr>
             <tr>
-                <td colspan="2" class="total-label">TOTAL INCLUDE PPN</td>
+                <td colspan="3" class="total-label">TOTAL INCLUDE PPN</td>
                 <td colspan="5"></td>
                 <td class="num total-val">{{ $fmt($report['po_total_include']) }}</td>
             </tr>

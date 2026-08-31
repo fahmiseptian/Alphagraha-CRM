@@ -27,7 +27,15 @@ class CrmNotification extends Model
 
     public const TYPE_ACTIVITY_DUE = 'activity_due';
 
+    public const TYPE_EVENT_APPROVAL_REQUESTED = 'event_approval_requested';
+
+    public const TYPE_EVENT_APPROVED = 'event_approved';
+
+    public const TYPE_EVENT_REJECTED = 'event_rejected';
+
     public const TYPE_OPPORTUNITY_DEADLINE = 'opportunity_deadline';
+
+    public const TYPE_SALES_ORDER_CREATED = 'sales_order_created';
 
     public const TYPE_GENERAL = 'general';
 
@@ -61,7 +69,9 @@ class CrmNotification extends Model
             self::TYPE_DISCOUNT_REQUESTED,
             self::TYPE_MARGIN_REQUESTED,
             self::TYPE_ACTIVITY_DUE,
+            self::TYPE_EVENT_APPROVAL_REQUESTED,
             self::TYPE_OPPORTUNITY_DEADLINE,
+            self::TYPE_SALES_ORDER_CREATED,
         ], true);
     }
 
@@ -82,7 +92,9 @@ class CrmNotification extends Model
             self::TYPE_DISCOUNT_REVERTED, self::TYPE_DISCOUNT_REQUESTED => 'bi-percent',
             self::TYPE_MARGIN_REQUESTED, self::TYPE_MARGIN_APPROVED, self::TYPE_MARGIN_REJECTED => 'bi-graph-up-arrow',
             self::TYPE_ACTIVITY_DUE => 'bi-calendar-event',
+            self::TYPE_EVENT_APPROVAL_REQUESTED, self::TYPE_EVENT_APPROVED, self::TYPE_EVENT_REJECTED => 'bi-calendar-event',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bi-briefcase',
+            self::TYPE_SALES_ORDER_CREATED => 'bi-receipt',
             default => 'bi-bell',
         };
     }
@@ -99,7 +111,11 @@ class CrmNotification extends Model
             self::TYPE_MARGIN_REJECTED => 'bg-red-50 text-red-600',
             self::TYPE_MARGIN_REQUESTED => 'bg-amber-50 text-amber-600',
             self::TYPE_ACTIVITY_DUE => 'bg-blue-50 text-blue-600',
+            self::TYPE_EVENT_APPROVED => 'bg-green-50 text-green-600',
+            self::TYPE_EVENT_REJECTED => 'bg-red-50 text-red-600',
+            self::TYPE_EVENT_APPROVAL_REQUESTED => 'bg-amber-50 text-amber-600',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bg-rose-50 text-rose-600',
+            self::TYPE_SALES_ORDER_CREATED => 'bg-indigo-50 text-indigo-600',
             default => 'bg-slate-100 text-slate-600',
         };
     }

@@ -34,6 +34,17 @@
         }
 
         @include('opportunities.sales-orders._report-styles')
+
+        @media screen {
+            .so-page-break {
+                display: block;
+                height: 28px;
+                margin: 36px -40px;
+                background: #e2e8f0;
+                border-top: 1px dashed #94a3b8;
+                border-bottom: 1px dashed #94a3b8;
+            }
+        }
     </style>
 </head>
 <body>

@@ -412,7 +412,16 @@
                                     </div>
                                     <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Vendor</label>
-                                        <input type="text" :name="`products[${i}][vendor]`" x-model="p.vendor" placeholder="Vendor" class="crm-field w-full">
+                                        <select :name="`products[${i}][vendor]`"
+                                                class="select2 select2-search w-full text-sm"
+                                                data-placeholder="— Vendor —"
+                                                data-vendor-select
+                                                x-init="$nextTick(() => initVendorSelect($el, i))">
+                                            <option value="">— Vendor —</option>
+                                            @foreach ($vendorOptions ?? [] as $vendor)
+                                                <option value="{{ $vendor['name'] }}">{{ $vendor['name'] }}</option>
+                                            @endforeach
+                                        </select>
                                     </div>
                                     <div class="flex items-end justify-end sm:col-span-1">
                                         <button type="button" x-show="!purchasingMode" @click="removeProduct(i)" class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i class="bi bi-trash"></i></button>
@@ -739,7 +748,7 @@
                         </div>
                     </div>
                     <p class="mt-2 text-xs text-slate-400" x-show="!purchasingMode">
-                        Bulk import: unduh template, isi baris produk, lalu Import Excel (.xlsx / .csv). Kategori pajak mengikuti pilihan di atas.
+                        Bulk import: unduh template, isi (atau ganti) baris produk, lalu Import Excel (.xlsx / .csv). Kategori pajak mengikuti pilihan di atas.
                     </p>
                 </div>
             </x-card>
@@ -1700,6 +1709,7 @@
                 });
                 this.refreshBrandSelects();
                 this.refreshCategorySelects();
+                this.refreshVendorSelects();
             },
             removeProduct(i) {
                 const brandEl = this.$root.querySelector(`select[name="products[${i}][brand]"]`);
@@ -1710,10 +1720,15 @@
                 if (catEl && window.CrmSelect2) {
                     CrmSelect2.destroy(catEl);
                 }
+                const vendorEl = this.$root.querySelector(`select[name="products[${i}][vendor]"]`);
+                if (vendorEl && window.CrmSelect2) {
+                    CrmSelect2.destroy(vendorEl);
+                }
                 this.products.splice(i, 1);
                 this.refreshDiscountFromMargin();
                 this.refreshBrandSelects();
                 this.refreshCategorySelects();
+                this.refreshVendorSelects();
             },
             initBrandSelect(el, index) {
                 if (!el || !window.CrmSelect2 || !window.jQuery) return;
@@ -1801,6 +1816,48 @@
                     });
                 });
             },
+            initVendorSelect(el, index) {
+                if (!el || !window.CrmSelect2 || !window.jQuery) return;
+
+                const $el = window.jQuery(el);
+                CrmSelect2.destroy(el);
+
+                $el.select2({
+                    width: '100%',
+                    placeholder: $el.data('placeholder') || '— Vendor —',
+                    allowClear: true,
+                    dropdownParent: window.jQuery(document.body),
+                    language: {
+                        noResults: () => 'Vendor tidak ditemukan',
+                        searching: () => 'Mencari...',
+                    },
+                });
+
+                $el.off('.crmVendor');
+                $el.on('change.crmVendor select2:select.crmVendor select2:clear.crmVendor', () => {
+                    if (!this.products[index]) return;
+                    this.products[index].vendor = $el.val() || '';
+                });
+
+                const vendor = this.products[index]?.vendor || '';
+                if (vendor && $el.find('option').filter(function () {
+                    return String(window.jQuery(this).val()) === String(vendor);
+                }).length === 0) {
+                    $el.append(new Option(vendor, vendor, true, true));
+                }
+                $el.val(vendor || '').trigger('change.select2');
+            },
+            refreshVendorSelects() {
+                this.$nextTick(() => {
+                    if (!window.CrmSelect2) return;
+                    this.$root.querySelectorAll('select[data-vendor-select]').forEach((el) => {
+                        const match = String(el.getAttribute('name') || '').match(/products\[(\d+)\]\[vendor\]/);
+                        const index = match ? Number(match[1]) : -1;
+                        if (index < 0) return;
+                        this.initVendorSelect(el, index);
+                    });
+                });
+            },
             /** Prospecting + ada nama produk → Qualification (sinkron select Stage). */
             promoteStageFromProducts() {
                 if (this.purchasingMode || this.stage !== 'Prospecting') return;
@@ -1844,7 +1901,7 @@
                     }
 
                     if (imported.length === 0) {
-                        alert('Tidak ada baris produk valid di file. Pastikan kolom "nama" terisi (hapus baris contoh template).');
+                        alert('Tidak ada baris produk valid di file. Pastikan baris header punya kolom "nama" dan isi nama item di baris berikutnya.');
                         return;
                     }
 
@@ -1864,6 +1921,7 @@
                     this.refreshDiscountFromMargin();
                     this.refreshBrandSelects();
                     this.refreshCategorySelects();
+                    this.refreshVendorSelects();
                     alert(`${imported.length} produk berhasil diimpor.`);
                 } catch (err) {
                     console.error(err);
@@ -1885,7 +1943,40 @@
                 const sheetName = workbook.SheetNames[0];
                 if (!sheetName) return [];
                 const sheet = workbook.Sheets[sheetName];
-                return XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
+                return this.matrixToProductObjects(matrix);
+            },
+            matrixToProductObjects(matrix) {
+                if (!Array.isArray(matrix) || matrix.length < 2) return [];
+
+                let headerIndex = 0;
+                for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+                    const cells = (matrix[i] || []).map((c) => this.normalizeImportHeader(c));
+                    if (cells.includes('nama') || cells.includes('jenis')) {
+                        headerIndex = i;
+                        break;
+                    }
+                }
+
+                const headers = (matrix[headerIndex] || []).map((c) => this.normalizeImportHeader(c));
+                if (!headers.includes('nama') && !headers.includes('jenis')) {
+                    return [];
+                }
+
+                const rows = [];
+                for (let i = headerIndex + 1; i < matrix.length; i++) {
+                    const line = matrix[i] || [];
+                    const empty = line.every((c) => String(c ?? '').trim() === '');
+                    if (empty) continue;
+                    const obj = {};
+                    headers.forEach((h, j) => {
+                        if (!h) return;
+                        obj[h] = line[j] ?? '';
+                    });
+                    rows.push(obj);
+                }
+
+                return rows;
             },
             loadSheetJs() {
                 if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -1908,13 +1999,8 @@
             parseCsvToObjects(text) {
                 const lines = text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/).filter(l => l.trim() !== '');
                 if (lines.length < 2) return [];
-                const headers = this.splitCsvLine(lines[0]).map(h => String(h).trim());
-                return lines.slice(1).map((line) => {
-                    const cols = this.splitCsvLine(line);
-                    const obj = {};
-                    headers.forEach((h, i) => { obj[h] = cols[i] ?? ''; });
-                    return obj;
-                });
+                const matrix = lines.map((line) => this.splitCsvLine(line));
+                return this.matrixToProductObjects(matrix);
             },
             splitCsvLine(line) {
                 const result = [];
@@ -1940,7 +2026,12 @@
                 return result;
             },
             normalizeImportHeader(header) {
-                let h = String(header || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+                let h = String(header || '')
+                    .replace(/\u00a0/g, ' ')
+                    .replace(/^\uFEFF/, '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[\s-]+/g, '_');
                 const aliases = {
                     barang_jasa: 'jenis', tipe: 'jenis', kind: 'jenis',
                     item: 'nama', product: 'nama', produk: 'nama', nama_item: 'nama', nama_produk: 'nama', name: 'nama',
@@ -1963,8 +2054,6 @@
 
                 const name = String(map.nama ?? '').trim();
                 if (!name) return null;
-                const lower = name.toLowerCase();
-                if (lower === 'contoh item a' || lower === 'contoh jasa b') return null;
 
                 const kindRaw = String(map.jenis ?? map.item_kind ?? 'barang').trim().toLowerCase();
                 const itemKind = kindRaw.includes('jasa') ? 'jasa' : 'barang';
@@ -2037,6 +2126,7 @@
                     this.syncDiscountPercentFromAmount();
                     this.refreshBrandSelects();
                     this.refreshCategorySelects();
+                    this.refreshVendorSelects();
                     this._accountReady = true;
                 });
             },

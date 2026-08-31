@@ -9,8 +9,9 @@
         'q' => ($search ?? '') !== '' ? $search : null,
         'stage' => ($stageFilter ?? '') !== '' ? $stageFilter : null,
         'company' => ($companyFilter ?? '') !== '' ? $companyFilter : null,
+        'account_id' => ($accountId ?? '') !== '' ? $accountId : null,
     ], fn ($v) => $v !== null && $v !== '');
-    $hasExtraFilters = ($search ?? '') !== '' || ($stageFilter ?? '') !== '' || ($companyFilter ?? '') !== '';
+    $hasExtraFilters = ($search ?? '') !== '' || ($stageFilter ?? '') !== '' || ($companyFilter ?? '') !== '' || ($accountId ?? '') !== '';
     $hasFilters = $selectedUserId || ($period ?? 'year') !== 'year' || $hasExtraFilters;
 @endphp
 
@@ -56,9 +57,19 @@
                 <label class="crm-label">Cari deal</label>
                 <div class="crm-search">
                     <i class="bi bi-search"></i>
-                    <input type="text" name="q" value="{{ $search }}" placeholder="Nama opportunity..."
+                    <input type="text" name="q" value="{{ $search }}" placeholder="Nama opportunity / customer..."
                            class="crm-field" autocomplete="off">
                 </div>
+            </div>
+
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Customer</label>
+                <select name="account_id" class="select2 select2-search w-full" data-placeholder="Cari customer...">
+                    <option value="">Semua customer</option>
+                    @foreach ($filterAccounts as $acc)
+                        <option value="{{ $acc->id }}" @selected(($accountId ?? '') === $acc->id)>{{ $acc->name }}</option>
+                    @endforeach
+                </select>
             </div>
 
             <div class="crm-opp-filters__field">
@@ -123,7 +134,7 @@
 </x-card>
 
 {{-- Summary --}}
-<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
     <x-stat-card title="Total Deals" :value="number_format($summary['total'])" icon="bi-briefcase" color="brand"
                  :sub="money($summary['total_value']) . ' total value'" />
     <x-stat-card title="Open Pipeline" :value="money($summary['open_value'])" icon="bi-graph-up-arrow" color="amber"
@@ -131,6 +142,9 @@
     <x-stat-card title="Closed Won" :value="money($summary['won_value'])" color="green"
                  :sub="$summary['won_count'] . ' deals won'"
                  :icon-text="$summary['win_rate'] !== null ? $summary['win_rate'].'%' : '—'" />
+    <x-stat-card title="Won Margin" :value="money($summary['won_margin'])" icon="bi-cash-stack" color="purple"
+                 :sub="$summary['won_count'] . ' deals won'"
+                 :icon-text="$summary['margin_rate'] !== null ? $summary['margin_rate'].'%' : '—'" />
     <x-stat-card title="Closed Lost" :value="money($summary['lost_value'])" icon="bi-x-circle" color="rose"
                  :sub="$summary['lost_count'] . ' deals lost'" />
 </div>

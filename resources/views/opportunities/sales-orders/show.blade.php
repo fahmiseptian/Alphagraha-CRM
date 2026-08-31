@@ -96,17 +96,26 @@
         ['label' => 'Update terakhir', 'value' => $fmtDate($detail['updated_date'] ?? null, 'd M Y'), 'icon' => 'bi-clock-history'],
     ], fn ($row) => filled($row['value']));
     $poCustomerNumber = (string) ($detail['po_number'] ?: ($salesOrder->po_number ?: ''));
-    $poAgcNumber = (string) ($detail['po_agc'] ?? '');
-    $canEditPoNumber = (bool) ($canEdit ?? false) && (auth()->user()?->isSuperAdmin() ?? false);
-    $canEditInvoice = (bool) ($canEdit ?? false) && (auth()->user()?->isSuperAdmin() ?? false);
+    $poAgcNumbers = $opportunity->purchaseOrders
+        ->pluck('number')
+        ->map(fn ($n) => trim((string) $n))
+        ->filter()
+        ->values();
+    $poAgcNumber = $poAgcNumbers->isNotEmpty()
+        ? $poAgcNumbers->implode(', ')
+        : (string) ($detail['po_agc'] ?? '');
+    $canViewPoDetail = auth()->user()?->canViewPurchaseOrders()
+        && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE;
+    $canEditInvoice = (bool) ($canEditInvoice ?? false);
+    $canEditDelivery = (bool) ($canEditDelivery ?? false);
     $paymentStatusKey = strtolower((string) ($detail['payment_status'] ?? ''));
     $deliveryStatusKey = strtolower((string) ($detail['delivery_status'] ?? ''));
-    $canMarkPaid = (bool) ($canEdit ?? false)
+    $canMarkPaid = (bool) ($canEditInvoice ?? false)
         && ! in_array($paymentStatusKey, ['paid', 'settlement'], true);
-    $canCompleteDelivery = (bool) ($canEdit ?? false)
+    $canCompleteDelivery = (bool) ($canEditDelivery ?? false)
         && ! in_array($deliveryStatusKey, ['completed', 'complete'], true);
     $soStatusKey = strtolower((string) ($detail['so_status'] ?? ''));
-    $canCompleteSo = (bool) ($canEdit ?? false)
+    $canCompleteSo = (bool) (($canEdit ?? false) && (auth()->user()?->canCreateSalesOrder() ?? false))
         && ! in_array($soStatusKey, ['completed', 'complete'], true);
     $requiredDeliveryRaw = $detail['required_delivery'] ?? $salesOrder->required_delivery;
     $requiredDeliveryLabel = $requiredDeliveryRaw ? $fmtDate($requiredDeliveryRaw, 'd M Y') : null;
@@ -145,6 +154,9 @@
     .so-items-table .summary-total .summary-value {
         font-size: 0.95rem;
     }
+    .so-detail-spec p { margin: 0 0 0.25rem; }
+    .so-detail-spec ul, .so-detail-spec ol { margin: 0.25rem 0 0.35rem 1.1rem; padding-left: 0.5rem; }
+    .so-detail-spec li { margin: 0.1rem 0; }
 </style>
 @endpush
 
@@ -355,6 +367,11 @@
                             @if (! empty($item['category']))
                                 <span class="mt-0.5 block text-xs font-normal text-slate-500">Category: {{ $item['category'] }}</span>
                             @endif
+                            @if (! empty($item['description_html']))
+                                <div class="so-detail-spec mt-2 text-xs text-slate-600">
+                                    {!! $item['description_html'] !!}
+                                </div>
+                            @endif
                         </td>
                         <td class="is-center tabular-nums">{{ number_format((float) $item['qty'], 0, ',', '.') }} {{ $item['unit'] ?? 'Unit' }}</td>
                         <td class="is-center tabular-nums">{{ money($item['price_display'] ?? $item['price'], $currency) }}</td>
@@ -403,7 +420,7 @@
             <div>
                 <dt class="flex items-center justify-between gap-2 text-xs text-slate-400">
                     <span>Metode pengiriman</span>
-                    @if ($canEdit ?? false)
+                    @if ($canEditDelivery)
                         <button type="button" @click="openEdit('shipping_method')" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Edit metode pengiriman">
                             <i class="bi bi-pencil text-xs"></i>
                         </button>
@@ -412,14 +429,14 @@
                 <dd class="mt-0.5 font-medium text-slate-800">{{ $detail['courier_name'] ?: $detail['shipping_name'] ?: '—' }}</dd>
             </div>
             <div>
-                <dt class="text-xs text-slate-400">No. resi / AWB</dt>
+                <dt class="text-xs text-slate-400">No. DO/Resi/AWB</dt>
                 <dd class="mt-0.5 flex items-center justify-between gap-3 font-mono font-medium text-slate-800">
                     <span>{{ $detail['no_resi'] ?: '—' }}</span>
-                    @if ($canEdit ?? false)
+                    @if ($canEditDelivery)
                         <button type="button"
                                 @click="openEdit('no_resi')"
                                 class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600"
-                                title="Edit No. resi / AWB">
+                                title="Edit No. DO/Resi/AWB">
                             <i class="bi bi-pencil text-xs"></i>
                         </button>
                     @endif
@@ -474,12 +491,14 @@
             </div>
             <div class="flex items-start justify-between gap-3">
                 <dt class="text-slate-400">PO AGC</dt>
-                <dd class="flex items-center gap-2 text-right font-medium text-slate-800">
+                <dd class="flex flex-wrap items-center justify-end gap-2 text-right font-medium text-slate-800">
                     <span>{{ $poAgcNumber !== '' ? $poAgcNumber : '—' }}</span>
-                    @if ($canEditPoNumber)
-                        <button type="button" @click="openEdit('po_agc')" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Edit PO AGC">
-                            <i class="bi bi-pencil text-xs"></i>
-                        </button>
+                    @if ($canViewPoDetail)
+                        <a href="{{ route('opportunities.purchase-orders.index', ['opportunity' => $opportunity, 'from_so' => $salesOrder->id]) }}"
+                           class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-brand-600 hover:bg-brand-50"
+                           title="Lihat detail Purchase Orders">
+                            <i class="bi bi-eye"></i> Lihat detail
+                        </a>
                     @endif
                 </dd>
             </div>
@@ -637,10 +656,6 @@
                 </div>
 
                 @if (auth()->user()?->isSuperAdmin())
-                    <div x-show="focusField === 'all' || focusField === 'po_agc'">
-                        <label class="crm-label">PO AGC</label>
-                        <input type="text" x-model="form.po_agc" maxlength="100" class="crm-field">
-                    </div>
                     <div x-show="focusField === 'all' || focusField === 'invoice_no'">
                         <label class="crm-label">Invoice</label>
                         <input type="text" x-model="form.invoice_no" maxlength="100" class="crm-field">
@@ -673,7 +688,7 @@
                 </div>
 
                 <div x-show="focusField === 'all' || focusField === 'no_resi'">
-                    <label class="crm-label">No. resi / AWB</label>
+                    <label class="crm-label">No. DO/Resi/AWB</label>
                     <input type="text" x-model="form.no_resi" maxlength="100" class="crm-field">
                 </div>
 
@@ -741,7 +756,6 @@ function salesOrderDetail(cfg) {
         focusField: 'all',
         form: {
             po_number: cfg.editForm.poNumber || '',
-            po_agc: cfg.editForm.poAgc || '',
             invoice_no: cfg.editForm.invoiceNo || '',
             invoice_dt: cfg.editForm.invoiceDt || '',
             nomor_ref: cfg.editForm.nomorRef || '',
@@ -780,7 +794,7 @@ function salesOrderDetail(cfg) {
 
         buildPayload() {
             const payload = {};
-            const fields = ['po_number', 'po_agc', 'invoice_no', 'invoice_dt', 'nomor_ref', 'required_delivery', 'no_resi', 'shipping_method', 'note'];
+            const fields = ['po_number', 'invoice_no', 'invoice_dt', 'nomor_ref', 'required_delivery', 'no_resi', 'shipping_method', 'note'];
             fields.forEach((key) => {
                 const shouldInclude = this.focusField === 'all'
                     || this.focusField === key

@@ -17,7 +17,7 @@ class PurchaseOrderReportService
      */
     public function build(Opportunity $opportunity): array
     {
-        $opportunity->loadMissing(['account', 'assignedUser', 'purchaseOrders.items']);
+        $opportunity->loadMissing(['account', 'assignedUser', 'purchaseOrders.vendor', 'purchaseOrders.items']);
 
         $currency = $opportunity->amount_currency ?: 'IDR';
         $products = $opportunity->products;
@@ -136,6 +136,7 @@ class PurchaseOrderReportService
             return [
                 'no' => $index + 1,
                 'number' => $po->number,
+                'vendor' => $po->displayVendorName(),
                 'payment_term' => $po->payment_term,
                 'is_cash' => $isCash,
                 'surcharge_percent' => $surchargePercent,

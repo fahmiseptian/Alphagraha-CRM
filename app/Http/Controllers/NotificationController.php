@@ -68,7 +68,9 @@ class NotificationController extends Controller
                 CrmNotification::TYPE_DISCOUNT_REQUESTED,
                 CrmNotification::TYPE_MARGIN_REQUESTED,
                 CrmNotification::TYPE_ACTIVITY_DUE,
+                CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
                 CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
+                CrmNotification::TYPE_SALES_ORDER_CREATED,
             ]),
             default => null,
         };

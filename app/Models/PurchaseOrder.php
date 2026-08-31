@@ -18,6 +18,8 @@ class PurchaseOrder extends Model
     protected $fillable = [
         'opportunity_id',
         'number',
+        'vendor_id',
+        'vendor_name',
         'payment_term',
         'total',
         'currency',
@@ -41,6 +43,16 @@ class PurchaseOrder extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class);
+    }
+
+    public function displayVendorName(): string
+    {
+        return $this->vendor?->name ?: ($this->vendor_name ?: '—');
     }
 
     public function isCash(): bool

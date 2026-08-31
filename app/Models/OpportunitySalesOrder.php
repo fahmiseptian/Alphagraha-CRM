@@ -5,9 +5,13 @@ namespace App\Models;
 use App\Models\Espo\Opportunity;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class OpportunitySalesOrder extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'crm_opportunity_sales_orders';
 
     protected $fillable = [
@@ -25,6 +29,7 @@ class OpportunitySalesOrder extends Model
         'items',
         'agc_payload',
         'created_by',
+        'deleted_by',
     ];
 
     protected $casts = [
@@ -44,6 +49,56 @@ class OpportunitySalesOrder extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function deleter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'deleted_by');
+    }
+
+    public function logs(): HasMany
+    {
+        return $this->hasMany(SalesOrderLog::class, 'sales_order_id')->orderByDesc('id');
+    }
+
+    /**
+     * SO tidak boleh dihapus permanen — tetap ada di log Superadmin.
+     */
+    public function forceDelete()
+    {
+        throw new \RuntimeException('Sales Order tidak dapat dihapus permanen.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toLogSnapshot(): array
+    {
+        $this->loadMissing(['opportunity.account', 'creator']);
+
+        return [
+            'id' => $this->id,
+            'number' => $this->displayNumber(),
+            'pso_number' => $this->displayPsoNumber(),
+            'nomor_ref' => $this->displayRefNumber(),
+            'opportunity_id' => $this->opportunity_id,
+            'opportunity_name' => $this->opportunity?->name,
+            'customer' => $this->opportunity?->account?->name ?: $this->opportunity?->company,
+            'email' => $this->email,
+            'payment' => $this->payment,
+            'payment_label' => $this->paymentLabel(),
+            'po_number' => $this->po_number,
+            'required_delivery' => optional($this->required_delivery)->toDateString(),
+            'note' => $this->note,
+            'items' => $this->items,
+            'payload' => $this->agc_payload,
+            'status' => $this->statusSnapshot(),
+            'created_by' => $this->created_by,
+            'created_by_name' => $this->creator?->display_name,
+            'created_at' => optional($this->created_at)->toDateTimeString(),
+            'deleted_at' => optional($this->deleted_at)->toDateTimeString(),
+            'deleted_by' => $this->deleted_by,
+        ];
     }
 
     public function displayNumber(): string

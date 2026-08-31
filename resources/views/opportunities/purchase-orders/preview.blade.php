@@ -36,7 +36,7 @@
 </head>
 <body>
     <div class="toolbar">
-        <a href="{{ route('opportunities.show', $opportunity) }}" class="btn-light"><i class="bi bi-arrow-left"></i> Back</a>
+        <a href="{{ route('opportunities.purchase-orders.index', $opportunity) }}" class="btn-light"><i class="bi bi-arrow-left"></i> Back</a>
         <strong>Laporan PO</strong>
         <div class="spacer"></div>
         <button type="button" onclick="window.print()" class="btn-light"><i class="bi bi-printer"></i> Print</button>

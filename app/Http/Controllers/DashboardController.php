@@ -147,6 +147,7 @@ class DashboardController extends Controller
             : collect();
 
         // Aktivitas: tugas mendatang & terlambat milik user.
+        Activity::approvePastPendingEvents();
         $upcomingActivities = Activity::with(['account', 'lead'])
             ->where('assigned_to', $user->id)
             ->whereNotIn('status', ['completed', 'cancelled'])

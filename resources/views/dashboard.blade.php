@@ -443,6 +443,9 @@
                     <p class="truncate text-xs text-slate-400">
                         {{ $activity->typeLabel() }}
                         @if ($activity->account) &middot; {{ $activity->account->name }} @endif
+                        @if ($activity->isEventTraining() && $activity->approvalLabel())
+                            &middot; {{ $activity->approvalLabel() }}
+                        @endif
                     </p>
                 </div>
                 <div class="text-right">

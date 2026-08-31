@@ -27,6 +27,10 @@ class CustomerController extends Controller
 
     public function index(Request $request)
     {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403, 'Anda tidak memiliki akses ke Customers.');
+        }
+
         $search = trim((string) $request->get('q'));
         $type = $request->filled('type') ? $request->get('type') : null;
 
@@ -70,6 +74,10 @@ class CustomerController extends Controller
 
     public function create()
     {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403);
+        }
+
         $account = new Account([
             'type' => 'Customer',
             'assigned_user_id' => auth()->id(),
@@ -80,6 +88,10 @@ class CustomerController extends Controller
 
     public function store(Request $request)
     {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403);
+        }
+
         $data = $this->validateData($request);
         $now = Carbon::now()->format('Y-m-d H:i:s');
 
@@ -102,6 +114,10 @@ class CustomerController extends Controller
 
     public function edit(string $id)
     {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403);
+        }
+
         $account = $this->scopeAssigned(Account::query())
             ->with(['emailAddresses', 'phoneNumbers'])
             ->findOrFail($id);
@@ -111,6 +127,10 @@ class CustomerController extends Controller
 
     public function update(Request $request, string $id)
     {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403);
+        }
+
         $account = $this->scopeAssigned(Account::query())->findOrFail($id);
         $data = $this->validateData($request);
 
@@ -152,6 +172,10 @@ class CustomerController extends Controller
 
     public function show(string $id)
     {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403);
+        }
+
         $account = $this->scopeAssigned(Account::query())
             ->with(['assignedUser', 'emailAddresses', 'phoneNumbers'])
             ->findOrFail($id);

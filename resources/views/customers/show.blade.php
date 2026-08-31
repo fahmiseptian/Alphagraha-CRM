@@ -268,7 +268,11 @@
                                 <x-badge :color="$activity->status === 'completed' ? 'green' : ($activity->isOverdue() ? 'red' : 'slate')">{{ $activity->statusLabel() }}</x-badge>
                             </div>
                             @if ($activity->description)<p class="mt-1 text-xs text-slate-500">{{ $activity->description }}</p>@endif
-                            <p class="mt-1 text-xs text-slate-400">{{ $activity->typeLabel() }} &middot; {{ optional($activity->due_at ?? $activity->created_at)->translatedFormat('d M Y H:i') }}</p>
+                            <p class="mt-1 text-xs text-slate-400">{{ $activity->typeLabel() }} &middot; {{ optional($activity->due_at ?? $activity->created_at)->translatedFormat('d M Y H:i') }}
+                                @if ($activity->isEventTraining() && $activity->approvalLabel())
+                                    &middot; {{ $activity->approvalLabel() }}
+                                @endif
+                            </p>
                         </div>
                     </div>
                 @empty
