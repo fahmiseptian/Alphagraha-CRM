@@ -37,6 +37,8 @@ class CrmNotification extends Model
 
     public const TYPE_SALES_ORDER_CREATED = 'sales_order_created';
 
+    public const TYPE_OPPORTUNITY_ASSIGNED = 'opportunity_assigned';
+
     public const TYPE_GENERAL = 'general';
 
     protected $fillable = [
@@ -95,6 +97,7 @@ class CrmNotification extends Model
             self::TYPE_EVENT_APPROVAL_REQUESTED, self::TYPE_EVENT_APPROVED, self::TYPE_EVENT_REJECTED => 'bi-calendar-event',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bi-briefcase',
             self::TYPE_SALES_ORDER_CREATED => 'bi-receipt',
+            self::TYPE_OPPORTUNITY_ASSIGNED => 'bi-person-check',
             default => 'bi-bell',
         };
     }
@@ -116,6 +119,7 @@ class CrmNotification extends Model
             self::TYPE_EVENT_APPROVAL_REQUESTED => 'bg-amber-50 text-amber-600',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bg-rose-50 text-rose-600',
             self::TYPE_SALES_ORDER_CREATED => 'bg-indigo-50 text-indigo-600',
+            self::TYPE_OPPORTUNITY_ASSIGNED => 'bg-brand-50 text-brand-600',
             default => 'bg-slate-100 text-slate-600',
         };
     }

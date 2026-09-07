@@ -44,7 +44,11 @@ class QuotationController extends Controller
         $query = Quotation::with(['creator', 'opportunity']);
 
         if (! $this->isAdmin()) {
-            $query->where('created_by', auth()->id());
+            $userId = auth()->id();
+            $query->where(function ($q) use ($userId) {
+                $q->where('created_by', $userId)
+                    ->orWhereHas('opportunity', fn ($oq) => $oq->where('assigned_user_id', $userId));
+            });
         }
 
         if ($search !== '') {
@@ -368,6 +372,12 @@ class QuotationController extends Controller
                 $quotation->recalculateTotals();
                 $quotation->save();
 
+                if (! $everSent && $quotation->status === 'draft') {
+                    if ($this->service->syncDraftQuotationSalesCode($quotation)) {
+                        $quotation->save();
+                    }
+                }
+
                 $oppSync = $quotation->syncItemsToLinkedOpportunity();
                 $syncedOpportunity = $oppSync['synced'];
                 $notifyOppMargin = $oppSync['notify_margin'];
@@ -378,7 +388,22 @@ class QuotationController extends Controller
 
                 if ($isCurrentlySent && $contentChanged) {
                     $quotation->document_revision = (int) $quotation->document_revision + 1;
+
+                    $quotation->loadMissing('opportunity');
+                    $salesContext = $this->service->resolveSalesCodeContext(
+                        $quotation->opportunity_id ? (string) $quotation->opportunity_id : null,
+                        auth()->user()
+                    );
+
+                    if ($salesContext['code'] === '') {
+                        $who = $this->service->salesCodeOwnerLabel($salesContext['user']);
+                        throw new \RuntimeException(
+                            'Sales Code untuk '.$who.' belum diisi. Minta admin mengisi Sales Code di menu Users sebelum revisi dokumen.'
+                        );
+                    }
+
                     $base = $quotation->base_number ?: $this->service->stripDocumentRevision($quotation->number);
+                    $base = $this->service->replaceSalesCodeInNumber($base, $salesContext['code']);
                     $quotation->base_number = $base;
                     $quotation->number = $this->service->withDocumentRevision($base, (int) $quotation->document_revision);
                     $quotation->revision = (int) $quotation->revision + 1;
@@ -1118,9 +1143,21 @@ class QuotationController extends Controller
 
     protected function authorizeAccess(Quotation $quotation): void
     {
-        if (! $this->isAdmin() && $quotation->created_by !== auth()->id()) {
-            abort(403, 'You do not have access to this quotation.');
+        if ($this->isAdmin()) {
+            return;
         }
+
+        $userId = auth()->id();
+        if ($quotation->created_by === $userId) {
+            return;
+        }
+
+        $quotation->loadMissing('opportunity');
+        if ($quotation->opportunity && (string) $quotation->opportunity->assigned_user_id === (string) $userId) {
+            return;
+        }
+
+        abort(403, 'You do not have access to this quotation.');
     }
 
     /**

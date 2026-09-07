@@ -1,6 +1,19 @@
 @extends('layouts.app')
 @section('title', 'Customers')
 
+@php
+    $filterQuery = array_filter([
+        'q' => ($search ?? '') !== '' ? $search : null,
+        'assigned_user_id' => ($assignedUserId ?? '') !== '' ? $assignedUserId : null,
+        'level' => ($levelFilter ?? '') !== '' ? $levelFilter : null,
+        'type' => ($type ?? '') !== '' ? $type : null,
+    ], fn ($v) => $v !== null && $v !== '');
+    $hasFilters = ($search ?? '') !== ''
+        || ($assignedUserId ?? '') !== ''
+        || ($levelFilter ?? '') !== ''
+        || ($type ?? '') !== '';
+@endphp
+
 @section('content')
 <x-page-header title="Customers" :description="number_format($accounts->total()) . ' customers'">
     <x-slot:actions>
@@ -9,38 +22,83 @@
 </x-page-header>
 
 <x-card class="mb-4" :padding="false">
-    <form method="GET" action="{{ route('customers.index') }}" class="crm-filter-form">
-        <div class="min-w-0 flex-1">
-            <label class="crm-label">Nama Customer</label>
-            <div class="crm-search">
-                <i class="bi bi-search"></i>
-                <input type="text" name="q" value="{{ $search }}" placeholder="Ketik nama customer..." class="crm-field" autocomplete="off">
+    <form method="GET" action="{{ route('customers.index') }}" class="crm-opp-filters">
+        @if ($type ?? null)
+            <input type="hidden" name="type" value="{{ $type }}">
+        @endif
+
+        <div @class([
+            'crm-opp-filters__grid',
+            'crm-opp-filters__grid--admin' => ($canFilterSales ?? false),
+        ])>
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Nama Customer</label>
+                <div class="crm-search">
+                    <i class="bi bi-search"></i>
+                    <input type="text" name="q" value="{{ $search }}"
+                           placeholder="Ketik nama customer, email, kota, sales..."
+                           class="crm-field" autocomplete="off">
+                </div>
+            </div>
+
+            @if ($canFilterSales ?? false)
+                <div class="crm-opp-filters__field">
+                    <label class="crm-label">Sales</label>
+                    <select name="assigned_user_id" class="select2 select2-search w-full" data-placeholder="Semua sales">
+                        <option value="">Semua sales</option>
+                        @foreach ($salesUsers as $user)
+                            <option value="{{ $user->id }}" @selected(($assignedUserId ?? '') === $user->id)>
+                                {{ $user->display_name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+            @endif
+
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Level pembayaran</label>
+                <select name="level" class="select2 select2-compact w-full" data-placeholder="Semua level">
+                    <option value="">Semua level</option>
+                    @foreach ($paymentLevels as $lv)
+                        <option value="{{ $lv }}" @selected(($levelFilter ?? '') === $lv)>
+                            {{ \App\Support\PaymentLevel::label($lv) }}
+                        </option>
+                    @endforeach
+                </select>
             </div>
         </div>
-        <x-btn type="submit" variant="primary" icon="bi-search">Cari</x-btn>
-        @if ($search)
-            <x-btn href="{{ route('customers.index', request()->only('type')) }}" variant="ghost">Reset</x-btn>
-        @endif
+
+        <div class="crm-opp-filters__actions">
+            <div class="crm-opp-filters__buttons">
+                <x-btn type="submit" variant="primary" icon="bi-search">Cari</x-btn>
+                @if ($hasFilters)
+                    <x-btn href="{{ route('customers.index') }}" variant="ghost">Reset</x-btn>
+                @endif
+            </div>
+            <p class="crm-opp-filters__total">
+                Total: <strong>{{ number_format($accounts->total()) }}</strong>
+            </p>
+        </div>
     </form>
 </x-card>
 
 @if ($types->isNotEmpty())
     <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Kategori:</span>
-        <a href="{{ route('customers.index', request()->only('q')) }}"
+        <a href="{{ route('customers.index', collect($filterQuery)->except('type')->all()) }}"
            @class([
                'rounded-full border px-3 py-1 text-xs font-medium transition',
-               'border-brand-300 bg-brand-50 text-brand-700' => ! $type,
-               'border-slate-200 bg-white text-slate-600 hover:border-slate-300' => $type,
+               'border-brand-300 bg-brand-50 text-brand-700' => ! ($type ?? null),
+               'border-slate-200 bg-white text-slate-600 hover:border-slate-300' => ($type ?? null),
            ])>
             Semua
         </a>
         @foreach ($types as $t)
-            <a href="{{ route('customers.index', array_filter(['q' => $search ?: null, 'type' => $t])) }}"
+            <a href="{{ route('customers.index', collect($filterQuery)->put('type', $t)->all()) }}"
                @class([
                    'rounded-full border px-3 py-1 text-xs font-medium transition',
-                   'border-brand-300 bg-brand-50 text-brand-700' => $type === $t,
-                   'border-slate-200 bg-white text-slate-600 hover:border-slate-300' => $type !== $t,
+                   'border-brand-300 bg-brand-50 text-brand-700' => ($type ?? null) === $t,
+                   'border-slate-200 bg-white text-slate-600 hover:border-slate-300' => ($type ?? null) !== $t,
                ])>
                 {{ $t }}
             </a>
@@ -113,7 +171,7 @@
         </div>
         <div class="crm-table-footer">{{ $accounts->links() }}</div>
     @else
-        <x-empty-state icon="bi-people" title="No customers found" message="Try adjusting your search or filters." />
+        <x-empty-state icon="bi-people" title="No customers found" message="Coba ubah kata kunci atau filter pencarian." />
     @endif
 </x-card>
 @endsection

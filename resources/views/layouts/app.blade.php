@@ -107,22 +107,28 @@
                     $nav[] = ['leads.index', 'Leads', 'bi-funnel'];
                 }
                 if ($user->canViewOpportunities() && ! $user->isFinance()) {
-                    $nav[] = ['opportunities.index', 'Opportunities', 'bi-briefcase'];
+                    $nav[] = $user->isPurchasing()
+                        ? ['opportunities.index', 'Closed Won', 'bi-trophy']
+                        : ['opportunities.index', 'Opportunities', 'bi-briefcase'];
                 }
                 if ($user->canViewSalesOrders()) {
                     $nav[] = ['sales-orders.index', 'SO', 'bi-receipt'];
                 }
-                if ($user->canManageVendorStocks()) {
-                    $nav[] = ['vendor-stocks.index', 'Ketersediaan Vendor', 'bi-boxes'];
+                if ($user->canViewPurchaseOrders()) {
+                    $nav[] = ['purchase-orders.index', 'PO', 'bi-cart-check'];
                 }
-                if ($user->canManageVendors() && ! $user->canAccessAdministration()) {
-                    $nav[] = ['vendors.index', 'Vendors', 'bi-truck'];
-                }
+                $catalogNav = [];
                 if ($user->canManageBrands() && ! $user->canAccessAdministration()) {
-                    $nav[] = ['brands.index', 'Brands', 'bi-tags'];
+                    $catalogNav[] = ['brands.index', 'Brands', 'bi-tags'];
                 }
                 if ($user->canManageCategories() && ! $user->canAccessAdministration()) {
-                    $nav[] = ['categories.index', 'Categories', 'bi-folder'];
+                    $catalogNav[] = ['categories.index', 'Categories', 'bi-folder'];
+                }
+                if ($user->canManageVendors() && ! $user->canAccessAdministration()) {
+                    $catalogNav[] = ['vendors.index', 'Vendors', 'bi-truck'];
+                }
+                if ($user->canManageVendorStocks()) {
+                    $nav[] = ['vendor-stocks.index', 'Ketersediaan Vendor', 'bi-boxes'];
                 }
                 if ($user->canCreateOpportunity() || $user->isAdmin()) {
                     $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
@@ -140,6 +146,21 @@
                     <span class="crm-sidebar-label truncate">{{ $label }}</span>
                 </a>
             @endforeach
+
+            @if (! empty($catalogNav))
+                <div class="crm-sidebar-label px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Master Data
+                </div>
+                @foreach ($catalogNav as [$route, $label, $icon])
+                    @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
+                    <a href="{{ route($route) }}" title="{{ $label }}"
+                       class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
+                              {{ $active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                        <i class="bi {{ $icon }} shrink-0 text-base"></i>
+                        <span class="crm-sidebar-label truncate">{{ $label }}</span>
+                    </a>
+                @endforeach
+            @endif
 
             @if (auth()->user()->canAccessAdministration())
                 <div class="crm-sidebar-label px-3 pt-5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Administration</div>

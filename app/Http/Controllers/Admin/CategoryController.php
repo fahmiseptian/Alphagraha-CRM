@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\AuthorizesCatalog;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Support\CatalogExcel;
@@ -11,6 +12,17 @@ use Illuminate\Validation\ValidationException;
 
 class CategoryController extends Controller
 {
+    use AuthorizesCatalog;
+
+    public function __construct()
+    {
+        $this->middleware(function ($request, $next) {
+            $this->authorizeCategoryManagement();
+
+            return $next($request);
+        });
+    }
+
     public function index()
     {
         $categories = Category::query()->ordered()->orderByDesc('id')->get();
@@ -84,6 +96,30 @@ class CategoryController extends Controller
         return redirect()
             ->route('categories.index')
             ->with('success', CatalogExcel::resultMessage($result, 'category'));
+    }
+
+    public function quickStore(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $name = trim($data['name']);
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'name' => 'Nama category wajib diisi.',
+            ]);
+        }
+
+        $category = Category::query()->firstOrCreate(
+            ['name' => $name],
+            ['is_active' => true, 'sort_order' => 0]
+        );
+
+        return response()->json([
+            'id' => $category->id,
+            'name' => $category->name,
+        ]);
     }
 
     /**

@@ -2,7 +2,7 @@
 @section('title', 'Vendors')
 
 @section('content')
-<x-page-header title="Vendors" description="Master vendor untuk item opportunity. Satu vendor bisa punya banyak brand & PIC.">
+<x-page-header title="Vendors" description="Master vendor untuk item opportunity. Dikelola superadmin, tim Product, dan Purchasing.">
     <x-slot:actions>
         <x-btn href="{{ route('vendor-stocks.index') }}" variant="secondary" icon="bi-boxes">Ketersediaan</x-btn>
         <x-btn href="{{ route('vendors.create') }}" icon="bi-plus-lg">New Vendor</x-btn>
@@ -34,6 +34,7 @@
                         <th data-field="company_status" data-sortable="true" data-width="160">Status Perusahaan</th>
                         <th data-field="brands" data-sortable="false">Brand</th>
                         <th data-field="top" data-sortable="true" data-width="140">TOP</th>
+                        <th data-field="pkp" data-sortable="true" data-width="90">PKP</th>
                         <th data-field="pic_label" data-sortable="false" data-width="110">PIC</th>
                         <th data-field="sort_order" data-sortable="true" data-align="right" data-width="90">Urutan</th>
                         <th data-field="status" data-sortable="true" data-width="110">Status</th>
@@ -60,6 +61,13 @@
                                 @endif
                             </td>
                             <td class="text-slate-600">{{ $item->topLabel() }}</td>
+                            <td>
+                                @if ($item->is_pkp)
+                                    <x-badge color="blue">PKP</x-badge>
+                                @else
+                                    <x-badge color="slate">Non-PKP</x-badge>
+                                @endif
+                            </td>
                             <td>
                                 <button type="button" class="js-vendor-detail inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-200">
                                     {{ $item->pics->count() }} PIC

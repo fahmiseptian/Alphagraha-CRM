@@ -24,14 +24,14 @@
         <form method="GET" action="{{ route('sales-orders.index') }}" class="crm-opp-filters">
             <div @class([
                 'crm-opp-filters__grid',
-                'crm-opp-filters__grid--admin' => auth()->user()->isAdmin(),
+                'crm-opp-filters__grid--admin' => ($canFilterSales ?? false),
             ])>
                 <div class="crm-opp-filters__field">
                     <label class="crm-label">Pencarian</label>
                     <div class="crm-search">
                         <i class="bi bi-search"></i>
                         <input type="text" name="q" value="{{ $search }}"
-                               placeholder="No. SO, PSO, PO, referensi, opportunity, customer..."
+                               placeholder="No. SO, PSO, PO, referensi, opportunity, customer, sales..."
                                class="crm-field" autocomplete="off">
                     </div>
                 </div>
@@ -56,11 +56,11 @@
                     </select>
                 </div>
 
-                @if (auth()->user()->isAdmin())
+                @if ($canFilterSales ?? false)
                     <div class="crm-opp-filters__field">
-                        <label class="crm-label">Assigned User</label>
-                        <select name="assigned_user_id" class="select2 select2-search w-full" data-placeholder="All sales">
-                            <option value="">All sales</option>
+                        <label class="crm-label">Sales</label>
+                        <select name="assigned_user_id" class="select2 select2-search w-full" data-placeholder="Semua sales">
+                            <option value="">Semua sales</option>
                             @foreach ($salesUsers as $user)
                                 <option value="{{ $user->id }}" @selected(($selectedUserId ?? '') === $user->id)>
                                     {{ $user->display_name }}
@@ -104,6 +104,9 @@
                     <tr>
                         <th>No. SO / PSO</th>
                         <th>Opportunity</th>
+                        @if ($canFilterSales ?? false)
+                            <th>Sales</th>
+                        @endif
                         <th class="text-right">Harga jual (excl)</th>
                         <th class="text-right">Modal (excl)</th>
                         <th>Status</th>
@@ -162,6 +165,11 @@
                                     <div class="text-xs text-slate-400">{{ $so->opportunity->account->name }}</div>
                                 @endif
                             </td>
+                            @if ($canFilterSales ?? false)
+                                <td class="text-slate-600">
+                                    {{ optional($so->opportunity?->assignedUser)->display_name ?: '—' }}
+                                </td>
+                            @endif
                             <td class="text-right tabular-nums text-slate-700">{{ money($nilaiJual, $currency) }}</td>
                             <td class="text-right tabular-nums text-slate-700">{{ money($modal, $currency) }}</td>
                             <td>
@@ -200,7 +208,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="py-10 text-center text-slate-500">
+                            <td colspan="{{ ($canFilterSales ?? false) ? 8 : 7 }}" class="py-10 text-center text-slate-500">
                                 @if ($hasFilters)
                                     Tidak ada Sales Order sesuai filter.
                                     <a href="{{ route('sales-orders.index') }}" class="ml-1 text-brand-600 hover:underline">Reset</a>

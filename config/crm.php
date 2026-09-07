@@ -116,6 +116,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Format nomor Purchase Order (default, tetap bisa diedit)
+    |--------------------------------------------------------------------------
+    | Contoh: AGC/26/09/1367  (prefix / tahun 2 digit / bulan / nomor urut purchasing)
+    */
+    'purchase_order_number' => [
+        'prefix' => env('CRM_PO_NUMBER_PREFIX', 'AGC'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Fallback tarif pajak (jika belum ada di DB crm_settings)
     |--------------------------------------------------------------------------
     */

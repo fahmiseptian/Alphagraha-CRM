@@ -970,7 +970,19 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
-     * Simpan margin ke deal bila Closed Won; kosongkan jika stage berubah.
+     * Persentase margin setelah diskon tambahan terhadap basis penjualan.
+     */
+    public function salesMarginPercent(): ?float
+    {
+        $denom = $this->totalMarginPercentDenominator();
+        if ($denom <= 0) {
+            return null;
+        }
+
+        return round(($this->salesMargin() / $denom) * 100, 2);
+    }
+
+    /**
      * Sudah dipotong diskon tambahan.
      */
     public function syncWonMargin(): void

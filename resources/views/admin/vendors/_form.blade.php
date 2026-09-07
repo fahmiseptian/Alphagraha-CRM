@@ -1,5 +1,5 @@
 @php
-    $vendor = $vendor ?? new \App\Models\Vendor(['is_active' => true, 'top' => \App\Support\CustomerTop::DAYS_30]);
+    $vendor = $vendor ?? new \App\Models\Vendor(['is_active' => true, 'top' => \App\Support\CustomerTop::DAYS_30, 'is_pkp' => true]);
     $brandOptions = $brandOptions ?? collect();
     $selectedBrandIds = collect(old('brand_ids', $vendor->exists ? $vendor->brands->pluck('id')->all() : []))
         ->map(fn ($id) => (string) $id)
@@ -68,6 +68,13 @@
         <p class="mt-1 text-xs text-slate-400">Terms of Payment. Default: TOP 30 hari.</p>
         @error('top')<p class="mt-1 text-xs text-red-600">{{ $message }}</p>@enderror
     </div>
+    <label class="flex items-center gap-2 text-sm text-slate-700">
+        <input type="hidden" name="is_pkp" value="0">
+        <input type="checkbox" name="is_pkp" value="1" @checked(old('is_pkp', $vendor->is_pkp ?? true))
+               class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+        PKP (Pengusaha Kena Pajak)
+    </label>
+    <p class="text-xs text-slate-400 -mt-2">Jika non-PKP, harga vendor di PO default tanpa PPN. Bisa diubah per item di form PO.</p>
     <div>
         <label class="crm-label">Urutan</label>
         <input type="number" name="sort_order" value="{{ old('sort_order', $vendor->sort_order ?? 0) }}" min="0" max="9999"

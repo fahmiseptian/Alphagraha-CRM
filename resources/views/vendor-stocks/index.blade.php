@@ -74,7 +74,7 @@
                             </td>
                             <td class="text-slate-700">{{ $item->vendor?->name ?: '—' }}</td>
                             <td>
-                                <x-badge :color="$item->isReady() ? 'green' : 'amber'">{{ $item->statusLabel() }}</x-badge>
+                                <x-badge :color="$item->badgeColor()">{{ $item->statusLabel() }}</x-badge>
                                 @unless ($item->is_active)
                                     <x-badge color="slate">Nonaktif</x-badge>
                                 @endunless

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\AuthorizesCatalog;
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
 use App\Models\Vendor;
@@ -14,6 +15,17 @@ use Illuminate\Validation\ValidationException;
 
 class VendorController extends Controller
 {
+    use AuthorizesCatalog;
+
+    public function __construct()
+    {
+        $this->middleware(function ($request, $next) {
+            $this->authorizeVendorManagement();
+
+            return $next($request);
+        });
+    }
+
     public function index()
     {
         $vendors = Vendor::query()->with(['pics', 'brands'])->ordered()->orderByDesc('id')->get();
@@ -24,7 +36,7 @@ class VendorController extends Controller
     public function create()
     {
         return view('admin.vendors.create', [
-            'vendor' => new Vendor(['is_active' => true, 'top' => CustomerTop::DAYS_30]),
+            'vendor' => new Vendor(['is_active' => true, 'top' => CustomerTop::DAYS_30, 'is_pkp' => true]),
             'brandOptions' => $this->brandOptions(),
         ]);
     }
@@ -111,8 +123,37 @@ class VendorController extends Controller
             ->with('success', VendorExcel::resultMessage($result));
     }
 
+    public function quickStore(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $name = trim($data['name']);
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'name' => 'Nama vendor wajib diisi.',
+            ]);
+        }
+
+        $vendor = Vendor::query()->firstOrCreate(
+            ['name' => $name],
+            [
+                'is_active' => true,
+                'sort_order' => 0,
+                'top' => CustomerTop::DAYS_30,
+                'is_pkp' => true,
+            ]
+        );
+
+        return response()->json([
+            'id' => $vendor->id,
+            'name' => $vendor->name,
+        ]);
+    }
+
     /**
-     * @return array{name: string, company_status: ?string, top: string, is_active: bool, sort_order: int}
+     * @return array{name: string, company_status: ?string, top: string, is_pkp: bool, is_active: bool, sort_order: int}
      */
     protected function validated(Request $request, ?Vendor $vendor = null): array
     {
@@ -136,6 +177,7 @@ class VendorController extends Controller
             'top' => CustomerTop::isValid($data['top'] ?? null)
                 ? (string) $data['top']
                 : CustomerTop::DAYS_30,
+            'is_pkp' => $request->boolean('is_pkp'),
             'is_active' => $request->boolean('is_active'),
             'sort_order' => (int) ($data['sort_order'] ?? 0),
         ];

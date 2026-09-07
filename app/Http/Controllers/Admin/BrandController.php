@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\AuthorizesCatalog;
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
 use App\Support\CatalogExcel;
@@ -11,6 +12,17 @@ use Illuminate\Validation\ValidationException;
 
 class BrandController extends Controller
 {
+    use AuthorizesCatalog;
+
+    public function __construct()
+    {
+        $this->middleware(function ($request, $next) {
+            $this->authorizeBrandManagement();
+
+            return $next($request);
+        });
+    }
+
     public function index()
     {
         $brands = Brand::query()->ordered()->orderByDesc('id')->get();
@@ -84,6 +96,30 @@ class BrandController extends Controller
         return redirect()
             ->route('brands.index')
             ->with('success', CatalogExcel::resultMessage($result, 'brand'));
+    }
+
+    public function quickStore(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $name = trim($data['name']);
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'name' => 'Nama brand wajib diisi.',
+            ]);
+        }
+
+        $brand = Brand::query()->firstOrCreate(
+            ['name' => $name],
+            ['is_active' => true, 'sort_order' => 0]
+        );
+
+        return response()->json([
+            'id' => $brand->id,
+            'name' => $brand->name,
+        ]);
     }
 
     /**

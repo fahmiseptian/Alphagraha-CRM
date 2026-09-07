@@ -39,6 +39,17 @@
     $royaltyDalamPercent = \App\Support\OpportunityProductPricing::royaltyDalamPercent();
     $royaltyLuarPercent = \App\Support\OpportunityProductPricing::royaltyLuarPercent();
     $purchasingMode = $purchasingMode ?? false;
+    $catalogUser = auth()->user();
+    $catalogCanAdd = [
+        'brands' => (bool) ($catalogUser?->canManageBrands()),
+        'categories' => (bool) ($catalogUser?->canManageCategories()),
+        'vendors' => (bool) ($catalogUser?->canManageVendors()),
+    ];
+    $catalogQuickUrls = [
+        'brands' => route('brands.quick-store'),
+        'categories' => route('categories.quick-store'),
+        'vendors' => route('vendors.quick-store'),
+    ];
 @endphp
 <form method="POST" action="{{ $action }}" enctype="multipart/form-data"
       x-data="opportunityForm({{ \Illuminate\Support\Js::from([
@@ -73,6 +84,8 @@
           'stage' => old('stage', $opportunity->stage ?: 'Prospecting'),
           'initialStage' => $opportunity->stage ?: 'Prospecting',
           'noApprovalStages' => \App\Models\Espo\Opportunity::NO_APPROVAL_STAGES,
+          'catalogCanAdd' => $catalogCanAdd,
+          'catalogQuickUrls' => $catalogQuickUrls,
       ]) }})">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
@@ -762,14 +775,26 @@
                            @checked(old('has_shipping_charge', $opportunity->crm_has_shipping_charge))>
                     Ada ongkir (dijual ke customer)
                 </label>
-                <div x-show="hasShippingCharge" x-cloak class="mt-3 max-w-sm">
-                    <label class="mb-1 block text-xs font-medium text-slate-500">Ongkir jual</label>
-                    <input type="text" inputmode="decimal" placeholder="0"
-                           x-effect="if (editingField !== 'shipping') $el.value = formatId(shippingSell)"
-                           @focus="editingField = 'shipping'"
-                           @blur="editingField = null; $el.value = formatId(shippingSell)"
-                           @input="shippingSell = parseId($event.target.value)"
-                           class="crm-field w-full tabular-nums">
+                <div x-show="hasShippingCharge" x-cloak class="mt-3 grid max-w-md gap-3 sm:grid-cols-2">
+                    <div>
+                        <label class="mb-1 block text-xs font-medium text-slate-500">Exclude</label>
+                        <input type="text" inputmode="decimal" placeholder="0"
+                               x-effect="if (editingField !== 'ship-sell-ex') $el.value = formatId(shippingSell)"
+                               @focus="editingField = 'ship-sell-ex'"
+                               @blur="editingField = null; $el.value = formatId(shippingSell)"
+                               @input="onShippingSellExcludeChange(parseId($event.target.value))"
+                               class="crm-field w-full text-right tabular-nums">
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-xs font-medium text-slate-500">Include</label>
+                        <input type="text" inputmode="decimal" placeholder="0"
+                               x-effect="if (editingField !== 'ship-sell-inc') $el.value = formatId(shippingSellInclude())"
+                               @focus="editingField = 'ship-sell-inc'"
+                               @blur="editingField = null; $el.value = formatId(shippingSellInclude())"
+                               @input="onShippingSellIncludeChange(parseId($event.target.value))"
+                               class="crm-field w-full border-amber-200 bg-amber-50 text-right tabular-nums"
+                               title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                    </div>
                     <input type="hidden" name="shipping_sell" :value="shippingSell">
                     @if (auth()->user()?->isSuperAdmin())
                     <p class="mt-1 text-xs text-slate-400">
@@ -1097,6 +1122,8 @@
             marginMaxPercent: Number(config.marginMaxPercent) || 90,
             purchasingMode: !!config.purchasingMode,
             productTemplateUrl: config.productTemplateUrl || '',
+            catalogCanAdd: config.catalogCanAdd || { brands: false, categories: false, vendors: false },
+            catalogQuickUrls: config.catalogQuickUrls || {},
             productImportBusy: false,
             stage: config.stage || 'Prospecting',
             initialStage: config.initialStage || config.stage || 'Prospecting',
@@ -1274,6 +1301,15 @@
             excludeFromInclude(include) {
                 if (TAX_MULTIPLIER <= 0) return 0;
                 return this.round((Number(include) || 0) / TAX_MULTIPLIER);
+            },
+            shippingSellInclude() {
+                return this.round((Number(this.shippingSell) || 0) * TAX_MULTIPLIER);
+            },
+            onShippingSellExcludeChange(value) {
+                this.shippingSell = Number(value) || 0;
+            },
+            onShippingSellIncludeChange(value) {
+                this.shippingSell = this.excludeFromInclude(value);
             },
             /** Pembulatan ke atas per seribu (540541 → 541000). */
             ceilThousand(value) {
@@ -1736,20 +1772,41 @@
                 const $el = window.jQuery(el);
                 CrmSelect2.destroy(el);
 
-                $el.select2({
+                const canAdd = !!this.catalogCanAdd?.brands && !this.purchasingMode;
+                const selectOpts = {
                     width: '100%',
                     placeholder: $el.data('placeholder') || '— Brand —',
                     allowClear: true,
                     dropdownParent: window.jQuery(document.body),
                     language: {
-                        noResults: () => 'Brand tidak ditemukan',
+                        noResults: () => canAdd ? 'Ketik nama brand baru' : 'Brand tidak ditemukan',
                         searching: () => 'Mencari...',
                     },
-                });
+                };
+
+                if (canAdd) {
+                    selectOpts.tags = true;
+                    selectOpts.createTag = (params) => {
+                        const term = window.jQuery.trim(params.term);
+                        if (term === '') return null;
+                        return { id: term, text: term, newTag: true };
+                    };
+                }
+
+                $el.select2(selectOpts);
 
                 $el.off('.crmBrand');
-                $el.on('change.crmBrand select2:select.crmBrand select2:clear.crmBrand', () => {
+                $el.on('change.crmBrand select2:clear.crmBrand', () => {
                     if (!this.products[index]) return;
+                    this.products[index].brand = $el.val() || '';
+                });
+                $el.on('select2:select.crmBrand', async (event) => {
+                    if (!this.products[index]) return;
+                    const data = event.params?.data;
+                    if (canAdd && data?.newTag) {
+                        await this.persistCatalogQuick('brands', data.id, $el, index, 'brand');
+                        return;
+                    }
                     this.products[index].brand = $el.val() || '';
                 });
 
@@ -1779,20 +1836,41 @@
                 const $el = window.jQuery(el);
                 CrmSelect2.destroy(el);
 
-                $el.select2({
+                const canAdd = !!this.catalogCanAdd?.categories && !this.purchasingMode;
+                const selectOpts = {
                     width: '100%',
                     placeholder: $el.data('placeholder') || '— Category —',
                     allowClear: true,
                     dropdownParent: window.jQuery(document.body),
                     language: {
-                        noResults: () => 'Category tidak ditemukan',
+                        noResults: () => canAdd ? 'Ketik nama category baru' : 'Category tidak ditemukan',
                         searching: () => 'Mencari...',
                     },
-                });
+                };
+
+                if (canAdd) {
+                    selectOpts.tags = true;
+                    selectOpts.createTag = (params) => {
+                        const term = window.jQuery.trim(params.term);
+                        if (term === '') return null;
+                        return { id: term, text: term, newTag: true };
+                    };
+                }
+
+                $el.select2(selectOpts);
 
                 $el.off('.crmCategory');
-                $el.on('change.crmCategory select2:select.crmCategory select2:clear.crmCategory', () => {
+                $el.on('change.crmCategory select2:clear.crmCategory', () => {
                     if (!this.products[index]) return;
+                    this.products[index].category = $el.val() || '';
+                });
+                $el.on('select2:select.crmCategory', async (event) => {
+                    if (!this.products[index]) return;
+                    const data = event.params?.data;
+                    if (canAdd && data?.newTag) {
+                        await this.persistCatalogQuick('categories', data.id, $el, index, 'category');
+                        return;
+                    }
                     this.products[index].category = $el.val() || '';
                 });
 
@@ -1822,20 +1900,41 @@
                 const $el = window.jQuery(el);
                 CrmSelect2.destroy(el);
 
-                $el.select2({
+                const canAdd = !!this.catalogCanAdd?.vendors;
+                const selectOpts = {
                     width: '100%',
                     placeholder: $el.data('placeholder') || '— Vendor —',
                     allowClear: true,
                     dropdownParent: window.jQuery(document.body),
                     language: {
-                        noResults: () => 'Vendor tidak ditemukan',
+                        noResults: () => canAdd ? 'Ketik nama vendor baru' : 'Vendor tidak ditemukan',
                         searching: () => 'Mencari...',
                     },
-                });
+                };
+
+                if (canAdd) {
+                    selectOpts.tags = true;
+                    selectOpts.createTag = (params) => {
+                        const term = window.jQuery.trim(params.term);
+                        if (term === '') return null;
+                        return { id: term, text: term, newTag: true };
+                    };
+                }
+
+                $el.select2(selectOpts);
 
                 $el.off('.crmVendor');
-                $el.on('change.crmVendor select2:select.crmVendor select2:clear.crmVendor', () => {
+                $el.on('change.crmVendor select2:clear.crmVendor', () => {
                     if (!this.products[index]) return;
+                    this.products[index].vendor = $el.val() || '';
+                });
+                $el.on('select2:select.crmVendor', async (event) => {
+                    if (!this.products[index]) return;
+                    const data = event.params?.data;
+                    if (canAdd && data?.newTag) {
+                        await this.persistCatalogQuick('vendors', data.id, $el, index, 'vendor');
+                        return;
+                    }
                     this.products[index].vendor = $el.val() || '';
                 });
 
@@ -1846,6 +1945,52 @@
                     $el.append(new Option(vendor, vendor, true, true));
                 }
                 $el.val(vendor || '').trigger('change.select2');
+            },
+            async persistCatalogQuick(type, name, $el, index, field) {
+                const url = this.catalogQuickUrls?.[type];
+                if (!url || !name) return;
+
+                const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': token,
+                        },
+                        body: JSON.stringify({ name }),
+                    });
+
+                    if (!response.ok) {
+                        let message = 'Gagal menyimpan data.';
+                        try {
+                            const payload = await response.json();
+                            message = payload.message || Object.values(payload.errors || {})[0]?.[0] || message;
+                        } catch (e) {}
+                        throw new Error(message);
+                    }
+
+                    const payload = await response.json();
+                    const savedName = payload.name || name;
+
+                    if (!$el.find('option').filter(function () {
+                        return String(window.jQuery(this).val()) === String(savedName);
+                    }).length) {
+                        $el.append(new Option(savedName, savedName, true, true));
+                    }
+
+                    $el.val(savedName).trigger('change.select2');
+                    if (this.products[index]) {
+                        this.products[index][field] = savedName;
+                    }
+                } catch (error) {
+                    window.alert(error.message || 'Gagal menambah data master.');
+                    $el.val('').trigger('change.select2');
+                    if (this.products[index]) {
+                        this.products[index][field] = '';
+                    }
+                }
             },
             refreshVendorSelects() {
                 this.$nextTick(() => {

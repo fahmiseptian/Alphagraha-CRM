@@ -37,6 +37,10 @@ class OpportunityController extends Controller
             abort(403, 'Anda tidak memiliki akses ke Opportunities.');
         }
 
+        if (auth()->user()->isPurchasing()) {
+            return $this->purchasingIndex($request);
+        }
+
         $kanbanStages = Opportunity::KANBAN_STAGES;
         $view = $request->get('view') === 'list' ? 'list' : 'kanban';
         $selectedUserId = $this->resolveAssignedUserFilter($request);
@@ -127,6 +131,91 @@ class OpportunityController extends Controller
             'grouped' => $grouped,
             'duplicateMap' => Opportunity::duplicateMap($kanbanOpportunities),
             'summary' => $this->buildOpportunitySummary($allOpportunities, $kanbanStages),
+        ]);
+    }
+
+    /**
+     * Daftar Closed Won untuk purchasing: antrian PO, bukan pipeline sales.
+     */
+    protected function purchasingIndex(Request $request)
+    {
+        $period = $this->resolvePeriodFilter($request);
+        $periodRange = $this->periodDateRange($period);
+        $periodLabel = $this->periodLabel($period);
+
+        $search = trim((string) $request->get('q', ''));
+        $companyFilter = trim((string) $request->get('company', ''));
+        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
+            $companyFilter = '';
+        }
+        $accountId = trim((string) $request->get('account_id', ''));
+        if ($accountId !== '' && ! Account::query()->where('id', $accountId)->exists()) {
+            $accountId = '';
+        }
+
+        $selectedUserId = null;
+        $rawSalesId = $request->input('assigned_user_id');
+        if (is_array($rawSalesId)) {
+            $rawSalesId = $rawSalesId[0] ?? '';
+        }
+        $rawSalesId = trim((string) $rawSalesId);
+        if ($rawSalesId !== '' && EspoUser::query()->activeSales()->where('id', $rawSalesId)->exists()) {
+            $selectedUserId = $rawSalesId;
+        }
+
+        $poStatus = trim((string) $request->get('po_status', ''));
+        if (! in_array($poStatus, ['pending', 'done'], true)) {
+            $poStatus = '';
+        }
+
+        $query = Opportunity::query()
+            ->with(['account', 'assignedUser'])
+            ->withCount('purchaseOrders')
+            ->where('stage', Opportunity::WON_STAGE);
+
+        $this->applyPeriodToOpportunityQuery($query, $periodRange);
+        $this->applyOpportunityIndexFilters($query, $search, '', $companyFilter, $accountId);
+
+        if ($selectedUserId !== null) {
+            $query->where($query->getModel()->getTable().'.assigned_user_id', $selectedUserId);
+        }
+
+        $statsQuery = clone $query;
+        $total = (clone $statsQuery)->count();
+        $pendingPo = (clone $statsQuery)->whereDoesntHave('purchaseOrders')->count();
+        $donePo = max($total - $pendingPo, 0);
+
+        if ($poStatus === 'pending') {
+            $query->whereDoesntHave('purchaseOrders');
+        } elseif ($poStatus === 'done') {
+            $query->whereHas('purchaseOrders');
+        }
+
+        $opportunities = $query
+            ->orderBy('purchase_orders_count')
+            ->orderByDesc('close_date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
+        $filterAccounts = Account::query()->orderBy('name')->get(['id', 'name']);
+        $salesUsers = EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name']);
+
+        return view('opportunities.index-purchasing', [
+            'opportunities' => $opportunities,
+            'search' => $search,
+            'companyFilter' => $companyFilter,
+            'accountId' => $accountId,
+            'filterAccounts' => $filterAccounts,
+            'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $periodLabel,
+            'salesUsers' => $salesUsers,
+            'companies' => Opportunity::COMPANIES,
+            'poStatus' => $poStatus,
+            'pendingPo' => $pendingPo,
+            'donePo' => $donePo,
+            'total' => $total,
         ]);
     }
 
@@ -253,14 +342,21 @@ class OpportunityController extends Controller
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
 
+        $notifications = app(\App\Services\NotificationService::class);
+
         if ($notifyDiscount) {
-            app(\App\Services\NotificationService::class)->notifyDiscountRequested($opportunity);
+            $notifications->notifyDiscountRequested($opportunity);
         }
         if ($notifyMargin) {
-            app(\App\Services\NotificationService::class)->notifyOpportunityMarginRequested($opportunity);
+            $notifications->notifyOpportunityMarginRequested($opportunity);
         }
+        $this->notifySalesAssignmentIfChanged($opportunity, null, $notifications);
+        $customerTransferred = $this->syncLinkedCustomerOnSalesAssignment($opportunity, null);
 
         $message = 'Opportunity created successfully.';
+        if ($customerTransferred) {
+            $message .= ' Customer juga dialihkan ke sales yang ditunjuk.';
+        }
         if ($opportunity->discountNeedsAttention()) {
             $message .= ' Diskon menunggu approval Superadmin.';
         }
@@ -306,6 +402,7 @@ class OpportunityController extends Controller
 
         $data = $this->validateData($request, creating: false, opportunity: $opportunity);
         $pricingBefore = $opportunity->productsPricingFingerprint();
+        $previousAssignedUserId = $opportunity->assigned_user_id;
         $this->applyValidatedData($opportunity, $data, $request);
         $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
 
@@ -355,7 +452,13 @@ class OpportunityController extends Controller
             $notifications->markOpportunityDeadlineActioned($opportunity);
         }
 
+        $this->notifySalesAssignmentIfChanged($opportunity, $previousAssignedUserId, $notifications);
+        $customerTransferred = $this->syncLinkedCustomerOnSalesAssignment($opportunity, $previousAssignedUserId);
+
         $message = 'Opportunity updated successfully.';
+        if ($customerTransferred) {
+            $message .= ' Customer juga dialihkan ke sales yang ditunjuk.';
+        }
         if ($syncedQuotationItems) {
             $message .= ' Item Quotation disinkronkan; status QO menjadi Draft.';
         }
@@ -1267,6 +1370,80 @@ class OpportunityController extends Controller
         }
 
         abort(403, 'You do not have access to this opportunity.');
+    }
+
+    protected function notifySalesAssignmentIfChanged(
+        Opportunity $opportunity,
+        ?string $previousAssignedUserId,
+        \App\Services\NotificationService $notifications,
+    ): void {
+        if (! $this->isAdmin()) {
+            return;
+        }
+
+        $newAssignedUserId = $opportunity->assigned_user_id;
+        if (! filled($newAssignedUserId)) {
+            return;
+        }
+
+        if ((string) $previousAssignedUserId === (string) $newAssignedUserId) {
+            return;
+        }
+
+        $notifications->notifyOpportunityAssigned(
+            $opportunity,
+            $previousAssignedUserId,
+            auth()->id(),
+        );
+    }
+
+    /**
+     * Saat admin menunjuk sales baru pada opportunity, customer terkait ikut dialihkan.
+     */
+    protected function syncLinkedCustomerOnSalesAssignment(
+        Opportunity $opportunity,
+        ?string $previousAssignedUserId,
+    ): bool {
+        if (! $this->isAdmin()) {
+            return false;
+        }
+
+        $newAssignedUserId = $opportunity->assigned_user_id;
+        if (! filled($newAssignedUserId)) {
+            return false;
+        }
+
+        if ((string) $previousAssignedUserId === (string) $newAssignedUserId) {
+            return false;
+        }
+
+        if (! filled($opportunity->account_id)) {
+            return false;
+        }
+
+        $account = Account::query()->whereKey($opportunity->account_id)->first();
+        if (! $account) {
+            return false;
+        }
+
+        if ((string) $account->assigned_user_id === (string) $newAssignedUserId) {
+            return false;
+        }
+
+        $now = Carbon::now()->format('Y-m-d H:i:s');
+
+        $account->assigned_user_id = $newAssignedUserId;
+        $account->modified_at = $now;
+        $account->save();
+
+        Contact::query()
+            ->where('account_id', $account->id)
+            ->update([
+                'assigned_user_id' => $newAssignedUserId,
+                'modified_at' => $now,
+            ]);
+
+        return true;
     }
 
     /**

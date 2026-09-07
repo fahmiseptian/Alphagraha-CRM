@@ -28,8 +28,9 @@
 .po-summary .row-total td { font-weight: 700; background: #f9fafb; }
 
 .margin-banner {
-    display: inline-block; margin: 4px 0 10px; padding: 4px 14px;
-    border: 1px solid #333; font-size: 16px; font-weight: 700;
+    display: block; margin: 4px 0 10px; margin-left: auto; width: fit-content;
+    padding: 4px 14px; border: 1px solid #333; font-size: 16px; font-weight: 700;
+    text-align: center;
 }
 
 .po-settled { width: auto; margin-bottom: 16px; border: none !important; }

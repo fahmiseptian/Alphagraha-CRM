@@ -2,7 +2,7 @@
 @section('title', 'Categories')
 
 @section('content')
-<x-page-header title="Categories" description="Master kategori produk untuk opportunity. Dikelola superadmin, tanpa API AGC.">
+<x-page-header title="Categories" description="Master kategori produk untuk opportunity. Dikelola superadmin dan tim Product.">
     <x-slot:actions>
         <x-btn href="{{ route('categories.create') }}" icon="bi-plus-lg">New Category</x-btn>
     </x-slot:actions>

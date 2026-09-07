@@ -127,20 +127,35 @@ class PurchaseOrderService
     }
 
     /**
-     * Sarankan nomor PO unik berdasarkan vendor.
+     * Prefix otomatis nomor PO: AGC/YY/MM/
+     * Nomor urut diisi purchasing; seluruh string tetap bisa diedit.
+     */
+    public static function numberPrefix(?Carbon $date = null): string
+    {
+        $date ??= now();
+        $prefix = trim((string) config('crm.purchase_order_number.prefix', 'AGC')) ?: 'AGC';
+
+        return sprintf('%s/%s/%s/', $prefix, $date->format('y'), $date->format('m'));
+    }
+
+    public static function numberExample(?Carbon $date = null): string
+    {
+        return rtrim(self::numberPrefix($date), '/').'/1367';
+    }
+
+    public static function numberHasSequence(string $number): bool
+    {
+        $number = trim($number);
+
+        return $number !== '' && ! str_ends_with($number, '/');
+    }
+
+    /**
+     * Default nomor PO (prefix tahun/bulan). Nomor urut dikosongkan untuk diisi purchasing.
      */
     public function suggestNumber(Opportunity $opportunity, string $vendorName): string
     {
-        $slug = strtoupper(preg_replace('/[^A-Z0-9]+/i', '', substr($vendorName, 0, 6)) ?: 'PO');
-        $base = 'PO-'.now()->format('Ymd').'-'.$slug;
-        $candidate = $base;
-        $n = 1;
-        while (PurchaseOrder::query()->where('number', $candidate)->exists()) {
-            $n++;
-            $candidate = $base.'-'.$n;
-        }
-
-        return $candidate;
+        return self::numberPrefix();
     }
 
     /**
@@ -199,7 +214,7 @@ class PurchaseOrderService
 
     /**
      * Hapus semua item lama, insert ulang, update total header.
-     * line_total = qty × jumlah_exclude (modal + surcharge dari settings).
+     * line_total = qty × jumlah_exclude (modal + tambahan Cash/TOP di sisi exclude).
      * Harga modal diambil dari vendor yang dipilih (is_selected).
      *
      * @param  list<array<string, mixed>>  $items
@@ -208,7 +223,6 @@ class PurchaseOrderService
     {
         $purchaseOrder->items()->delete();
 
-        $rate = PurchaseOrderPricing::surchargeRate($purchaseOrder->payment_term);
         $total = 0.0;
 
         foreach (array_values($items) as $index => $item) {
@@ -218,9 +232,9 @@ class PurchaseOrderService
             $unitPrice = $selected !== null
                 ? round((float) ($selected['unit_price'] ?? 0), 2)
                 : round((float) ($item['unit_price'] ?? 0), 2);
-            $extra = $rate > 0 ? round($unitPrice * $rate, 2) : 0.0;
-            $jumlahExclude = round($unitPrice + $extra, 2);
-            $lineTotal = round($qty * $jumlahExclude, 2);
+            $rate = PurchaseOrderPricing::surchargeRate($purchaseOrder->payment_term);
+            $extraExclude = $rate > 0 ? round($unitPrice * $rate, 2) : 0.0;
+            $lineTotal = round($qty * round($unitPrice + $extraExclude, 2), 2);
             $total += $lineTotal;
 
             $oppProductName = trim((string) ($item['opportunity_product_name'] ?? ''));
@@ -327,7 +341,7 @@ class PurchaseOrderService
 
     /**
      * @param  array<string, mixed>  $item
-     * @return list<array{vendor_id:?int,vendor_stock_id:?int,vendor_name:string,product_name:string,status:string,top:string,unit_price:float,is_selected:bool}>
+     * @return list<array{vendor_id:?int,vendor_stock_id:?int,vendor_name:string,product_name:string,status:string,top:string,unit_price:float,is_pkp:bool,quoted_at:string,is_selected:bool}>
      */
     protected function normalizeQuotes(array $item): array
     {
@@ -358,6 +372,8 @@ class PurchaseOrderService
                 'status' => VendorStock::normalizeStatus($row['status'] ?? VendorStock::STATUS_READY),
                 'top' => CustomerTop::isValid($row['top'] ?? null) ? (string) $row['top'] : CustomerTop::DAYS_30,
                 'unit_price' => round((float) ($row['unit_price'] ?? 0), 2),
+                'is_pkp' => $this->resolveQuoteIsPkp($row, $vendorId),
+                'quoted_at' => $this->normalizeQuoteDate($row['quoted_at'] ?? null),
                 'is_selected' => $this->truthy($row['is_selected'] ?? false),
             ];
         }
@@ -485,6 +501,9 @@ class PurchaseOrderService
                 'status' => $quote['status'],
                 'top' => $quote['top'] ?? CustomerTop::DAYS_30,
                 'unit_price' => $quote['unit_price'],
+                'unit_price_basis' => 'exclude',
+                'is_pkp' => (bool) ($quote['is_pkp'] ?? true),
+                'quoted_at' => $quote['quoted_at'] ?? null,
                 'is_selected' => $isSelected,
                 'sort_order' => $index,
             ]);
@@ -494,6 +513,41 @@ class PurchaseOrderService
     protected function truthy(mixed $value): bool
     {
         return in_array($value, [true, 1, '1', 'true', 'on', 'yes'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    protected function resolveQuoteIsPkp(array $row, ?int $vendorId): bool
+    {
+        if (array_key_exists('is_pkp', $row)) {
+            return $this->truthy($row['is_pkp']);
+        }
+
+        if ($vendorId) {
+            $vendorIsPkp = Vendor::query()->whereKey($vendorId)->value('is_pkp');
+
+            return $vendorIsPkp === null ? true : (bool) $vendorIsPkp;
+        }
+
+        return true;
+    }
+
+    protected function normalizeQuoteDate(mixed $value): string
+    {
+        $today = Carbon::today()->toDateString();
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return $today;
+        }
+
+        try {
+            $date = Carbon::parse($raw)->toDateString();
+        } catch (\Throwable) {
+            return $today;
+        }
+
+        return $date > $today ? $today : $date;
     }
 
     protected function normalizePaymentTerm(string $paymentTerm): string

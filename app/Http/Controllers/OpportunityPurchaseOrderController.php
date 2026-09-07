@@ -7,10 +7,12 @@ use App\Models\Espo\Opportunity;
 use App\Models\PurchaseOrder;
 use App\Models\VendorStock;
 use App\Support\CustomerTop;
+use App\Support\OpportunityProductPricing;
 use App\Services\PurchaseOrderReportService;
 use App\Services\PurchaseOrderService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -169,7 +171,14 @@ class OpportunityPurchaseOrderController extends Controller
     {
         $data = $request->validate([
             'pos' => ['required', 'array', 'min:1'],
-            'pos.*.number' => ['required', 'string', 'max:100', 'distinct', Rule::unique('crm_purchase_orders', 'number')],
+            'pos.*.number' => [
+                'required',
+                'string',
+                'max:100',
+                'distinct',
+                Rule::unique('crm_purchase_orders', 'number'),
+                $this->poNumberSequenceRule(),
+            ],
             'pos.*.vendor_id' => ['required', 'integer', 'distinct', 'exists:crm_vendors,id'],
             'pos.*.vendor_name' => ['nullable', 'string', 'max:255'],
             'pos.*.payment_term' => ['required', Rule::in([PurchaseOrder::PAYMENT_TOP, PurchaseOrder::PAYMENT_CASH])],
@@ -185,15 +194,20 @@ class OpportunityPurchaseOrderController extends Controller
             'pos.*.items.*.vendors.*.vendor_id' => ['nullable', 'integer', 'exists:crm_vendors,id'],
             'pos.*.items.*.vendors.*.vendor_stock_id' => ['nullable', 'integer', 'exists:crm_vendor_stocks,id'],
             'pos.*.items.*.vendors.*.vendor_name' => ['nullable', 'string', 'max:255'],
-            'pos.*.items.*.vendors.*.status' => ['required', Rule::in([VendorStock::STATUS_READY, VendorStock::STATUS_INDENT])],
+            'pos.*.items.*.vendors.*.status' => ['required', Rule::in(array_keys(VendorStock::STATUSES))],
             'pos.*.items.*.vendors.*.top' => ['nullable', 'string', Rule::in(CustomerTop::OPTIONS)],
             'pos.*.items.*.vendors.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'pos.*.items.*.vendors.*.price_basis' => ['nullable', Rule::in(['exclude', 'include'])],
+            'pos.*.items.*.vendors.*.is_pkp' => ['nullable'],
+            'pos.*.items.*.vendors.*.quoted_at' => ['nullable', 'date', 'before_or_equal:today'],
             'pos.*.items.*.vendors.*.is_selected' => ['nullable'],
         ], [
             'pos.required' => 'Belum ada PO yang bisa dibuat. Lengkapi item dan pilih vendor Dipilih.',
             'pos.*.vendor_id.distinct' => 'Setiap vendor hanya boleh satu PO dalam satu kali buat.',
             'pos.*.number.distinct' => 'Nomor PO tidak boleh sama.',
+            'pos.*.number.required' => 'Isi nomor urut PO. Contoh: '.PurchaseOrderService::numberExample().'.',
             'pos.*.payment_term.required' => 'Kondisi TOP/Cash wajib diisi per vendor.',
+            'pos.*.items.*.vendors.*.quoted_at.before_or_equal' => 'Tanggal vendor tidak boleh lebih dari hari ini.',
         ]);
 
         $pos = [];
@@ -304,7 +318,10 @@ class OpportunityPurchaseOrderController extends Controller
                 'product_name' => $itemName,
                 'status' => $quote['status'],
                 'top' => CustomerTop::isValid($quote['top'] ?? null) ? $quote['top'] : CustomerTop::DAYS_30,
-                'unit_price' => $quote['unit_price'],
+                'unit_price' => $this->normalizeQuoteUnitPrice($quote),
+                'price_basis' => $this->normalizeQuotePriceBasis($quote),
+                'is_pkp' => $this->normalizeQuoteIsPkp($quote, $vendorId),
+                'quoted_at' => $this->normalizeQuoteDate($quote['quoted_at'] ?? null),
                 'is_selected' => $quote['is_selected'] ?? false,
             ];
         }
@@ -327,6 +344,7 @@ class OpportunityPurchaseOrderController extends Controller
                 'string',
                 'max:100',
                 Rule::unique('crm_purchase_orders', 'number')->ignore($existing?->id),
+                $this->poNumberSequenceRule(),
             ],
             'vendor_id' => ['required', 'integer', 'exists:crm_vendors,id'],
             'vendor_name' => ['nullable', 'string', 'max:255'],
@@ -343,13 +361,18 @@ class OpportunityPurchaseOrderController extends Controller
             'items.*.vendors.*.vendor_id' => ['nullable', 'integer', 'exists:crm_vendors,id'],
             'items.*.vendors.*.vendor_stock_id' => ['nullable', 'integer', 'exists:crm_vendor_stocks,id'],
             'items.*.vendors.*.vendor_name' => ['nullable', 'string', 'max:255'],
-            'items.*.vendors.*.status' => ['required', Rule::in([VendorStock::STATUS_READY, VendorStock::STATUS_INDENT])],
+            'items.*.vendors.*.status' => ['required', Rule::in(array_keys(VendorStock::STATUSES))],
             'items.*.vendors.*.top' => ['nullable', 'string', Rule::in(CustomerTop::OPTIONS)],
             'items.*.vendors.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items.*.vendors.*.price_basis' => ['nullable', Rule::in(['exclude', 'include'])],
+            'items.*.vendors.*.is_pkp' => ['nullable'],
+            'items.*.vendors.*.quoted_at' => ['nullable', 'date', 'before_or_equal:today'],
             'items.*.vendors.*.is_selected' => ['nullable'],
         ], [
+            'number.required' => 'Isi nomor urut PO. Contoh: '.PurchaseOrderService::numberExample().'.',
             'vendor_id.required' => 'Pilih vendor untuk Purchase Order ini (satu PO = satu vendor).',
             'items.*.opportunity_product_name.required' => 'Setiap item harus terikat ke produk opportunity.',
+            'items.*.vendors.*.quoted_at.before_or_equal' => 'Tanggal vendor tidak boleh lebih dari hari ini.',
         ]);
 
         $data['number'] = trim($data['number']);
@@ -395,6 +418,8 @@ class OpportunityPurchaseOrderController extends Controller
                     'status' => $quote['status'],
                     'top' => CustomerTop::isValid($quote['top'] ?? null) ? $quote['top'] : CustomerTop::DAYS_30,
                     'unit_price' => $quote['unit_price'],
+                    'is_pkp' => $this->normalizeQuoteIsPkp($quote, $vendorId),
+                    'quoted_at' => $this->normalizeQuoteDate($quote['quoted_at'] ?? null),
                     'is_selected' => $quote['is_selected'] ?? false,
                 ];
             }
@@ -501,5 +526,84 @@ class OpportunityPurchaseOrderController extends Controller
         if ($purchaseOrder->opportunity_id !== $opportunity->id) {
             abort(404);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $quote
+     */
+    protected function normalizeQuotePriceBasis(array $quote): string
+    {
+        $basis = (string) ($quote['price_basis'] ?? 'exclude');
+
+        return in_array($basis, ['include', 'exclude'], true) ? $basis : 'exclude';
+    }
+
+    /**
+     * Simpan harga modal selalu exclude; konversi jika user input include.
+     *
+     * @param  array<string, mixed>  $quote
+     */
+    protected function normalizeQuoteUnitPrice(array $quote): float
+    {
+        $amount = round((float) ($quote['unit_price'] ?? 0), 2);
+        if ($amount <= 0) {
+            return 0.0;
+        }
+
+        if ($this->normalizeQuotePriceBasis($quote) === 'include') {
+            return OpportunityProductPricing::excludeFromInclude($amount);
+        }
+
+        return $amount;
+    }
+
+    /**
+     * @param  array<string, mixed>  $quote
+     */
+    protected function normalizeQuoteIsPkp(array $quote, ?int $vendorId): bool
+    {
+        if (array_key_exists('is_pkp', $quote)) {
+            return in_array($quote['is_pkp'], [true, 1, '1', 'true', 'on', 'yes'], true);
+        }
+
+        if ($vendorId) {
+            $vendorIsPkp = \App\Models\Vendor::query()->whereKey($vendorId)->value('is_pkp');
+
+            return $vendorIsPkp === null ? true : (bool) $vendorIsPkp;
+        }
+
+        return true;
+    }
+
+    protected function normalizeQuoteDate(mixed $value): string
+    {
+        $today = Carbon::today()->toDateString();
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return $today;
+        }
+
+        try {
+            $date = Carbon::parse($raw)->toDateString();
+        } catch (\Throwable) {
+            return $today;
+        }
+
+        return $date > $today ? $today : $date;
+    }
+
+    /**
+     * Nomor PO wajib punya urutan (bukan hanya prefix AGC/YY/MM/).
+     * Format tetap bebas diedit purchasing.
+     */
+    protected function poNumberSequenceRule(): \Closure
+    {
+        $example = PurchaseOrderService::numberExample();
+
+        return function (string $attribute, mixed $value, \Closure $fail) use ($example) {
+            if (! PurchaseOrderService::numberHasSequence((string) $value)) {
+                $fail('Isi nomor urut PO. Contoh: '.$example.'.');
+            }
+        };
     }
 }

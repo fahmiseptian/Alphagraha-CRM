@@ -2,7 +2,7 @@
 @section('title', 'Brands')
 
 @section('content')
-<x-page-header title="Brands" description="Master brand untuk opportunity & quotation. Dikelola superadmin, tanpa API AGC.">
+<x-page-header title="Brands" description="Master brand untuk opportunity & quotation. Dikelola superadmin dan tim Product.">
     <x-slot:actions>
         <x-btn href="{{ route('brands.create') }}" icon="bi-plus-lg">New Brand</x-btn>
     </x-slot:actions>

@@ -385,25 +385,40 @@ textarea.crm-field {
     color: #94a3b8;
 }
 
-.select2-container.select2--compact .select2-selection--single,
-select[data-po-vendor-select] + .select2-container .select2-selection--single {
+.select2-container.select2--compact .select2-selection--single {
     min-height: 32px;
     height: 32px;
     font-size: 0.75rem;
     border-radius: 0.375rem !important;
 }
 
-.select2-container.select2--compact .select2-selection--single .select2-selection__rendered,
-select[data-po-vendor-select] + .select2-container .select2-selection--single .select2-selection__rendered {
+.select2-container.select2--compact .select2-selection--single .select2-selection__rendered {
     line-height: 30px;
     padding-left: 8px;
     font-size: 0.75rem;
 }
 
-.select2-container.select2--compact .select2-selection--single .select2-selection__arrow,
-select[data-po-vendor-select] + .select2-container .select2-selection--single .select2-selection__arrow {
+.select2-container.select2--compact .select2-selection--single .select2-selection__arrow {
     height: 30px;
     right: 4px;
+}
+
+select[data-po-vendor-select] + .select2-container .select2-selection--single {
+    min-height: 40px;
+    height: 40px;
+    font-size: 0.875rem;
+    border-radius: 0.5rem !important;
+}
+
+select[data-po-vendor-select] + .select2-container .select2-selection--single .select2-selection__rendered {
+    line-height: 38px;
+    padding-left: 12px;
+    font-size: 0.875rem;
+}
+
+select[data-po-vendor-select] + .select2-container .select2-selection--single .select2-selection__arrow {
+    height: 38px;
+    right: 6px;
 }
 
 .select2-dropdown.select2--compact-dropdown {

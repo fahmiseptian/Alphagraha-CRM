@@ -63,6 +63,77 @@ class QuotationService
         return preg_replace('/^(\d+)-R\d+(\/.*)$/', '$1$2', $number) ?: $number;
     }
 
+    /**
+     * Ganti segmen sales code pada nomor QO: 0002/KA/QO/VII/26 → 0002/BB/QO/VII/26
+     */
+    public function replaceSalesCodeInNumber(string $number, string $newSalesCode): string
+    {
+        $newSalesCode = strtoupper(trim($newSalesCode));
+        if ($newSalesCode === '') {
+            return $number;
+        }
+
+        $normalized = $this->stripDocumentRevision(trim($number));
+        if (preg_match('/^(\d+)\/([A-Z0-9]+)\/(QO\/[IVX]+\/\d{2})$/i', $normalized, $matches)) {
+            return $matches[1].'/'.$newSalesCode.'/'.$matches[3];
+        }
+
+        return $number;
+    }
+
+    public function extractSalesCodeFromNumber(string $number): ?string
+    {
+        $normalized = $this->stripDocumentRevision(trim($number));
+        if (preg_match('/^(\d+)\/([A-Z0-9]+)\/(QO\/[IVX]+\/\d{2})$/i', $normalized, $matches)) {
+            return strtoupper($matches[2]);
+        }
+
+        return null;
+    }
+
+    /**
+     * QO draft murni (belum pernah Sent): samakan kode sales di nomor dengan assignee opportunity saat ini.
+     */
+    public function syncDraftQuotationSalesCode(Quotation $quotation, ?User $editor = null): bool
+    {
+        if ($quotation->status !== 'draft' || $quotation->hasBeenSent()) {
+            return false;
+        }
+
+        $editor = $editor ?? auth()->user();
+        $quotation->loadMissing('opportunity');
+
+        $salesContext = $this->resolveSalesCodeContext(
+            $quotation->opportunity_id ? (string) $quotation->opportunity_id : null,
+            $editor
+        );
+
+        $base = $quotation->base_number ?: $this->stripDocumentRevision((string) $quotation->number);
+        $currentCode = $this->extractSalesCodeFromNumber($base);
+        $targetCode = strtoupper(trim($salesContext['code']));
+
+        if ($targetCode === '') {
+            if ($currentCode !== null && $currentCode !== '') {
+                $who = $this->salesCodeOwnerLabel($salesContext['user']);
+                throw new \RuntimeException(
+                    'Sales Code untuk '.$who.' belum diisi. Minta admin mengisi Sales Code di menu Users sebelum menyimpan quotation.'
+                );
+            }
+
+            return false;
+        }
+
+        if ($currentCode === $targetCode) {
+            return false;
+        }
+
+        $updated = $this->replaceSalesCodeInNumber($base, $targetCode);
+        $quotation->base_number = $updated;
+        $quotation->number = $updated;
+
+        return true;
+    }
+
     public function parseDocumentRevision(string $number): int
     {
         if (preg_match('/^\d+-R(\d+)\//', $number, $m)) {
@@ -886,8 +957,7 @@ class QuotationService
             .'</tr></thead><tbody>'
             .$this->renderItemsRowsIndoInclude($quotation)
             .$this->renderItemsTableIndoIncludeSummary($quotation)
-            .'</tbody></table>'
-            .'<p style="font-size:10px;color:#64748b;margin:4px 0 0;">* Harga sudah termasuk PPN '.$taxLabel.'%</p>';
+            .'</tbody></table>';
     }
 
     protected function renderItemsRowsDiskonItem(Quotation $quotation): string

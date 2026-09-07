@@ -76,6 +76,21 @@
             fn ($p) => ($p['tax_category'] ?? '') === \App\Support\OpportunityProductPricing::TAX_INAPROC
         );
         $discountAmount = (float) $opportunity->crm_discount_amount;
+        $marginDenom = $opportunity->totalMarginPercentDenominator();
+        $marginBasisPercent = ($marginDenom > 0 && $discountBasisMargin > 0)
+            ? round(($discountBasisMargin / $marginDenom) * 100, 2)
+            : null;
+        $marginAfterDiscount = max(0, round($discountBasisMargin - $discountAmount, 2));
+        $marginAfterDiscountPercent = $marginDenom > 0
+            ? round(($marginAfterDiscount / $marginDenom) * 100, 2)
+            : null;
+        $marginPercentBasisLabel = $approvalProducts->contains(
+            fn ($p) => in_array(($p['tax_category'] ?? ''), [
+                \App\Support\OpportunityProductPricing::TAX_WAPU,
+                \App\Support\OpportunityProductPricing::TAX_INAPROC,
+            ], true)
+        ) ? 'jual setelah PPH' : 'total jual exclude';
+        $discountBasisLabel = $discountBasisIsGross ? 'margin kotor' : 'total margin';
     @endphp
     <div @class([
         'mb-4 rounded-lg border px-4 py-3 text-sm',
@@ -273,28 +288,50 @@
             {{-- Ringkasan detail untuk Superadmin --}}
             @if (auth()->user()->canApproveDiscount() && $approvalProducts->isNotEmpty())
                 <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
-                        <p class="text-[10px] uppercase tracking-wide text-slate-400">% Diskon</p>
-                        <p class="text-sm font-semibold text-slate-800">
-                            {{ $discPct !== null ? number_format($discPct, 2, ',', '.').'%' : '—' }}
+                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2.5">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                            {{ $discountBasisIsGross ? 'Margin Kotor' : 'Margin' }}
                         </p>
-                        <p class="text-[10px] text-slate-400">
-                            {{ $discountBasisIsGross ? 'dari margin kotor' : 'dari total margin' }}
-                        </p>
+                        <p class="mt-1 text-sm font-semibold text-slate-800">{{ money($discountBasisMargin, $currency) }}</p>
+                        @if ($marginBasisPercent !== null)
+                            <p class="mt-1.5 text-xs font-semibold text-brand-700">
+                                {{ number_format($marginBasisPercent, 2, ',', '.') }}%
+                                <span class="font-normal text-slate-500">dari {{ $marginPercentBasisLabel }}</span>
+                            </p>
+                        @else
+                            <p class="mt-1.5 text-[10px] text-slate-400">Persentase margin belum tersedia</p>
+                        @endif
                     </div>
-                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
-                        <p class="text-[10px] uppercase tracking-wide text-slate-400">Nominal Diskon</p>
-                        <p class="text-sm font-semibold text-slate-800">{{ money($discountAmount, $currency) }}</p>
+                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2.5">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Nominal Diskon</p>
+                        <p class="mt-1 text-sm font-semibold text-slate-800">{{ money($discountAmount, $currency) }}</p>
+                        @if ($discPct !== null)
+                            <p class="mt-1.5 text-xs font-semibold text-amber-700">
+                                {{ number_format($discPct, 2, ',', '.') }}%
+                                <span class="font-normal text-slate-500">dari {{ $discountBasisLabel }}</span>
+                            </p>
+                            <p class="mt-0.5 text-[10px] text-slate-400">
+                                Basis: {{ money($discountBasisMargin, $currency) }}
+                            </p>
+                        @else
+                            <p class="mt-1.5 text-[10px] text-slate-400">Persentase diskon belum tersedia</p>
+                        @endif
                     </div>
-                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
-                        <p class="text-[10px] uppercase tracking-wide text-slate-400">
-                            {{ $discountBasisIsGross ? 'Margin Kotor' : 'Total Margin' }}
-                        </p>
-                        <p class="text-sm font-semibold text-slate-800">{{ money($discountBasisMargin, $currency) }}</p>
+                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2.5">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Margin Setelah Diskon</p>
+                        <p class="mt-1 text-sm font-semibold text-slate-800">{{ money($marginAfterDiscount, $currency) }}</p>
+                        @if ($marginAfterDiscountPercent !== null)
+                            <p class="mt-1.5 text-xs font-semibold text-green-700">
+                                {{ number_format($marginAfterDiscountPercent, 2, ',', '.') }}%
+                                <span class="font-normal text-slate-500">dari {{ $marginPercentBasisLabel }}</span>
+                            </p>
+                        @else
+                            <p class="mt-1.5 text-[10px] text-slate-400">Persentase margin belum tersedia</p>
+                        @endif
                     </div>
-                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2">
-                        <p class="text-[10px] uppercase tracking-wide text-slate-400">Kategori deal</p>
-                        <p class="text-sm font-semibold text-slate-800">
+                    <div class="rounded-lg border border-white/70 bg-white/90 px-3 py-2.5">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Kategori Deal</p>
+                        <p class="mt-1 text-sm font-semibold text-slate-800">
                             {{ \App\Support\OpportunityProductPricing::taxCategoryLabel((string) ($approvalProducts->first()['tax_category'] ?? 'non_wapu')) }}
                         </p>
                     </div>
@@ -541,7 +578,28 @@
 
             <dl class="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
                 <div><dt class="text-slate-400">Company</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->company ?: '—' }}</dd></div>
-                <div><dt class="text-slate-400">Account / Customer</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->account)->name ?: '—' }}</dd></div>
+                <div>
+                    <dt class="text-slate-400">Account / Customer</dt>
+                    <dd class="mt-0.5 font-medium text-slate-700">
+                        @if ($opportunity->account)
+                            <span class="inline-flex flex-wrap items-center gap-1.5">
+                                {{ $opportunity->account->name }}
+                                @php
+                                    $levelColor = match ($opportunity->account->paymentLevel()) {
+                                        'lancar' => 'green',
+                                        'mandek' => 'amber',
+                                        'jelek' => 'rose',
+                                        'suspend' => 'red',
+                                        default => 'slate',
+                                    };
+                                @endphp
+                                <x-badge :color="$levelColor">{{ $opportunity->account->paymentLevelLabel() }}</x-badge>
+                            </span>
+                        @else
+                            —
+                        @endif
+                    </dd>
+                </div>
                 <div>
                     <dt class="text-slate-400">TOP</dt>
                     <dd class="mt-0.5 font-medium text-slate-700">
@@ -553,6 +611,28 @@
                 </div>
                 <div><dt class="text-slate-400">Type</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->type ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Amount</dt><dd class="mt-0.5 font-semibold text-slate-800">{{ money($opportunity->amount, $opportunity->amount_currency ?: 'IDR') }}</dd></div>
+                @php
+                    $summaryCurrency = $opportunity->amount_currency ?: 'IDR';
+                    $hasExtraDiscount = $opportunity->hasActiveDiscount();
+                    if ($hasExtraDiscount) {
+                        $summaryMarginLabel = 'Margin Setelah Diskon';
+                        $summaryMarginTotal = $opportunity->salesMargin();
+                        $summaryMarginPercent = $opportunity->salesMarginPercent();
+                    } else {
+                        $summaryMarginLabel = 'Total Margin';
+                        $summaryMarginTotal = $opportunity->totalProductsMargin();
+                        $summaryMarginPercent = $opportunity->overallMarginPercent();
+                    }
+                @endphp
+                <div>
+                    <dt class="text-slate-400">{{ $summaryMarginLabel }}</dt>
+                    <dd class="mt-0.5 font-semibold text-green-700">
+                        {{ money($summaryMarginTotal, $summaryCurrency) }}
+                        @if ($summaryMarginPercent !== null)
+                            <span class="font-medium">({{ number_format($summaryMarginPercent, 2, ',', '.') }}%)</span>
+                        @endif
+                    </dd>
+                </div>
                 @if ($opportunity->crm_has_shipping_charge)
                     <div>
                         <dt class="text-slate-400">Ongkir jual</dt>
@@ -604,7 +684,19 @@
         </x-card>
 
         {{-- Product list --}}
-        @php $products = $opportunity->products; @endphp
+        @php
+            $products = $opportunity->products;
+            $vendorStatusByName = \App\Models\Vendor::query()
+                ->get(['name', 'company_status'])
+                ->mapWithKeys(function ($vendor) {
+                    $key = mb_strtolower(trim((string) $vendor->name));
+
+                    return $key !== ''
+                        ? [$key => trim((string) ($vendor->company_status ?? ''))]
+                        : [];
+                })
+                ->all();
+        @endphp
         <x-card :padding="false">
             <div class="flex items-center justify-between px-5 pt-4">
                 <h3 class="text-sm font-semibold text-slate-800">Product List</h3>
@@ -733,7 +825,22 @@
                                     </td>
                                     <td class="text-right font-medium text-slate-700">{{ money($p['margin'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                     <td class="text-right text-slate-500">{{ $p['margin_percent'] !== null ? number_format($p['margin_percent'], 2, ',', '.') . '%' : '—' }}</td>
-                                    <td class="text-slate-600">{{ $p['vendor'] ?: '—' }}</td>
+                                    <td class="text-slate-600">
+                                        @php
+                                            $vendorName = trim((string) ($p['vendor'] ?? ''));
+                                            $vendorStatus = $vendorName !== ''
+                                                ? ($vendorStatusByName[mb_strtolower($vendorName)] ?? '')
+                                                : '';
+                                        @endphp
+                                        @if ($vendorName === '')
+                                            —
+                                        @else
+                                            <span class="font-medium text-slate-800">{{ $vendorName }}</span>
+                                            @if ($vendorStatus !== '')
+                                                <span class="mt-0.5 block text-[11px] text-slate-400">{{ $vendorStatus }}</span>
+                                            @endif
+                                        @endif
+                                    </td>
                                     <td class="text-right font-medium text-slate-700">{{ money($p['subtotal'], $opportunity->amount_currency ?: 'IDR') }}</td>
                                 </tr>
                             @endforeach

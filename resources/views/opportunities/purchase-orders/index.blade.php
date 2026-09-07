@@ -4,7 +4,7 @@
 @section('content')
     @php
         $poCount = $opportunity->purchaseOrders->count();
-        $poTotal = round((float) $opportunity->purchaseOrders->sum('total'), 2);
+        $poTotal = round((float) $opportunity->purchaseOrders->sum(fn ($po) => $po->totalInclude()), 2);
         $currency = $opportunity->amount_currency ?: 'IDR';
         $customerName = $opportunity->account?->name;
         $description = collect([$opportunity->name, $customerName])->filter()->implode(' · ');
@@ -17,6 +17,8 @@
         <x-slot:actions>
             @if ($backUrl ?? null)
                 <x-btn :href="$backUrl" variant="secondary" icon="bi-arrow-left">Kembali ke SO</x-btn>
+            @else
+                <x-btn href="{{ route('purchase-orders.index') }}" variant="secondary" icon="bi-arrow-left">Daftar PO</x-btn>
             @endif
             <x-btn href="{{ route('opportunities.show', $opportunity) }}" variant="ghost" icon="bi-briefcase">Opportunity</x-btn>
             <x-btn href="{{ route('opportunities.purchase-orders.preview', $opportunity) }}" variant="secondary" icon="bi-eye" target="_blank">Preview laporan</x-btn>

@@ -33,6 +33,11 @@ class CustomerController extends Controller
 
         $search = trim((string) $request->get('q'));
         $type = $request->filled('type') ? $request->get('type') : null;
+        $assignedUserId = $this->resolveCustomerSalesFilter($request);
+        $levelFilter = trim((string) $request->get('level', ''));
+        if ($levelFilter !== '' && ! PaymentLevel::isValid($levelFilter)) {
+            $levelFilter = '';
+        }
 
         $query = $this->scopeAssigned(Account::query())
             ->with(['assignedUser', 'emailAddresses', 'phoneNumbers'])
@@ -53,6 +58,12 @@ class CustomerController extends Controller
                         $cq->where('first_name', 'like', $like)
                             ->orWhere('last_name', 'like', $like)
                             ->orWhere('name', 'like', $like);
+                    })
+                    ->orWhereHas('assignedUser', function ($uq) use ($like) {
+                        $uq->where('name', 'like', $like)
+                            ->orWhere('first_name', 'like', $like)
+                            ->orWhere('last_name', 'like', $like)
+                            ->orWhere('user_name', 'like', $like);
                     });
             });
 
@@ -63,13 +74,60 @@ class CustomerController extends Controller
             $query->where('account.type', $type);
         }
 
+        if ($assignedUserId !== null) {
+            $query->where('account.assigned_user_id', $assignedUserId);
+        }
+
+        if ($levelFilter !== '') {
+            $query->where('account.crm_payment_level', $levelFilter);
+        }
+
         $accounts = $query->orderByDesc('account.created_at')->paginate(15)->withQueryString();
 
         $types = $this->scopeAssigned(Account::query())
             ->whereNotNull('type')->where('type', '<>', '')
             ->distinct()->orderBy('type')->pluck('type');
 
-        return view('customers.index', compact('accounts', 'search', 'type', 'types'));
+        $canFilterSales = ! auth()->user()->isSales();
+        $salesUsers = $canFilterSales
+            ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
+            : collect();
+
+        return view('customers.index', [
+            'accounts' => $accounts,
+            'search' => $search,
+            'type' => $type,
+            'types' => $types,
+            'assignedUserId' => $assignedUserId ?? '',
+            'levelFilter' => $levelFilter,
+            'canFilterSales' => $canFilterSales,
+            'salesUsers' => $salesUsers,
+            'paymentLevels' => PaymentLevel::LEVELS,
+        ]);
+    }
+
+    /**
+     * Filter sales di index customer (non-sales role).
+     */
+    protected function resolveCustomerSalesFilter(Request $request): ?string
+    {
+        if (auth()->user()?->isSales()) {
+            return null;
+        }
+
+        $raw = $request->input('assigned_user_id');
+        if (is_array($raw)) {
+            $raw = $raw[0] ?? '';
+        }
+
+        $id = trim((string) $raw);
+        if ($id === '') {
+            return null;
+        }
+
+        $exists = EspoUser::query()->activeSales()->where('id', $id)->exists();
+
+        return $exists ? $id : null;
     }
 
     public function create()

@@ -1115,6 +1115,53 @@ class NotificationService
         ]);
     }
 
+    /**
+     * Notifikasi ke sales baru saat Superadmin/Admin menunjuk atau mengalihkan opportunity.
+     */
+    public function notifyOpportunityAssigned(
+        Opportunity $opportunity,
+        ?string $previousUserId = null,
+        ?string $assignedByUserId = null,
+    ): void {
+        $newUserId = $opportunity->assigned_user_id;
+        if (! filled($newUserId)) {
+            return;
+        }
+
+        if ($assignedByUserId && (string) $newUserId === (string) $assignedByUserId) {
+            return;
+        }
+
+        $actor = $this->actorName($assignedByUserId);
+        $previousUser = filled($previousUserId)
+            ? User::query()->whereKey($previousUserId)->first()
+            : null;
+        $previousName = $previousUser?->display_name;
+
+        $title = 'Opportunity ditunjuk ke Anda';
+        if ($previousName) {
+            $body = $actor.' mengalihkan Opportunity "'.$opportunity->name.'" kepada Anda (sebelumnya '.$previousName.').';
+        } else {
+            $body = $actor.' menunjukkan Opportunity "'.$opportunity->name.'" kepada Anda.';
+        }
+
+        $this->notify(
+            $newUserId,
+            CrmNotification::TYPE_OPPORTUNITY_ASSIGNED,
+            $title,
+            $body,
+            route('opportunities.show', $opportunity),
+            showPopup: true,
+            uniqueKey: 'opp_assigned:'.$opportunity->id.':'.uniqid('', true),
+            data: array_merge([
+                'opportunity_id' => $opportunity->id,
+                'previous_assigned_user_id' => $previousUserId,
+                'previous_assigned_user_name' => $previousName,
+                'assigned_user_id' => $newUserId,
+            ], $this->actorPayload($assignedByUserId)),
+        );
+    }
+
     protected function deadlineLabel(Carbon $date): string
     {
         $days = (int) now()->startOfDay()->diffInDays($date, false);

@@ -72,7 +72,7 @@ class OpportunitySalesOrderController extends Controller
         $periodLabel = $this->periodLabel($period);
 
         $query = OpportunitySalesOrder::query()
-            ->with(['opportunity.account', 'opportunity.purchaseOrders', 'creator'])
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'opportunity.purchaseOrders', 'creator'])
             ->whereHas('opportunity', function ($q) use ($user, $accountId, $companyFilter, $selectedUserId) {
                 if ($user->canViewAllOpportunities()
                     || $user->isProduct()
@@ -119,7 +119,8 @@ class OpportunitySalesOrderController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $salesUsers = $this->isAdmin()
+        $canFilterSales = ! $user->isSales();
+        $salesUsers = $canFilterSales
             ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
             : collect();
 
@@ -133,16 +134,17 @@ class OpportunitySalesOrderController extends Controller
             'period' => $period,
             'periodLabel' => $periodLabel,
             'salesUsers' => $salesUsers,
+            'canFilterSales' => $canFilterSales,
             'companies' => Opportunity::COMPANIES,
         ]);
     }
 
     /**
-     * @return string|null null = semua sales (hanya admin).
+     * @return string|null null = semua sales (non-sales role).
      */
     protected function resolveAssignedUserFilter(Request $request): ?string
     {
-        if (! $this->isAdmin()) {
+        if (auth()->user()?->isSales()) {
             return null;
         }
 
@@ -219,7 +221,13 @@ class OpportunitySalesOrderController extends Controller
                 ->orWhereHas('opportunity', function ($oq) use ($like) {
                     $oq->where('opportunity.name', 'like', $like)
                         ->orWhere('opportunity.company', 'like', $like)
-                        ->orWhereHas('account', fn ($aq) => $aq->where('account.name', 'like', $like));
+                        ->orWhereHas('account', fn ($aq) => $aq->where('account.name', 'like', $like))
+                        ->orWhereHas('assignedUser', function ($uq) use ($like) {
+                            $uq->where('name', 'like', $like)
+                                ->orWhere('first_name', 'like', $like)
+                                ->orWhere('last_name', 'like', $like)
+                                ->orWhere('user_name', 'like', $like);
+                        });
                 });
 
             if (strcasecmp($psoAsSo, $search) !== 0) {

@@ -28,7 +28,49 @@
         'cost_exclude' => (float) ($p['cost_exclude'] ?? 0),
     ])->filter(fn ($p) => trim($p['name']) !== '')->values()->all();
 
-    $mapPoVendors = function ($vendors) {
+    $poToday = now()->toDateString();
+    $poDateValue = function ($raw) use ($poToday): ?string {
+        if ($raw instanceof \DateTimeInterface) {
+            $s = $raw->format('Y-m-d');
+        } else {
+            $s = trim((string) $raw);
+            $s = strlen($s) >= 10 ? substr($s, 0, 10) : $s;
+        }
+        if ($s === '' || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) {
+            return null;
+        }
+
+        return $s > $poToday ? $poToday : $s;
+    };
+    $poQuotedAt = function ($v) use ($poDateValue, $poToday): string {
+        $quoted = is_array($v) ? ($v['quoted_at'] ?? null) : ($v->quoted_at ?? null);
+        $created = is_array($v) ? ($v['created_at'] ?? null) : ($v->created_at ?? null);
+
+        return $poDateValue($quoted) ?: $poDateValue($created) ?: $poToday;
+    };
+    $poPreviousQuoteDates = [];
+    foreach ($poList as $existingPo) {
+        foreach ($existingPo->items as $existingItem) {
+            $productKeys = array_unique(array_filter([
+                mb_strtolower(trim((string) $existingItem->product_name)),
+                mb_strtolower(trim((string) ($existingItem->opportunity_product_name ?? ''))),
+            ]));
+            foreach ($existingItem->vendorQuotes as $existingQuote) {
+                if (! $existingQuote->vendor_id) {
+                    continue;
+                }
+                $date = $poQuotedAt($existingQuote);
+                foreach ($productKeys as $productKey) {
+                    $key = $existingQuote->vendor_id.'|'.$productKey;
+                    if (! isset($poPreviousQuoteDates[$key]) || $date > $poPreviousQuoteDates[$key]) {
+                        $poPreviousQuoteDates[$key] = $date;
+                    }
+                }
+            }
+        }
+    }
+
+    $mapPoVendors = function ($vendors) use ($poQuotedAt) {
         return collect($vendors ?? [])->map(fn ($v) => [
             'vendor_id' => $v['vendor_id'] ?? ($v->vendor_id ?? ''),
             'vendor_stock_id' => $v['vendor_stock_id'] ?? ($v->vendor_stock_id ?? ''),
@@ -36,6 +78,8 @@
             'status' => $v['status'] ?? ($v->status ?? 'ready'),
             'top' => $v['top'] ?? ($v->top ?? \App\Support\CustomerTop::DAYS_30),
             'unit_price' => (float) ($v['unit_price'] ?? ($v->unit_price ?? 0)),
+            'is_pkp' => (bool) (is_array($v) ? ($v['is_pkp'] ?? true) : ($v->is_pkp ?? true)),
+            'quoted_at' => $poQuotedAt($v),
             'is_selected' => (bool) ($v['is_selected'] ?? ($v->is_selected ?? false)),
         ])->values()->all();
     };
@@ -84,6 +128,8 @@
 
     $poStoreUrl = route('opportunities.purchase-orders.store', $opportunity);
     $poUpdateBase = url('/opportunities/'.$opportunity->id.'/purchase-orders');
+    $poNumberPrefix = \App\Services\PurchaseOrderService::numberPrefix();
+    $poNumberExample = \App\Services\PurchaseOrderService::numberExample();
     $poItemErrors = collect($errors->keys())->filter(fn ($k) => str_starts_with($k, 'items') || str_starts_with($k, 'pos'))->map(fn ($k) => $errors->first($k))->unique()->values();
 
     // Tree tampilan: Produk → PO → Item → Vendor
@@ -111,6 +157,8 @@
                     'status' => $q->status ?: 'ready',
                     'top' => $q->topValue(),
                     'unit_price' => (float) $q->unit_price,
+                    'is_pkp' => (bool) $q->is_pkp,
+                    'quoted_at' => $poQuotedAt($q),
                     'is_selected' => (bool) $q->is_selected,
                 ])->values()->all(),
             ])->values()->all(),
@@ -185,13 +233,19 @@
             _catalogCache: null,
             storeUrl: @js($poStoreUrl),
             updateBase: @js($poUpdateBase),
+            poNumberPrefix: @js($poNumberPrefix),
+            poNumberExample: @js($poNumberExample),
             ppnMultiplier: @js($ppnMultiplier),
             surchargeCash: @js($poSurchargeCash),
             surchargeTop: @js($poSurchargeTop),
             vendorOptions: @js($poVendorOptions),
             vendorStocks: @js($poVendorStocks),
+            shippingEditing: @js(old('crm_shipping_cost') !== null),
+            shippingExclude: @js((float) old('crm_shipping_cost', $opportunity->crm_shipping_cost ?? 0)),
             brandOptions: @js($poBrandOptions),
             opportunityProducts: @js($poOppProducts),
+            todayDate: @js($poToday),
+            previousQuoteDates: @js($poPreviousQuoteDates),
             isCash() {
                 return this.paymentTerm === 'cash';
             },
@@ -209,6 +263,23 @@
             nextUid() {
                 return this.uid++;
             },
+            clampQuotedAt(value) {
+                const today = this.todayDate;
+                const raw = String(value || '').trim().slice(0, 10);
+                if (!raw || raw > today) {
+                    return today;
+                }
+
+                return raw;
+            },
+            previousQuotedAt(vendorId, productName) {
+                const vid = String(vendorId || '');
+                if (!vid) {
+                    return this.todayDate;
+                }
+                const key = vid + '|' + this.normalizeName(productName);
+                return this.clampQuotedAt((this.previousQuoteDates || {})[key] || '');
+            },
             emptyVendor(selected = false) {
                 return {
                     _uid: this.nextUid(),
@@ -218,15 +289,19 @@
                     status: 'ready',
                     top: '30',
                     unit_price: 0,
+                    is_pkp: true,
+                    quoted_at: this.todayDate,
                     is_selected: !!selected,
                 };
             },
-            emptyItem(brand = '') {
+            emptyItem(brand = '', oppQty = 1) {
+                const qty = Number(oppQty) || 1;
                 return {
                     _uid: this.nextUid(),
                     product_name: '',
                     brand: brand || '',
-                    quantity: 1,
+                    quantity: qty,
+                    _qtyEdited: false,
                     description: '',
                     note: '',
                     unit_price: 0,
@@ -243,7 +318,7 @@
                     opportunity_product_name: p.name || '',
                     opportunity_quantity: p.quantity || 1,
                     opportunity_brand: p.brand || '',
-                    items: [this.emptyItem(p.brand || '')],
+                    items: [this.emptyItem(p.brand || '', p.quantity || 1)],
                 };
             },
             emptyPlanProduct(oppProduct) {
@@ -257,10 +332,11 @@
                 };
             },
             hydrateItem(row) {
-                const item = Object.assign(this.emptyItem(), {
+                const item = Object.assign(this.emptyItem('', row.quantity ?? 1), {
                     product_name: row.product_name || '',
                     brand: row.brand || '',
                     quantity: row.quantity ?? 1,
+                    _qtyEdited: true,
                     description: row.description || '',
                     note: row.note || '',
                     unit_price: row.unit_price || 0,
@@ -272,6 +348,7 @@
                 item.vendors = vendors.length
                     ? vendors.map((v, idx) => Object.assign(this.emptyVendor(false), v, {
                         _uid: this.nextUid(),
+                        quoted_at: this.clampQuotedAt(v.quoted_at),
                         is_selected: v.is_selected === true || v.is_selected === 1 || v.is_selected === '1' || (!vendors.some((x) => x.is_selected) && idx === 0),
                     }))
                     : [this.emptyVendor(true)];
@@ -336,11 +413,15 @@
                         ? (String(first.opportunity_product_name || '').trim() || (key === '__empty__' ? '' : key))
                         : (key === '__empty__' ? '' : key);
                     const oppMatch = this.opportunityProducts.find((p) => this.normalizeName(p.name) === this.normalizeName(oppName));
-                    const group = this.emptyGroup(oppMatch || { name: oppName, brand: first.brand || '', quantity: 1 });
+                    const group = this.emptyGroup(oppMatch || {
+                        name: oppName,
+                        brand: first.brand || '',
+                        quantity: oppMatch?.quantity || first.quantity || 1,
+                    });
                     group.opportunity_product_name = oppName;
                     group.items = rowsInGroup.map((row) => this.hydrateItem(row));
                     if (!group.items.length) {
-                        group.items = [this.emptyItem(group.opportunity_brand || '')];
+                        group.items = [this.emptyItem(group.opportunity_brand || '', group.opportunity_quantity || 1)];
                     }
                     return group;
                 });
@@ -399,7 +480,7 @@
             },
             addPlanItem(product) {
                 if (!product) return;
-                product.items.push(this.emptyItem(product.brand || ''));
+                product.items.push(this.emptyItem(product.brand || '', product.quantity || 1));
                 this.refreshPoVendorSelects();
                 this.touchPlanDrafts();
             },
@@ -417,23 +498,11 @@
                 return (product.items || []).reduce((sum, item) => {
                     const sel = this.selectedQuote(item);
                     if (!sel || !sel.vendor_id) return sum;
-                    const qty = Number(item.quantity) || 0;
-                    const price = Number(sel.unit_price) || Number(item.unit_price) || 0;
-                    return sum + (qty * price);
+                    return sum + this.lineTotal(item);
                 }, 0);
             },
-            suggestPoNumber(vendorName, vendorId) {
-                const d = new Date();
-                const ymd = String(d.getFullYear())
-                    + String(d.getMonth() + 1).padStart(2, '0')
-                    + String(d.getDate()).padStart(2, '0');
-                let slug = String(vendorName || '')
-                    .replace(/[^a-zA-Z0-9]+/g, '')
-                    .substring(0, 12)
-                    .toUpperCase();
-                if (!slug) slug = 'VENDOR';
-                const suffix = vendorId != null && vendorId !== '' ? String(vendorId) : '';
-                return suffix ? ('PO-' + ymd + '-' + slug + '-' + suffix) : ('PO-' + ymd + '-' + slug);
+            suggestPoNumber() {
+                return this.poNumberPrefix || '';
             },
             paymentTermFromVendorTop(top) {
                 return String(top || '') === 'cash' ? 'cash' : 'top';
@@ -468,7 +537,7 @@
                                 vendor_name: vendorName,
                                 vendor_top: vendorTop,
                                 payment_term: this.paymentTermFromVendorTop(vendorTop),
-                                number: this.suggestPoNumber(vendorName, sel.vendor_id),
+                                number: this.suggestPoNumber(),
                                 items: [],
                             });
                         }
@@ -487,6 +556,8 @@
                                 status: v.status || 'ready',
                                 top: v.top || '30',
                                 unit_price: v.unit_price,
+                                is_pkp: v.is_pkp !== false,
+                                quoted_at: this.clampQuotedAt(v.quoted_at),
                                 is_selected: !!v.is_selected,
                             })),
                         });
@@ -520,15 +591,24 @@
             touchPlanDrafts() {
                 if (this.mode === 'plan') this.refreshPoDrafts();
             },
+            surchargePercentFor(paymentTerm) {
+                const isCash = String(paymentTerm || this.paymentTerm) === 'cash';
+                return isCash ? Number(this.surchargeCash) || 0 : Number(this.surchargeTop) || 0;
+            },
+            draftItemIncludeUnit(item, paymentTerm) {
+                const selected = (item.vendors || []).find((v) => v.is_selected) || null;
+                const exclude = Number(item.unit_price) || 0;
+                const include = this.includeFromExclude(exclude, this.quotePpnMultiplier(selected));
+                const rate = this.surchargePercentFor(paymentTerm) / 100;
+                const extra = rate > 0 ? Math.round(include * rate * 100) / 100 : 0;
+                return Math.round((include + extra) * 100) / 100;
+            },
+            draftItemLineInclude(item, paymentTerm) {
+                return Math.round((Number(item.quantity) || 0) * this.draftItemIncludeUnit(item, paymentTerm) * 100) / 100;
+            },
             draftPoTotal(draft) {
-                const isCash = String(draft.payment_term || '') === 'cash';
-                const pct = isCash ? Number(this.surchargeCash) || 0 : Number(this.surchargeTop) || 0;
-                const rate = pct / 100;
                 return (draft.items || []).reduce((sum, item) => {
-                    const qty = Number(item.quantity) || 0;
-                    const price = Number(item.unit_price) || 0;
-                    const line = price + (rate > 0 ? Math.round(price * rate * 100) / 100 : 0);
-                    return sum + (qty * line);
+                    return sum + this.draftItemLineInclude(item, draft.payment_term);
                 }, 0);
             },
             draftSurchargeLabel(draft) {
@@ -544,11 +624,13 @@
             canSubmitPlan() {
                 const drafts = this.poDrafts || [];
                 if (!drafts.length) return false;
-                return drafts.every((d) =>
-                    d.vendor_id
-                    && String(d.number || '').trim() !== ''
-                    && (d.payment_term === 'top' || d.payment_term === 'cash')
-                );
+                return drafts.every((d) => {
+                    const number = String(d.number || '').trim();
+                    return d.vendor_id
+                        && number !== ''
+                        && !number.endsWith('/')
+                        && (d.payment_term === 'top' || d.payment_term === 'cash');
+                });
             },
             poVendorName() {
                 if (!this.vendorId) return '';
@@ -588,7 +670,7 @@
                 }
             },
             addItemToGroup(group) {
-                group.items.push(this.emptyItem(group.opportunity_brand || ''));
+                group.items.push(this.emptyItem(group.opportunity_brand || '', group.opportunity_quantity || 1));
                 this.refreshPoVendorSelects();
             },
             removeItemFromGroup(group, index) {
@@ -671,23 +753,31 @@
                 const next = Number.isFinite(cur) && cur >= 0 ? cur + delta : (delta > 0 ? 0 : results.length - 1);
                 item._searchHighlight = (next + results.length) % results.length;
             },
-            selectHighlightedCatalog(item) {
+            applyOpportunityQty(item, oppQty) {
+                const qty = Number(oppQty) || 0;
+                if (qty > 0 && !item._qtyEdited) {
+                    item.quantity = qty;
+                }
+            },
+            selectHighlightedCatalog(item, oppQty) {
                 const results = this.searchCatalog(item.product_name);
                 const idx = Number(item._searchHighlight);
                 if (idx >= 0 && results[idx]) {
-                    this.selectCatalogProduct(item, results[idx]);
+                    this.selectCatalogProduct(item, results[idx], oppQty);
                     return;
                 }
-                this.confirmNewItemName(item);
+                this.confirmNewItemName(item, oppQty);
             },
-            selectCatalogProduct(item, product) {
+            selectCatalogProduct(item, product, oppQty) {
                 item.product_name = product.name;
                 item._lastPickedName = '';
                 this.closeItemSearch(item);
+                this.applyOpportunityQty(item, oppQty);
                 this.onItemNamePick(item);
             },
-            confirmNewItemName(item) {
+            confirmNewItemName(item, oppQty) {
                 this.closeItemSearch(item);
+                this.applyOpportunityQty(item, oppQty);
                 this.onItemNamePick(item);
             },
             stocksForProduct(name, sku) {
@@ -699,7 +789,7 @@
                 if (!s) return [];
                 return this.vendorStocks.filter((row) => String(row.sku || '').trim().toLowerCase() === s);
             },
-            quoteFromStock(row, selected) {
+            quoteFromStock(row, selected, productName) {
                 const vendor = this.vendorOptions.find((v) => String(v.id) === String(row.vendor_id));
                 return {
                     _uid: this.nextUid(),
@@ -709,6 +799,8 @@
                     status: row.status || 'ready',
                     top: vendor ? (vendor.top || '30') : '30',
                     unit_price: Number(row.price) || 0,
+                    is_pkp: this.vendorIsPkp(row.vendor_id),
+                    quoted_at: this.previousQuotedAt(row.vendor_id, productName || row.product_name),
                     is_selected: !!selected,
                 };
             },
@@ -736,7 +828,7 @@
                 }
                 const stocks = this.stocksForProduct(name);
                 if (stocks.length) {
-                    item.vendors = stocks.map((row, idx) => this.quoteFromStock(row, idx === 0));
+                    item.vendors = stocks.map((row, idx) => this.quoteFromStock(row, idx === 0, name));
                     this.applySelectedPrice(item);
                     if (this.mode === 'edit') this.syncPoVendorFromSelected();
                     this.refreshPoVendorSelects();
@@ -788,6 +880,7 @@
                 quote.vendor_name = vendor ? vendor.name : '';
                 if (vendor) {
                     quote.top = vendor.top || '30';
+                    quote.is_pkp = vendor.is_pkp !== false;
                 }
                 const stock = this.vendorStocks.find((row) =>
                     String(row.vendor_id) === String(quote.vendor_id)
@@ -800,6 +893,7 @@
                 } else {
                     quote.vendor_stock_id = '';
                 }
+                quote.quoted_at = this.previousQuotedAt(quote.vendor_id, item.product_name);
                 if (quote.is_selected) {
                     this.applySelectedPrice(item);
                     if (this.mode === 'edit' && quote.vendor_id) this.setPoVendorId(quote.vendor_id);
@@ -809,6 +903,54 @@
             onQuotePrice(item, quote) {
                 if (quote.is_selected) this.applySelectedPrice(item);
                 this.touchPlanDrafts();
+            },
+            vendorIsPkp(vendorId) {
+                const vendor = this.vendorOptions.find((v) => String(v.id) === String(vendorId));
+                return vendor ? vendor.is_pkp !== false : true;
+            },
+            vendorCompanyStatus(quote) {
+                if (!quote || quote.vendor_id == null || quote.vendor_id === '') return '—';
+                const vendor = this.vendorOptions.find((v) => String(v.id) === String(quote.vendor_id));
+                const status = vendor && vendor.company_status ? String(vendor.company_status).trim() : '';
+                return status !== '' ? status : '—';
+            },
+            quotePpnMultiplier(quote) {
+                return quote && quote.is_pkp === false ? 1 : (Number(this.ppnMultiplier) || 1);
+            },
+            includeFromExclude(amount, mult = null) {
+                const m = mult ?? this.ppnMultiplier;
+                return Math.round((Number(amount) || 0) * m * 100) / 100;
+            },
+            excludeFromInclude(amount, mult = null) {
+                const m = mult ?? this.ppnMultiplier;
+                if (m <= 1) {
+                    return Number(amount) || 0;
+                }
+                return Math.round((Number(amount) || 0) / m * 100) / 100;
+            },
+            quoteInclude(quote) {
+                return this.includeFromExclude(Number(quote?.unit_price) || 0, this.quotePpnMultiplier(quote));
+            },
+            onQuoteExcludeChange(item, quote, value) {
+                quote.unit_price = Number(value) || 0;
+                this.onQuotePrice(item, quote);
+            },
+            onQuoteIncludeChange(item, quote, value) {
+                quote.unit_price = this.excludeFromInclude(value, this.quotePpnMultiplier(quote));
+                this.onQuotePrice(item, quote);
+            },
+            onQuotePkpChange(item, quote) {
+                if (quote.is_selected) this.applySelectedPrice(item);
+                this.touchPlanDrafts();
+            },
+            shippingInclude() {
+                return this.includeFromExclude(this.shippingExclude);
+            },
+            onShippingExcludeChange(value) {
+                this.shippingExclude = Number(value) || 0;
+            },
+            onShippingIncludeChange(value) {
+                this.shippingExclude = this.excludeFromInclude(value);
             },
             findItemByUid(uid) {
                 for (const group of (this.groups || [])) {
@@ -897,7 +1039,9 @@
                 return Math.round((this.modal(item) + this.extraExclude(item)) * 100) / 100;
             },
             hargaInclude(item) {
-                return Math.round(this.modal(item) * this.ppnMultiplier * 100) / 100;
+                const selected = this.selectedVendor(item);
+                const mult = selected ? this.quotePpnMultiplier(selected) : (Number(this.ppnMultiplier) || 1);
+                return Math.round(this.modal(item) * mult * 100) / 100;
             },
             extraInclude(item) {
                 const rate = this.surchargePercent() / 100;
@@ -908,7 +1052,7 @@
                 return Math.round((this.hargaInclude(item) + this.extraInclude(item)) * 100) / 100;
             },
             lineTotal(item) {
-                return (Number(item.quantity) || 0) * this.jumlahExclude(item);
+                return Math.round((Number(item.quantity) || 0) * this.jumlahInclude(item) * 100) / 100;
             },
             productTotal(group) {
                 return (group.items || []).reduce((sum, item) => sum + this.lineTotal(item), 0);
@@ -981,48 +1125,63 @@
         </div>
 
         {{-- Ongkir: 1 opportunity = 1 ongkir --}}
-        <div class="mx-5 mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5"
-             @if ($canManagePo)
-             x-data="{
-                editing: @js(old('crm_shipping_cost') !== null),
-             }"
-             @endif>
+        <div class="mx-5 mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5">
             @if ($canManagePo)
             <form method="POST" action="{{ route('opportunities.shipping-cost.update', $opportunity) }}"
-                  class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  class="flex flex-wrap items-end gap-x-3 gap-y-2">
                 @csrf
                 @method('PUT')
-                <div class="flex min-w-0 flex-1 items-center gap-2">
-                    <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
-                    <template x-if="!editing">
-                        <span class="text-sm font-semibold tabular-nums text-slate-800">
-                            @if ($opportunity->crm_shipping_cost !== null && (float) $opportunity->crm_shipping_cost > 0)
-                                {{ money($opportunity->crm_shipping_cost, $poCurrency) }}
-                            @else
-                                <span class="font-normal text-slate-400">Belum diisi</span>
-                            @endif
+                <span class="shrink-0 self-center text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
+                <template x-if="!shippingEditing">
+                    <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums text-slate-800">
+                        <span x-show="Number(shippingExclude) > 0">
+                            <span class="text-xs text-slate-400">Excl</span>
+                            <span class="font-semibold" x-text="formatMoney(shippingExclude)"></span>
                         </span>
-                    </template>
-                    <template x-if="editing">
-                        <input type="text" inputmode="decimal" name="crm_shipping_cost" data-crm-number data-decimals="0"
-                               value="{{ old('crm_shipping_cost', $opportunity->crm_shipping_cost ?? 0) }}"
-                               placeholder="0"
-                               class="crm-field w-full max-w-[200px] text-right tabular-nums"
-                               autofocus
-                               x-init="$nextTick(() => window.CrmNumber && CrmNumber.enhance($el.parentElement))">
-                    </template>
-                </div>
+                        <span x-show="Number(shippingExclude) > 0">
+                            <span class="text-xs text-slate-400">Incl</span>
+                            <span class="font-semibold" x-text="formatMoney(shippingInclude())"></span>
+                        </span>
+                        <span x-show="!(Number(shippingExclude) > 0)" class="font-normal text-slate-400">Belum diisi</span>
+                    </div>
+                </template>
+                <template x-if="shippingEditing">
+                    <div class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                        <div>
+                            <label class="crm-label text-[10px] text-slate-400">Exclude</label>
+                            <input type="text" inputmode="decimal"
+                                   x-effect="if (editingField !== 'ship-ex') $el.value = formatId(shippingExclude)"
+                                   @focus="editingField = 'ship-ex'"
+                                   @blur="editingField = null; $el.value = formatId(shippingExclude)"
+                                   @input="onShippingExcludeChange(parseId($event.target.value))"
+                                   placeholder="0"
+                                   class="crm-field w-full min-w-[7rem] text-right tabular-nums">
+                        </div>
+                        <div>
+                            <label class="crm-label text-[10px] text-slate-400">Include</label>
+                            <input type="text" inputmode="decimal"
+                                   x-effect="if (editingField !== 'ship-inc') $el.value = formatId(shippingInclude())"
+                                   @focus="editingField = 'ship-inc'"
+                                   @blur="editingField = null; $el.value = formatId(shippingInclude())"
+                                   @input="onShippingIncludeChange(parseId($event.target.value))"
+                                   placeholder="0"
+                                   class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                   title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                        </div>
+                        <input type="hidden" name="crm_shipping_cost" :value="shippingExclude">
+                    </div>
+                </template>
                 <div class="flex items-center gap-1.5">
-                    <template x-if="!editing">
-                        <button type="button" @click="editing = true"
+                    <template x-if="!shippingEditing">
+                        <button type="button" @click="shippingEditing = true"
                                 class="rounded p-1.5 text-slate-500 hover:bg-white hover:text-brand-600"
                                 title="Edit ongkir">
                             <i class="bi bi-pencil text-sm"></i>
                         </button>
                     </template>
-                    <template x-if="editing">
+                    <template x-if="shippingEditing">
                         <div class="flex items-center gap-1.5">
-                            <button type="button" @click="editing = false"
+                            <button type="button" @click="shippingEditing = false"
                                     class="text-xs text-slate-500 hover:text-slate-700">Batal</button>
                             <button type="submit"
                                     class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
@@ -1033,15 +1192,24 @@
                 </div>
             </form>
             @else
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            @php
+                $shipExcl = (float) ($opportunity->crm_shipping_cost ?? 0);
+                $shipIncl = $shipExcl > 0 ? \App\Support\OpportunityProductPricing::includeFromExclude($shipExcl) : 0;
+            @endphp
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
-                <span class="text-sm font-semibold tabular-nums text-slate-800">
-                    @if ($opportunity->crm_shipping_cost !== null && (float) $opportunity->crm_shipping_cost > 0)
-                        {{ money($opportunity->crm_shipping_cost, $poCurrency) }}
-                    @else
-                        <span class="font-normal text-slate-400">Belum diisi</span>
-                    @endif
-                </span>
+                @if ($shipExcl > 0)
+                    <span class="text-sm tabular-nums text-slate-800">
+                        <span class="text-xs text-slate-400">Excl</span>
+                        <span class="font-semibold">{{ money($shipExcl, $poCurrency) }}</span>
+                    </span>
+                    <span class="text-sm tabular-nums text-slate-800">
+                        <span class="text-xs text-slate-400">Incl</span>
+                        <span class="font-semibold">{{ money($shipIncl, $poCurrency) }}</span>
+                    </span>
+                @else
+                    <span class="text-sm font-normal text-slate-400">Belum diisi</span>
+                @endif
             </div>
             @endif
             @error('crm_shipping_cost')
@@ -1125,7 +1293,7 @@
                                 </div>
                                 <div class="flex flex-wrap items-center gap-3">
                                     <p class="text-sm text-slate-600">
-                                        Total Modal:
+                                        Total include:
                                         <span class="font-semibold text-slate-900" x-text="formatMoney(productModalTotal(product))"></span>
                                     </p>
                                     <button type="button" @click="addPlanItem(product)"
@@ -1159,7 +1327,7 @@
                                                            @blur="touchPlanDrafts()"
                                                            @keydown.arrow-down.prevent="moveItemSearchHighlight(item, 1)"
                                                            @keydown.arrow-up.prevent="moveItemSearchHighlight(item, -1)"
-                                                           @keydown.enter.prevent="selectHighlightedCatalog(item)">
+                                                           @keydown.enter.prevent="selectHighlightedCatalog(item, product.quantity)">
                                                 </div>
 
                                                 <div x-show="item._searchOpen"
@@ -1178,7 +1346,7 @@
                                                                     class="flex w-full items-start gap-3 px-3 py-2.5 text-left transition"
                                                                     :class="Number(item._searchHighlight) === pi ? 'bg-brand-50' : 'hover:bg-slate-50'"
                                                                     @mouseenter="item._searchHighlight = pi"
-                                                                    @mousedown.prevent="selectCatalogProduct(item, catalogProduct)">
+                                                                    @mousedown.prevent="selectCatalogProduct(item, catalogProduct, product.quantity)">
                                                                 <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
                                                                     <i class="bi bi-box-seam text-sm"></i>
                                                                 </span>
@@ -1208,7 +1376,7 @@
                                                                     <p>Tidak ada produk cocok di ketersediaan.</p>
                                                                     <button type="button"
                                                                             class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
-                                                                            @mousedown.prevent="confirmNewItemName(item)">
+                                                                            @mousedown.prevent="confirmNewItemName(item, product.quantity)">
                                                                         <i class="bi bi-plus-lg"></i>
                                                                         Pakai “<span class="max-w-[10rem] truncate" x-text="item.product_name"></span>” sebagai item baru
                                                                     </button>
@@ -1224,7 +1392,7 @@
                                                          class="border-t border-slate-100 px-3 py-2">
                                                         <button type="button"
                                                                 class="text-xs font-medium text-brand-600 hover:text-brand-700"
-                                                                @mousedown.prevent="confirmNewItemName(item)">
+                                                                @mousedown.prevent="confirmNewItemName(item, product.quantity)">
                                                             <i class="bi bi-plus-lg"></i>
                                                             Tetap pakai nama ini sebagai item baru
                                                         </button>
@@ -1254,13 +1422,13 @@
                                                    x-effect="if (editingField !== `pq-${item._uid}`) $el.value = formatId(item.quantity, 2)"
                                                    @focus="editingField = `pq-${item._uid}`"
                                                    @blur="editingField = null; $el.value = formatId(item.quantity, 2); touchPlanDrafts()"
-                                                   @input="item.quantity = parseId($event.target.value)"
+                                                   @input="item.quantity = parseId($event.target.value); item._qtyEdited = true"
                                                    class="crm-field w-full text-right tabular-nums">
                                         </div>
                                         <div class="flex items-end justify-between gap-2 sm:col-span-2">
                                             <div class="min-w-0 flex-1">
-                                                <label class="crm-label text-xs">Harga modal (vendor terpilih)</label>
-                                                <p class="truncate py-2 text-sm font-medium text-slate-700" x-text="formatMoney(modal(item))"></p>
+                                                <label class="crm-label text-xs">Harga include (vendor terpilih)</label>
+                                                <p class="truncate py-2 text-sm font-medium text-slate-700" x-text="formatMoney(jumlahInclude(item))"></p>
                                             </div>
                                             <button type="button" @click="removePlanItem(product, i)"
                                                     class="mb-1 rounded p-1.5 text-red-500 hover:bg-red-50" title="Hapus item">
@@ -1269,79 +1437,108 @@
                                         </div>
                                     </div>
 
-                                    <div class="rounded-md border border-slate-200 bg-slate-50/60">
-                                        <div class="flex items-center justify-between gap-2 px-3 py-2">
-                                            <p class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Perbandingan vendor</p>
+                                    <div class="rounded-lg border border-slate-200 bg-slate-50/60">
+                                        <div class="flex items-center justify-between gap-2 px-4 py-3">
+                                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Perbandingan vendor</p>
                                             <button type="button" @click="addVendor(item)"
-                                                    class="text-xs font-medium text-brand-600 hover:text-brand-700">
+                                                    class="text-sm font-medium text-brand-600 hover:text-brand-700">
                                                 <i class="bi bi-plus-lg"></i> Tambah vendor
                                             </button>
                                         </div>
-                                        <div class="space-y-2 px-2 pb-2">
-                                            <div class="hidden sm:grid sm:grid-cols-12 gap-2 px-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                                                <div class="sm:col-span-1">Pakai</div>
-                                                <div class="sm:col-span-4">Vendor</div>
-                                                <div class="sm:col-span-2">TOP</div>
-                                                <div class="sm:col-span-2">Status</div>
-                                                <div class="sm:col-span-2 text-right">Harga</div>
-                                                <div class="sm:col-span-1"></div>
-                                            </div>
+                                        <div class="space-y-3 px-3 pb-3">
                                             <template x-for="(quote, vi) in item.vendors" :key="quote._uid">
-                                                <div class="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-2 sm:grid-cols-12 sm:items-center"
-                                                     :class="quote.is_selected ? 'bg-brand-50/80' : 'bg-white'">
-                                                    <div class="sm:col-span-1">
-                                                        <label class="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                                                <div class="space-y-3 rounded-lg border p-3 sm:p-4"
+                                                     :class="quote.is_selected ? 'border-brand-200 bg-brand-50/80' : 'border-slate-200 bg-white'">
+                                                    <div class="flex items-start gap-3">
+                                                        <label class="mt-7 inline-flex shrink-0 items-center" title="Pakai vendor ini">
                                                             <input type="radio"
                                                                    :name="'plan_select_' + item._uid"
                                                                    :checked="quote.is_selected"
                                                                    @change="selectVendor(item, vi)"
-                                                                   class="border-slate-300 text-brand-600 focus:ring-brand-500">
-                                                            <span x-show="quote.is_selected">Dipilih</span>
+                                                                   class="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500">
                                                         </label>
-                                                    </div>
-                                                    <div class="sm:col-span-4">
-                                                        <select x-model="quote.vendor_id"
-                                                                @change="onVendorChange(item, quote)"
-                                                                class="select2 select2-search w-full text-xs"
-                                                                data-placeholder="— Pilih vendor —"
-                                                                data-po-select2
-                                                                data-po-vendor-select
-                                                                :data-item-uid="item._uid"
-                                                                :data-quote-uid="quote._uid">
-                                                            <option value="">— Pilih vendor —</option>
-                                                            @foreach ($poVendorOptions as $opt)
-                                                                <option value="{{ $opt['id'] }}">{{ $opt['name'] }}</option>
-                                                            @endforeach
-                                                        </select>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <select x-model="quote.top"
-                                                                class="crm-field w-full py-1 text-xs">
-                                                            @foreach (\App\Support\CustomerTop::LABELS as $value => $label)
-                                                                <option value="{{ $value }}">{{ $label }}</option>
-                                                            @endforeach
-                                                        </select>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <select x-model="quote.status"
-                                                                class="crm-field w-full py-1 text-xs">
-                                                            <option value="ready">Ready</option>
-                                                            <option value="indent">Indent</option>
-                                                        </select>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <input type="text" inputmode="decimal"
-                                                               x-effect="if (editingField !== `pv-${quote._uid}`) $el.value = formatId(quote.unit_price)"
-                                                               @focus="editingField = `pv-${quote._uid}`"
-                                                               @blur="editingField = null; $el.value = formatId(quote.unit_price)"
-                                                               @input="quote.unit_price = parseId($event.target.value); onQuotePrice(item, quote)"
-                                                               class="crm-field w-full py-1 text-right text-xs tabular-nums">
-                                                    </div>
-                                                    <div class="flex justify-end sm:col-span-1">
+                                                        <div class="min-w-0 flex-1">
+                                                            <label class="crm-label">Vendor</label>
+                                                            <select x-model="quote.vendor_id"
+                                                                    @change="onVendorChange(item, quote)"
+                                                                    class="select2 select2-search w-full text-sm"
+                                                                    data-placeholder="— Pilih vendor —"
+                                                                    data-po-select2
+                                                                    data-po-vendor-select
+                                                                    :data-item-uid="item._uid"
+                                                                    :data-quote-uid="quote._uid">
+                                                                <option value="">— Pilih vendor —</option>
+                                                                @foreach ($poVendorOptions as $opt)
+                                                                    <option value="{{ $opt['id'] }}">{{ $opt['name'] }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                        </div>
                                                         <button type="button" @click="removeVendor(item, vi)" x-show="item.vendors.length > 1"
-                                                                class="rounded p-1 text-red-500 hover:bg-red-50" title="Hapus vendor">
-                                                            <i class="bi bi-trash text-sm"></i>
+                                                                class="mt-7 rounded p-2 text-red-500 hover:bg-red-50" title="Hapus vendor">
+                                                            <i class="bi bi-trash"></i>
                                                         </button>
+                                                    </div>
+                                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">Status vendor</label>
+                                                            <p class="truncate rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" x-text="vendorCompanyStatus(quote)"
+                                                               :title="vendorCompanyStatus(quote)"></p>
+                                                        </div>
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">TOP</label>
+                                                            <select x-model="quote.top" class="crm-field w-full">
+                                                                @foreach (\App\Support\CustomerTop::LABELS as $value => $label)
+                                                                    <option value="{{ $value }}">{{ $label }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                        </div>
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">Status</label>
+                                                            <select x-model="quote.status" class="crm-field w-full">
+                                                                @foreach (\App\Models\VendorStock::STATUSES as $value => $label)
+                                                                    <option value="{{ $value }}">{{ $label }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                        </div>
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">Tanggal</label>
+                                                            <input type="date"
+                                                                   x-model="quote.quoted_at"
+                                                                   :max="todayDate"
+                                                                   @change="quote.quoted_at = clampQuotedAt(quote.quoted_at)"
+                                                                   class="crm-field w-full">
+                                                        </div>
+                                                        <div class="flex items-end pb-2">
+                                                            <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700" title="Non-PKP: tanpa PPN (Include = Exclude)">
+                                                                <input type="checkbox"
+                                                                       x-model="quote.is_pkp"
+                                                                       @change="onQuotePkpChange(item, quote)"
+                                                                       class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                                                                PKP
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                        <div>
+                                                            <label class="crm-label">Exclude</label>
+                                                            <input type="text" inputmode="decimal"
+                                                                   x-effect="if (editingField !== `pv-ex-${quote._uid}`) $el.value = formatId(quote.unit_price)"
+                                                                   @focus="editingField = `pv-ex-${quote._uid}`"
+                                                                   @blur="editingField = null; $el.value = formatId(quote.unit_price)"
+                                                                   @input="onQuoteExcludeChange(item, quote, parseId($event.target.value))"
+                                                                   class="crm-field w-full text-right text-sm tabular-nums">
+                                                        </div>
+                                                        <div>
+                                                            <label class="crm-label">Include</label>
+                                                            <input type="text" inputmode="decimal"
+                                                                   x-effect="if (editingField !== `pv-inc-${quote._uid}`) $el.value = formatId(quoteInclude(quote))"
+                                                                   @focus="editingField = `pv-inc-${quote._uid}`"
+                                                                   @blur="editingField = null; $el.value = formatId(quoteInclude(quote))"
+                                                                   @input="onQuoteIncludeChange(item, quote, parseId($event.target.value))"
+                                                                   :class="quote.is_pkp ? 'border-amber-200 bg-amber-50' : 'bg-slate-50'"
+                                                                   class="crm-field w-full text-right text-sm tabular-nums"
+                                                                   :title="quote.is_pkp ? 'Isi Include → Exclude dihitung otomatis (÷ PPN)' : 'Tanpa PPN — Include sama dengan Exclude'">
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </template>
@@ -1358,7 +1555,6 @@
                                         <table class="w-full min-w-[640px] text-left text-xs">
                                             <thead class="text-[10px] uppercase tracking-wider text-slate-400">
                                                 <tr>
-                                                    <th class="px-2 py-1.5 font-medium text-right" x-show="hasSurcharge()" x-text="surchargeLabel() + ' Exclude'"></th>
                                                     <th class="px-2 py-1.5 font-medium text-right">Jumlah Exclude</th>
                                                     <th class="px-2 py-1.5 font-medium text-right">Harga Include</th>
                                                     <th class="px-2 py-1.5 font-medium text-right" x-show="hasSurcharge()" x-text="surchargeLabel() + ' Include'"></th>
@@ -1368,7 +1564,6 @@
                                             </thead>
                                             <tbody>
                                                 <tr class="tabular-nums text-slate-600">
-                                                    <td class="px-2 py-1.5 text-right" x-show="hasSurcharge()" x-text="formatMoney(extraExclude(item))"></td>
                                                     <td class="px-2 py-1.5 text-right font-medium text-slate-700" x-text="formatMoney(jumlahExclude(item))"></td>
                                                     <td class="px-2 py-1.5 text-right" x-text="formatMoney(hargaInclude(item))"></td>
                                                     <td class="px-2 py-1.5 text-right" x-show="hasSurcharge()" x-text="formatMoney(extraInclude(item))"></td>
@@ -1405,8 +1600,11 @@
                                                maxlength="100"
                                                :required="mode === 'plan'"
                                                :disabled="mode !== 'plan'"
-                                               placeholder="PO-YYYYMMDD-VENDOR"
+                                               :placeholder="poNumberExample"
                                                class="crm-field w-full">
+                                        <p class="mt-1 text-[11px] text-slate-400">
+                                            Otomatis <span x-text="poNumberPrefix"></span> — isi nomor urut (contoh <span x-text="poNumberExample"></span>). Semua bagian bisa diedit.
+                                        </p>
                                     </div>
                                     <div>
                                         <label class="crm-label">Vendor</label>
@@ -1451,8 +1649,8 @@
                                                 <th class="px-3 py-2 font-medium">Item</th>
                                                 <th class="px-3 py-2 font-medium">Dari produk</th>
                                                 <th class="px-3 py-2 font-medium text-right">Qty</th>
-                                                <th class="px-3 py-2 font-medium text-right">Harga</th>
-                                                <th class="px-3 py-2 font-medium text-right">Subtotal</th>
+                                                <th class="px-3 py-2 font-medium text-right">Harga (incl)</th>
+                                                <th class="px-3 py-2 font-medium text-right">Subtotal (incl)</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1461,9 +1659,9 @@
                                                     <td class="px-3 py-2 font-medium" x-text="row.product_name"></td>
                                                     <td class="px-3 py-2 text-slate-500" x-text="row.opportunity_product_name"></td>
                                                     <td class="px-3 py-2 text-right tabular-nums" x-text="formatId(row.quantity, 2)"></td>
-                                                    <td class="px-3 py-2 text-right tabular-nums" x-text="formatMoney(row.unit_price)"></td>
+                                                    <td class="px-3 py-2 text-right tabular-nums" x-text="formatMoney(draftItemIncludeUnit(row, draft.payment_term))"></td>
                                                     <td class="px-3 py-2 text-right tabular-nums font-medium"
-                                                        x-text="formatMoney((Number(row.quantity) || 0) * (Number(row.unit_price) || 0))"></td>
+                                                        x-text="formatMoney(draftItemLineInclude(row, draft.payment_term))"></td>
                                                 </tr>
                                             </template>
                                         </tbody>
@@ -1487,6 +1685,8 @@
                                                 <input type="hidden" :name="'pos[' + di + '][items][' + ri + '][vendors][' + qi + '][status]'" :value="qv.status || 'ready'" :disabled="mode !== 'plan'">
                                                 <input type="hidden" :name="'pos[' + di + '][items][' + ri + '][vendors][' + qi + '][top]'" :value="qv.top || '30'" :disabled="mode !== 'plan'">
                                                 <input type="hidden" :name="'pos[' + di + '][items][' + ri + '][vendors][' + qi + '][unit_price]'" :value="qv.unit_price" :disabled="mode !== 'plan'">
+                                                <input type="hidden" :name="'pos[' + di + '][items][' + ri + '][vendors][' + qi + '][is_pkp]'" :value="qv.is_pkp ? 1 : 0" :disabled="mode !== 'plan'">
+                                                <input type="hidden" :name="'pos[' + di + '][items][' + ri + '][vendors][' + qi + '][quoted_at]'" :value="qv.quoted_at || ''" :disabled="mode !== 'plan'">
                                                 <input type="hidden" :name="'pos[' + di + '][items][' + ri + '][vendors][' + qi + '][is_selected]'" :value="qv.is_selected ? 1 : 0" :disabled="mode !== 'plan'">
                                             </div>
                                         </template>
@@ -1632,7 +1832,7 @@
                                                            @input="openItemSearch(item)"
                                                            @keydown.arrow-down.prevent="moveItemSearchHighlight(item, 1)"
                                                            @keydown.arrow-up.prevent="moveItemSearchHighlight(item, -1)"
-                                                           @keydown.enter.prevent="selectHighlightedCatalog(item)">
+                                                           @keydown.enter.prevent="selectHighlightedCatalog(item, group.opportunity_quantity)">
                                                 </div>
 
                                                 <div x-show="item._searchOpen"
@@ -1651,7 +1851,7 @@
                                                                     class="flex w-full items-start gap-3 px-3 py-2.5 text-left transition"
                                                                     :class="Number(item._searchHighlight) === pi ? 'bg-brand-50' : 'hover:bg-slate-50'"
                                                                     @mouseenter="item._searchHighlight = pi"
-                                                                    @mousedown.prevent="selectCatalogProduct(item, catalogProduct)">
+                                                                    @mousedown.prevent="selectCatalogProduct(item, catalogProduct, group.opportunity_quantity)">
                                                                 <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
                                                                     <i class="bi bi-box-seam text-sm"></i>
                                                                 </span>
@@ -1681,7 +1881,7 @@
                                                                     <p>Tidak ada produk cocok di ketersediaan.</p>
                                                                     <button type="button"
                                                                             class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
-                                                                            @mousedown.prevent="confirmNewItemName(item)">
+                                                                            @mousedown.prevent="confirmNewItemName(item, group.opportunity_quantity)">
                                                                         <i class="bi bi-plus-lg"></i>
                                                                         Pakai “<span class="max-w-[10rem] truncate" x-text="item.product_name"></span>” sebagai item baru
                                                                     </button>
@@ -1697,7 +1897,7 @@
                                                          class="border-t border-slate-100 px-3 py-2">
                                                         <button type="button"
                                                                 class="text-xs font-medium text-brand-600 hover:text-brand-700"
-                                                                @mousedown.prevent="confirmNewItemName(item)">
+                                                                @mousedown.prevent="confirmNewItemName(item, group.opportunity_quantity)">
                                                             <i class="bi bi-plus-lg"></i>
                                                             Tetap pakai nama ini sebagai item baru
                                                         </button>
@@ -1725,14 +1925,14 @@
                                                    x-effect="if (editingField !== `pq-${item._uid}`) $el.value = formatId(item.quantity, 2)"
                                                    @focus="editingField = `pq-${item._uid}`"
                                                    @blur="editingField = null; $el.value = formatId(item.quantity, 2)"
-                                                   @input="item.quantity = parseId($event.target.value)"
+                                                   @input="item.quantity = parseId($event.target.value); item._qtyEdited = true"
                                                    class="crm-field w-full text-right tabular-nums">
                                             <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][quantity]'" :value="item.quantity" :disabled="mode !== 'edit'">
                                         </div>
                                         <div class="flex items-end justify-between gap-2 sm:col-span-2">
                                             <div class="min-w-0 flex-1">
-                                                <label class="crm-label text-xs">Harga modal (vendor terpilih)</label>
-                                                <p class="truncate py-2 text-sm font-medium text-slate-700" x-text="formatMoney(modal(item))"></p>
+                                                <label class="crm-label text-xs">Harga include (vendor terpilih)</label>
+                                                <p class="truncate py-2 text-sm font-medium text-slate-700" x-text="formatMoney(jumlahInclude(item))"></p>
                                                 <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][unit_price]'" :value="item.unit_price" :disabled="mode !== 'edit'">
                                             </div>
                                             <button type="button" @click="removeItemFromGroup(group, i)" x-show="group.items.length > 1"
@@ -1742,89 +1942,124 @@
                                         </div>
                                     </div>
 
-                                    <div class="rounded-md border border-slate-200 bg-slate-50/60">
-                                        <div class="flex items-center justify-between gap-2 px-3 py-2">
-                                            <p class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Perbandingan vendor</p>
+                                    <div class="rounded-lg border border-slate-200 bg-slate-50/60">
+                                        <div class="flex items-center justify-between gap-2 px-4 py-3">
+                                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Perbandingan vendor</p>
                                             <button type="button" @click="addVendor(item)"
-                                                    class="text-xs font-medium text-brand-600 hover:text-brand-700">
+                                                    class="text-sm font-medium text-brand-600 hover:text-brand-700">
                                                 <i class="bi bi-plus-lg"></i> Tambah vendor
                                             </button>
                                         </div>
-                                        <div class="space-y-2 px-2 pb-2">
-                                            <div class="hidden sm:grid sm:grid-cols-12 gap-2 px-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                                                <div class="sm:col-span-1">Pakai</div>
-                                                <div class="sm:col-span-4">Vendor</div>
-                                                <div class="sm:col-span-2">TOP</div>
-                                                <div class="sm:col-span-2">Status</div>
-                                                <div class="sm:col-span-2 text-right">Harga</div>
-                                                <div class="sm:col-span-1"></div>
-                                            </div>
+                                        <div class="space-y-3 px-3 pb-3">
                                             <template x-for="(quote, vi) in item.vendors" :key="quote._uid">
-                                                <div class="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-2 sm:grid-cols-12 sm:items-center"
-                                                     :class="quote.is_selected ? 'bg-brand-50/80' : 'bg-white'">
-                                                    <div class="sm:col-span-1">
-                                                        <label class="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                                                <div class="space-y-3 rounded-lg border p-3 sm:p-4"
+                                                     :class="quote.is_selected ? 'border-brand-200 bg-brand-50/80' : 'border-slate-200 bg-white'">
+                                                    <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][is_selected]'" :value="quote.is_selected ? 1 : 0" :disabled="mode !== 'edit'">
+                                                    <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][vendor_stock_id]'" :value="quote.vendor_stock_id || ''" :disabled="mode !== 'edit'">
+                                                    <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][vendor_name]'" :value="quote.vendor_name" :disabled="mode !== 'edit'">
+                                                    <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][is_pkp]'" :value="quote.is_pkp ? 1 : 0" :disabled="mode !== 'edit'">
+                                                    <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][quoted_at]'" :value="quote.quoted_at || ''" :disabled="mode !== 'edit'">
+                                                    <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][unit_price]'" :value="quote.unit_price" :disabled="mode !== 'edit'">
+                                                    <div class="flex items-start gap-3">
+                                                        <label class="mt-7 inline-flex shrink-0 items-center" title="Pakai vendor ini">
                                                             <input type="radio"
                                                                    :name="'po_select_' + item._uid"
                                                                    :checked="quote.is_selected"
                                                                    @change="selectVendor(item, vi)"
-                                                                   class="border-slate-300 text-brand-600 focus:ring-brand-500">
-                                                            <span x-show="quote.is_selected">Dipilih</span>
+                                                                   class="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500">
                                                         </label>
-                                                        <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][is_selected]'" :value="quote.is_selected ? 1 : 0" :disabled="mode !== 'edit'">
-                                                        <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][vendor_stock_id]'" :value="quote.vendor_stock_id || ''" :disabled="mode !== 'edit'">
-                                                        <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][vendor_name]'" :value="quote.vendor_name" :disabled="mode !== 'edit'">
-                                                    </div>
-                                                    <div class="sm:col-span-4">
-                                                        <select :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][vendor_id]'"
-                                                                x-model="quote.vendor_id"
-                                                                @change="onVendorChange(item, quote)"
-                                                                :disabled="mode !== 'edit'"
-                                                                class="select2 select2-search w-full text-xs"
-                                                                data-placeholder="— Pilih vendor —"
-                                                                data-po-select2
-                                                                data-po-vendor-select
-                                                                :data-item-uid="item._uid"
-                                                                :data-quote-uid="quote._uid">
-                                                            <option value="">— Pilih vendor —</option>
-                                                            @foreach ($poVendorOptions as $opt)
-                                                                <option value="{{ $opt['id'] }}">{{ $opt['name'] }}</option>
-                                                            @endforeach
-                                                        </select>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <select :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][top]'"
-                                                                x-model="quote.top"
-                                                                :disabled="mode !== 'edit'"
-                                                                class="crm-field w-full py-1 text-xs">
-                                                            @foreach (\App\Support\CustomerTop::LABELS as $value => $label)
-                                                                <option value="{{ $value }}">{{ $label }}</option>
-                                                            @endforeach
-                                                        </select>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <select :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][status]'"
-                                                                x-model="quote.status"
-                                                                :disabled="mode !== 'edit'"
-                                                                class="crm-field w-full py-1 text-xs">
-                                                            <option value="ready">Ready</option>
-                                                            <option value="indent">Indent</option>
-                                                        </select>
-                                                    </div>
-                                                    <div class="sm:col-span-2">
-                                                        <input type="text" inputmode="decimal" :required="mode === 'edit'"
-                                                               x-effect="if (editingField !== `pv-${quote._uid}`) $el.value = formatId(quote.unit_price)"
-                                                               @focus="editingField = `pv-${quote._uid}`"
-                                                               @blur="editingField = null; $el.value = formatId(quote.unit_price)"
-                                                               @input="quote.unit_price = parseId($event.target.value); onQuotePrice(item, quote)"
-                                                               class="crm-field w-full py-1 text-right text-xs tabular-nums">
-                                                        <input type="hidden" :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][unit_price]'" :value="quote.unit_price" :disabled="mode !== 'edit'">
-                                                    </div>
-                                                    <div class="flex justify-end sm:col-span-1">
+                                                        <div class="min-w-0 flex-1">
+                                                            <label class="crm-label">Vendor</label>
+                                                            <select :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][vendor_id]'"
+                                                                    x-model="quote.vendor_id"
+                                                                    @change="onVendorChange(item, quote)"
+                                                                    :disabled="mode !== 'edit'"
+                                                                    class="select2 select2-search w-full text-sm"
+                                                                    data-placeholder="— Pilih vendor —"
+                                                                    data-po-select2
+                                                                    data-po-vendor-select
+                                                                    :data-item-uid="item._uid"
+                                                                    :data-quote-uid="quote._uid">
+                                                                <option value="">— Pilih vendor —</option>
+                                                                @foreach ($poVendorOptions as $opt)
+                                                                    <option value="{{ $opt['id'] }}">{{ $opt['name'] }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                        </div>
                                                         <button type="button" @click="removeVendor(item, vi)" x-show="item.vendors.length > 1"
-                                                                class="rounded p-1 text-red-500 hover:bg-red-50" title="Hapus vendor">
-                                                            <i class="bi bi-trash text-sm"></i>
+                                                                class="mt-7 rounded p-2 text-red-500 hover:bg-red-50" title="Hapus vendor">
+                                                            <i class="bi bi-trash"></i>
                                                         </button>
+                                                    </div>
+                                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">Status vendor</label>
+                                                            <p class="truncate rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" x-text="vendorCompanyStatus(quote)"
+                                                               :title="vendorCompanyStatus(quote)"></p>
+                                                        </div>
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">TOP</label>
+                                                            <select :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][top]'"
+                                                                    x-model="quote.top"
+                                                                    :disabled="mode !== 'edit'"
+                                                                    class="crm-field w-full">
+                                                                @foreach (\App\Support\CustomerTop::LABELS as $value => $label)
+                                                                    <option value="{{ $value }}">{{ $label }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                        </div>
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">Status</label>
+                                                            <select :name="'items[' + flatIndex(gi, i) + '][vendors][' + vi + '][status]'"
+                                                                    x-model="quote.status"
+                                                                    :disabled="mode !== 'edit'"
+                                                                    class="crm-field w-full">
+                                                                @foreach (\App\Models\VendorStock::STATUSES as $value => $label)
+                                                                    <option value="{{ $value }}">{{ $label }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                        </div>
+                                                        <div class="min-w-0">
+                                                            <label class="crm-label">Tanggal</label>
+                                                            <input type="date"
+                                                                   x-model="quote.quoted_at"
+                                                                   :max="todayDate"
+                                                                   @change="quote.quoted_at = clampQuotedAt(quote.quoted_at)"
+                                                                   :disabled="mode !== 'edit'"
+                                                                   class="crm-field w-full">
+                                                        </div>
+                                                        <div class="flex items-end pb-2">
+                                                            <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700" title="Non-PKP: tanpa PPN (Include = Exclude)">
+                                                                <input type="checkbox"
+                                                                       x-model="quote.is_pkp"
+                                                                       @change="onQuotePkpChange(item, quote)"
+                                                                       :disabled="mode !== 'edit'"
+                                                                       class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                                                                PKP
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                        <div>
+                                                            <label class="crm-label">Exclude</label>
+                                                            <input type="text" inputmode="decimal" :required="mode === 'edit'"
+                                                                   x-effect="if (editingField !== `pv-ex-${quote._uid}`) $el.value = formatId(quote.unit_price)"
+                                                                   @focus="editingField = `pv-ex-${quote._uid}`"
+                                                                   @blur="editingField = null; $el.value = formatId(quote.unit_price)"
+                                                                   @input="onQuoteExcludeChange(item, quote, parseId($event.target.value))"
+                                                                   class="crm-field w-full text-right text-sm tabular-nums">
+                                                        </div>
+                                                        <div>
+                                                            <label class="crm-label">Include</label>
+                                                            <input type="text" inputmode="decimal"
+                                                                   x-effect="if (editingField !== `pv-inc-${quote._uid}`) $el.value = formatId(quoteInclude(quote))"
+                                                                   @focus="editingField = `pv-inc-${quote._uid}`"
+                                                                   @blur="editingField = null; $el.value = formatId(quoteInclude(quote))"
+                                                                   @input="onQuoteIncludeChange(item, quote, parseId($event.target.value))"
+                                                                   :class="quote.is_pkp ? 'border-amber-200 bg-amber-50' : 'bg-slate-50'"
+                                                                   class="crm-field w-full text-right text-sm tabular-nums"
+                                                                   :title="quote.is_pkp ? 'Isi Include → Exclude dihitung otomatis (÷ PPN)' : 'Tanpa PPN — Include sama dengan Exclude'">
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </template>
@@ -1843,7 +2078,6 @@
                                         <table class="w-full min-w-[640px] text-left text-xs">
                                             <thead class="text-[10px] uppercase tracking-wider text-slate-400">
                                                 <tr>
-                                                    <th class="px-2 py-1.5 font-medium text-right" x-show="hasSurcharge()" x-text="surchargeLabel() + ' Exclude'"></th>
                                                     <th class="px-2 py-1.5 font-medium text-right">Jumlah Exclude</th>
                                                     <th class="px-2 py-1.5 font-medium text-right">Harga Include</th>
                                                     <th class="px-2 py-1.5 font-medium text-right" x-show="hasSurcharge()" x-text="surchargeLabel() + ' Include'"></th>
@@ -1853,7 +2087,6 @@
                                             </thead>
                                             <tbody>
                                                 <tr class="tabular-nums text-slate-600">
-                                                    <td class="px-2 py-1.5 text-right" x-show="hasSurcharge()" x-text="formatMoney(extraExclude(item))"></td>
                                                     <td class="px-2 py-1.5 text-right font-medium text-slate-700" x-text="formatMoney(jumlahExclude(item))"></td>
                                                     <td class="px-2 py-1.5 text-right" x-text="formatMoney(hargaInclude(item))"></td>
                                                     <td class="px-2 py-1.5 text-right" x-show="hasSurcharge()" x-text="formatMoney(extraInclude(item))"></td>
@@ -1888,8 +2121,11 @@
                                 <input type="text" name="number" x-model="number" maxlength="100"
                                        :required="mode === 'edit'"
                                        :disabled="mode !== 'edit'"
-                                       placeholder="Contoh: PO-2026-001"
+                                       :placeholder="poNumberExample"
                                        class="crm-field w-full">
+                                <p class="mt-1 text-[11px] text-slate-400">
+                                    Format default AGC/tahun/bulan/nomor. Semua bagian bisa diedit.
+                                </p>
                             </div>
                             <div>
                                 <label class="crm-label">Vendor PO <span class="text-red-500">*</span></label>
@@ -2069,13 +2305,16 @@
                                                     </p>
                                                 </div>
                                                 <div class="overflow-x-auto">
-                                                    <table class="w-full min-w-[480px] text-left text-sm">
+                                                    <table class="w-full min-w-[640px] text-left text-sm">
                                                         <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-400">
                                                             <tr>
                                                                 <th class="px-3 py-2 font-medium">Vendor</th>
-                                                                <th class="px-3 py-2 font-medium">TOP</th>
+                                                                <th class="px-3 py-2 font-medium">Status vendor</th>
+                                                                <th class="w-24 px-3 py-2 font-medium">TOP</th>
                                                                 <th class="px-3 py-2 font-medium">Status</th>
-                                                                <th class="px-3 py-2 font-medium text-right">Harga</th>
+                                                                <th class="px-3 py-2 font-medium">Tanggal</th>
+                                                                <th class="px-3 py-2 font-medium text-right">Exclude</th>
+                                                                <th class="px-3 py-2 font-medium text-right">Include</th>
                                                                 <th class="px-3 py-2 font-medium text-center">Pakai</th>
                                                             </tr>
                                                         </thead>
@@ -2086,18 +2325,27 @@
                                                                         {{ $quote->displayVendorName() }}
                                                                     </td>
                                                                     <td class="px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
+                                                                        {{ $quote->companyStatusLabel() }}
+                                                                    </td>
+                                                                    <td class="w-24 px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
                                                                         {{ $quote->topLabel() }}
                                                                     </td>
                                                                     <td class="px-3 py-2">
-                                                                        <x-badge :color="$quote->isReady() ? 'green' : 'amber'">{{ $quote->statusLabel() }}</x-badge>
+                                                                        <x-badge :color="$quote->statusBadgeColor()">{{ $quote->statusLabel() }}</x-badge>
+                                                                    </td>
+                                                                    <td class="whitespace-nowrap px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
+                                                                        {{ $quote->quotedAtLabel() }}
                                                                     </td>
                                                                     <td class="px-3 py-2 text-right tabular-nums {{ $quote->is_selected ? 'font-medium text-slate-800' : 'text-slate-500' }}">
-                                                                        {{ money($quote->unit_price, $poCurrencyCode) }}
+                                                                        {{ money($quote->hargaExclude(), $poCurrencyCode) }}
+                                                                    </td>
+                                                                    <td class="px-3 py-2 text-right tabular-nums {{ $quote->is_selected ? 'font-medium text-slate-800' : 'text-slate-500' }}">
+                                                                        {{ money($quote->hargaInclude(), $poCurrencyCode) }}
                                                                     </td>
                                                                     <td class="px-3 py-2 text-center">
                                                                         @if ($quote->is_selected)
-                                                                            <span class="inline-flex items-center gap-1 text-xs font-semibold text-brand-700">
-                                                                                <i class="bi bi-check-circle-fill"></i> Dipilih
+                                                                            <span class="inline-flex text-brand-700" title="Dipakai">
+                                                                                <i class="bi bi-check-circle-fill"></i>
                                                                             </span>
                                                                         @else
                                                                             <span class="text-xs text-slate-400">—</span>
@@ -2106,7 +2354,7 @@
                                                                 </tr>
                                                             @empty
                                                                 <tr>
-                                                                    <td colspan="5" class="px-3 py-3 text-center text-sm text-slate-400">Belum ada perbandingan vendor</td>
+                                                                    <td colspan="8" class="px-3 py-3 text-center text-sm text-slate-400">Belum ada perbandingan vendor</td>
                                                                 </tr>
                                                             @endforelse
                                                         </tbody>
@@ -2129,7 +2377,7 @@
                         Semua PO · {{ $poList->count() }} vendor
                     </p>
                     <p class="text-sm font-semibold tabular-nums text-slate-800">
-                        Total {{ money((float) $poList->sum('total'), $poCurrency) }}
+                        Total {{ money((float) $poList->sum(fn ($po) => $po->totalInclude()), $poCurrency) }}
                     </p>
                 </div>
                 <div class="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
@@ -2152,7 +2400,7 @@
                                         'bg-amber-50 text-amber-700' => $poFlatIsCash,
                                         'bg-slate-100 text-slate-600' => ! $poFlatIsCash,
                                     ])>{{ $po->paymentTermLabel() }}</span>
-                                    <span class="text-sm font-semibold tabular-nums text-slate-800">{{ money((float) $po->total, $poFlatCurrency) }}</span>
+                                    <span class="text-sm font-semibold tabular-nums text-slate-800">{{ money($po->totalInclude(), $poFlatCurrency) }}</span>
                                     <span class="text-xs text-slate-400">{{ $poFlatItemCount }} item</span>
                                 </div>
                                 <p class="mt-0.5 text-xs text-slate-400">
@@ -2199,7 +2447,7 @@
                      aria-modal="true"
                      @keydown.escape.window="if (previewPoId === {{ (int) $po->id }}) previewPoId = null">
                     <div class="absolute inset-0 bg-slate-900/50" @click="previewPoId = null"></div>
-                    <div class="relative z-10 flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                    <div class="relative z-10 flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
                         <div class="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
                             <div>
                                 <h3 class="text-base font-semibold text-slate-800">Perbandingan vendor</h3>
@@ -2244,13 +2492,16 @@
                                             </p>
                                         </div>
                                         <div class="overflow-x-auto">
-                                            <table class="w-full min-w-[520px] text-left text-sm">
+                                            <table class="w-full min-w-[720px] text-left text-sm">
                                                 <thead class="text-xs uppercase tracking-wider text-slate-400">
                                                     <tr>
                                                         <th class="px-4 py-2 font-medium">Vendor</th>
-                                                        <th class="px-4 py-2 font-medium">TOP</th>
+                                                        <th class="px-4 py-2 font-medium">Status vendor</th>
+                                                        <th class="w-24 px-4 py-2 font-medium">TOP</th>
                                                         <th class="px-4 py-2 font-medium">Status</th>
-                                                        <th class="px-4 py-2 font-medium text-right">Harga</th>
+                                                        <th class="px-4 py-2 font-medium">Tanggal</th>
+                                                        <th class="px-4 py-2 font-medium text-right">Exclude</th>
+                                                        <th class="px-4 py-2 font-medium text-right">Include</th>
                                                         <th class="px-4 py-2 font-medium text-center">Pakai</th>
                                                     </tr>
                                                 </thead>
@@ -2261,18 +2512,27 @@
                                                                 {{ $quote->displayVendorName() }}
                                                             </td>
                                                             <td class="px-4 py-2.5 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
+                                                                {{ $quote->companyStatusLabel() }}
+                                                            </td>
+                                                            <td class="w-24 px-4 py-2.5 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
                                                                 {{ $quote->topLabel() }}
                                                             </td>
                                                             <td class="px-4 py-2.5">
-                                                                <x-badge :color="$quote->isReady() ? 'green' : 'amber'">{{ $quote->statusLabel() }}</x-badge>
+                                                                <x-badge :color="$quote->statusBadgeColor()">{{ $quote->statusLabel() }}</x-badge>
+                                                            </td>
+                                                            <td class="whitespace-nowrap px-4 py-2.5 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
+                                                                {{ $quote->quotedAtLabel() }}
                                                             </td>
                                                             <td class="px-4 py-2.5 text-right tabular-nums {{ $quote->is_selected ? 'font-medium text-slate-800' : 'text-slate-500' }}">
-                                                                {{ money($quote->unit_price, $po->currency ?: $poCurrency) }}
+                                                                {{ money($quote->hargaExclude(), $po->currency ?: $poCurrency) }}
+                                                            </td>
+                                                            <td class="px-4 py-2.5 text-right tabular-nums {{ $quote->is_selected ? 'font-medium text-slate-800' : 'text-slate-500' }}">
+                                                                {{ money($quote->hargaInclude(), $po->currency ?: $poCurrency) }}
                                                             </td>
                                                             <td class="px-4 py-2.5 text-center">
                                                                 @if ($quote->is_selected)
-                                                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-brand-700">
-                                                                        <i class="bi bi-check-circle-fill"></i> Dipilih
+                                                                    <span class="inline-flex text-brand-700" title="Dipakai">
+                                                                        <i class="bi bi-check-circle-fill"></i>
                                                                     </span>
                                                                 @else
                                                                     <span class="text-xs text-slate-400">—</span>
@@ -2281,7 +2541,7 @@
                                                         </tr>
                                                     @empty
                                                         <tr>
-                                                            <td colspan="5" class="px-4 py-3 text-center text-sm text-slate-400">Belum ada perbandingan vendor</td>
+                                                            <td colspan="8" class="px-4 py-3 text-center text-sm text-slate-400">Belum ada perbandingan vendor</td>
                                                         </tr>
                                                     @endforelse
                                                 </tbody>

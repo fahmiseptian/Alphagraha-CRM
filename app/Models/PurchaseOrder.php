@@ -64,4 +64,16 @@ class PurchaseOrder extends Model
     {
         return $this->isCash() ? 'Cash' : 'TOP';
     }
+
+    /**
+     * Total PO harga include (PPN jika PKP + tambahan Cash/TOP di sisi include).
+     */
+    public function totalInclude(): float
+    {
+        $this->loadMissing(['items.vendorQuotes', 'vendor']);
+
+        return round((float) $this->items->sum(
+            fn (PurchaseOrderItem $item) => $item->lineTotalInclude($this->payment_term)
+        ), 2);
+    }
 }

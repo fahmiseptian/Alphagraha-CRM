@@ -10,6 +10,7 @@ use App\Models\Espo\Account;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Lead;
 use App\Models\Espo\Opportunity;
+use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Models\UserProfile;
 use Illuminate\Http\Request;
@@ -30,6 +31,10 @@ class DashboardController extends Controller
         }
         $periodRange = $this->periodDateRange($period);
         $periodLabel = $this->periodLabel($period);
+
+        if ($user->isPurchasing()) {
+            return $this->purchasingDashboard($period, $periodRange, $periodLabel);
+        }
 
         $leaderboardPeriod = $request->get('leaderboard_period', $period);
         if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year', '3months', '6months'], true)) {
@@ -196,6 +201,47 @@ class DashboardController extends Controller
             'period', 'periodLabel',
             'selectedSalesId', 'selectedSales', 'pipelineTitle', 'pipelineDetails',
             'showDetail', 'detailStart', 'detailEnd', 'dailyRecap'
+        ));
+    }
+
+    /**
+     * Dashboard purchasing: hanya Closed Won yang perlu dikerjakan (PO).
+     */
+    protected function purchasingDashboard(string $period, ?array $periodRange, string $periodLabel)
+    {
+        $wonBase = Opportunity::query()->where('stage', Opportunity::WON_STAGE);
+        $this->applyPeriodToDateColumn($wonBase, 'close_date', $periodRange);
+
+        $needsPoQuery = (clone $wonBase)->whereDoesntHave('purchaseOrders');
+        $needsPoCount = (clone $needsPoQuery)->count();
+        $needsPo = $needsPoQuery
+            ->with(['account', 'assignedUser'])
+            ->orderByDesc('close_date')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        $wonPeriodCount = (clone $wonBase)->count();
+        $wonWithPoCount = (clone $wonBase)->whereHas('purchaseOrders')->count();
+
+        $poPeriodQuery = PurchaseOrder::query();
+        $this->applyPeriodToDateColumn($poPeriodQuery, 'created_at', $periodRange);
+        $poPeriodCount = (clone $poPeriodQuery)->count();
+        $recentPos = (clone $poPeriodQuery)
+            ->with(['opportunity.account', 'vendor', 'items.vendorQuotes'])
+            ->orderByDesc('created_at')
+            ->limit(8)
+            ->get();
+
+        return view('dashboard-purchasing', compact(
+            'period',
+            'periodLabel',
+            'needsPo',
+            'needsPoCount',
+            'wonPeriodCount',
+            'wonWithPoCount',
+            'poPeriodCount',
+            'recentPos'
         ));
     }
 

@@ -48,6 +48,53 @@
     </div>
 </div>
 
+@php
+    $catalogUser = auth()->user();
+    $showCatalogShortcuts = $catalogUser
+        && $catalogUser->canManageCatalog()
+        && ! $catalogUser->canAccessAdministration();
+@endphp
+@if ($showCatalogShortcuts)
+    <div class="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        @if ($catalogUser->canManageBrands())
+            <a href="{{ route('brands.index') }}"
+               class="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md">
+                <span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 group-hover:bg-brand-100">
+                    <i class="bi bi-tags text-lg"></i>
+                </span>
+                <span>
+                    <span class="block text-sm font-semibold text-slate-800">Brands</span>
+                    <span class="block text-xs text-slate-500">Tambah & kelola master brand</span>
+                </span>
+            </a>
+        @endif
+        @if ($catalogUser->canManageCategories())
+            <a href="{{ route('categories.index') }}"
+               class="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md">
+                <span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 group-hover:bg-brand-100">
+                    <i class="bi bi-folder text-lg"></i>
+                </span>
+                <span>
+                    <span class="block text-sm font-semibold text-slate-800">Categories</span>
+                    <span class="block text-xs text-slate-500">Tambah & kelola kategori produk</span>
+                </span>
+            </a>
+        @endif
+        @if ($catalogUser->canManageVendors())
+            <a href="{{ route('vendors.index') }}"
+               class="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md">
+                <span class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 group-hover:bg-brand-100">
+                    <i class="bi bi-truck text-lg"></i>
+                </span>
+                <span>
+                    <span class="block text-sm font-semibold text-slate-800">Vendors</span>
+                    <span class="block text-xs text-slate-500">Tambah & kelola master vendor</span>
+                </span>
+            </a>
+        @endif
+    </div>
+@endif
+
 @if ($showDetail)
     <x-card class="mb-4" title="Detail Dashboard — Rekapan Penjualan & Margin">
         <x-slot:action>

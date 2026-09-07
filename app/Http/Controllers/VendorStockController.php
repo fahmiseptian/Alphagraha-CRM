@@ -40,7 +40,7 @@ class VendorStockController extends Controller
             $query->where('vendor_id', $vendorId);
         }
 
-        if (in_array($status, [VendorStock::STATUS_READY, VendorStock::STATUS_INDENT], true)) {
+        if (in_array($status, array_keys(VendorStock::STATUSES), true)) {
             $query->where('status', $status);
         }
 
@@ -156,7 +156,7 @@ class VendorStockController extends Controller
             'vendor_id' => ['required', 'integer', 'exists:crm_vendors,id'],
             'product_name' => ['required', 'string', 'max:255'],
             'sku' => ['nullable', 'string', 'max:100'],
-            'status' => ['required', Rule::in([VendorStock::STATUS_READY, VendorStock::STATUS_INDENT])],
+            'status' => ['required', Rule::in(array_keys(VendorStock::STATUSES))],
             'price' => ['required', 'numeric', 'min:0'],
             'note' => ['nullable', 'string', 'max:2000'],
             'is_active' => ['nullable', 'boolean'],

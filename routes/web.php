@@ -1,4 +1,4 @@
-<?php
+ <?php
 
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActivityMediaController;
@@ -24,6 +24,7 @@ use App\Http\Controllers\OpportunityNoteController;
 use App\Http\Controllers\OpportunityPurchaseOrderController;
 use App\Http\Controllers\OpportunitySalesOrderController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PurchaseOrderController;
 use App\Http\Controllers\VendorStockController;
 use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\WilayahLookupController;
@@ -124,6 +125,7 @@ Route::middleware('auth')->group(function () {
     Route::put('/vendor-stocks/{vendorStock}', [VendorStockController::class, 'update'])->name('vendor-stocks.update');
     Route::delete('/vendor-stocks/{vendorStock}', [VendorStockController::class, 'destroy'])->name('vendor-stocks.destroy');
 
+    Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
     Route::get('/sales-orders', [OpportunitySalesOrderController::class, 'index'])->name('sales-orders.index');
     Route::get('/opportunities/{opportunity}/sales-orders/create', [OpportunitySalesOrderController::class, 'create'])->name('opportunities.sales-orders.create');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'show'])->name('opportunities.sales-orders.show')->whereNumber('salesOrder');
@@ -186,10 +188,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/brands/export', [BrandController::class, 'export'])->name('brands.export');
         Route::get('/brands/template', [BrandController::class, 'template'])->name('brands.template');
         Route::post('/brands/import', [BrandController::class, 'import'])->name('brands.import');
+        Route::post('/brands/quick', [BrandController::class, 'quickStore'])->name('brands.quick-store');
         Route::resource('brands', BrandController::class)->except(['show']);
         Route::get('/categories/export', [CategoryController::class, 'export'])->name('categories.export');
         Route::get('/categories/template', [CategoryController::class, 'template'])->name('categories.template');
         Route::post('/categories/import', [CategoryController::class, 'import'])->name('categories.import');
+        Route::post('/categories/quick', [CategoryController::class, 'quickStore'])->name('categories.quick-store');
         Route::resource('categories', CategoryController::class)->except(['show']);
     });
 
@@ -198,6 +202,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/vendors/export', [VendorController::class, 'export'])->name('vendors.export');
         Route::get('/vendors/template', [VendorController::class, 'template'])->name('vendors.template');
         Route::post('/vendors/import', [VendorController::class, 'import'])->name('vendors.import');
+        Route::post('/vendors/quick', [VendorController::class, 'quickStore'])->name('vendors.quick-store');
         Route::resource('vendors', VendorController::class)->except(['show']);
     });
 });

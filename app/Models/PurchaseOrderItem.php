@@ -78,9 +78,15 @@ class PurchaseOrderItem extends Model
         $modal = round((float) $this->unit_price, 2);
         $percent = PurchaseOrderPricing::surchargePercent($term);
         $rate = $percent / 100;
+        $quote = $this->selectedVendorQuote();
+        $isPkp = $quote !== null
+            ? (bool) $quote->is_pkp
+            : (bool) ($this->purchaseOrder?->vendor?->is_pkp ?? true);
+        $hargaInclude = $isPkp
+            ? OpportunityProductPricing::includeFromExclude($modal)
+            : $modal;
         $extraExclude = $rate > 0 ? round($modal * $rate, 2) : 0.0;
         $jumlahExclude = round($modal + $extraExclude, 2);
-        $hargaInclude = OpportunityProductPricing::includeFromExclude($modal);
         $extraInclude = $rate > 0 ? round($hargaInclude * $rate, 2) : 0.0;
         $jumlahInclude = round($hargaInclude + $extraInclude, 2);
 
@@ -93,5 +99,16 @@ class PurchaseOrderItem extends Model
             'extra_include' => $extraInclude,
             'jumlah_include' => $jumlahInclude,
         ];
+    }
+
+    /**
+     * Subtotal baris include = qty × jumlah_include.
+     */
+    public function lineTotalInclude(?string $paymentTerm = null): float
+    {
+        $qty = (float) $this->quantity;
+        $breakdown = $this->pricingBreakdown(null, $paymentTerm);
+
+        return round($qty * (float) $breakdown['jumlah_include'], 2);
     }
 }

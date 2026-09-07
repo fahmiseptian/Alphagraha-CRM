@@ -13,9 +13,12 @@ class VendorStock extends Model
 
     public const STATUS_INDENT = 'indent';
 
+    public const STATUS_KOSONG = 'kosong';
+
     public const STATUSES = [
         self::STATUS_READY => 'Ready',
         self::STATUS_INDENT => 'Indent',
+        self::STATUS_KOSONG => 'Kosong',
     ];
 
     protected $table = 'crm_vendor_stocks';
@@ -55,9 +58,20 @@ class VendorStock extends Model
 
     public static function normalizeStatus(?string $status): string
     {
-        return $status === self::STATUS_INDENT
-            ? self::STATUS_INDENT
+        $status = strtolower(trim((string) $status));
+
+        return array_key_exists($status, self::STATUSES)
+            ? $status
             : self::STATUS_READY;
+    }
+
+    public static function badgeColorForStatus(?string $status): string
+    {
+        return match ($status) {
+            self::STATUS_READY => 'green',
+            self::STATUS_KOSONG => 'slate',
+            default => 'amber',
+        };
     }
 
     public function scopeActive(Builder $query): Builder
@@ -93,5 +107,10 @@ class VendorStock extends Model
     public function statusLabel(): string
     {
         return self::STATUSES[$this->status] ?? ucfirst((string) $this->status);
+    }
+
+    public function badgeColor(): string
+    {
+        return self::badgeColorForStatus($this->status);
     }
 }

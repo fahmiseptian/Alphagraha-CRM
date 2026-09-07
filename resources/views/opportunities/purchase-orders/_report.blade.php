@@ -43,7 +43,7 @@
                 </table>
             </td>
             <td class="po-meta-right">
-                <div class="payment-term-box">&nbsp;</div>
+                <div class="payment-term-box">{{ $report['payment_term_label'] ?? '—' }}</div>
             </td>
         </tr>
     </table>
@@ -64,8 +64,8 @@
                 <td class="col-label">Nilai Jual</td>
                 <td class="num">{{ $fmt($s['nilai_jual_incl']) }}</td>
                 <td class="num">{{ $fmt($s['nilai_jual_excl']) }}</td>
-                <td class="blank">&nbsp;</td>
-                <td class="blank">&nbsp;</td>
+                <td class="{{ ($s['pph_23'] ?? null) ? 'num' : 'blank' }}">{{ $fmt($s['pph_23'] ?? null) }}</td>
+                <td class="num">{{ $fmt($s['terima_uang'] ?? $s['nilai_jual_incl']) }}</td>
                 <td class="blank">&nbsp;</td>
             </tr>
             <tr>
@@ -74,14 +74,14 @@
                 <td class="num">{{ $fmt($s['modal_excl']) }}</td>
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
-                <td class="num">{{ $fmtPct($s['margin_percent']) }}</td>
+                <td class="num">{{ $fmtPct($s['modal_row_percent']) }}</td>
             </tr>
             <tr>
                 <td class="col-label">Jual Ongkir</td>
+                <td class="num">{{ $fmt($s['jual_ongkir_incl']) }}</td>
+                <td class="num">{{ $fmt($s['jual_ongkir_excl']) }}</td>
                 <td class="blank">&nbsp;</td>
-                <td class="blank">&nbsp;</td>
-                <td class="blank">&nbsp;</td>
-                <td class="blank">&nbsp;</td>
+                <td class="num">{{ $fmt($s['jual_ongkir_incl']) }}</td>
                 <td class="blank">&nbsp;</td>
             </tr>
             <tr>
@@ -95,7 +95,7 @@
             <tr>
                 <td class="col-label">DISKON</td>
                 <td class="num">{{ $fmt($s['diskon_incl']) }}</td>
-                <td class="num">{{ $fmt($s['diskon_excl']) }}</td>
+                <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="num">{{ $fmtPct($s['diskon_percent']) }}</td>
@@ -122,7 +122,7 @@
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="num">{{ $fmt($s['total_profit']) }}</td>
-                <td class="num">{{ $fmtPct($s['margin_percent'] !== null && $s['total_profit'] != 0 ? 100 : null) }}</td>
+                <td class="num">{{ $fmtPct($s['total_profit_percent']) }}</td>
             </tr>
         </tbody>
     </table>
@@ -166,10 +166,10 @@
                     <td class="col-po">{{ $row['number'] }}</td>
                     <td class="col-vendor">{{ $row['vendor'] ?? '—' }}</td>
                     <td class="num">{{ $fmt($row['harga_exclude']) }}</td>
-                    <td class="num">{{ $fmt($row['extra_exclude']) }}</td>
+                    <td class="{{ ($row['extra_exclude'] ?? 0) > 0 ? 'num' : 'blank' }}">{{ ($row['extra_exclude'] ?? 0) > 0 ? $fmt($row['extra_exclude']) : '' }}</td>
                     <td class="num">{{ $fmt($row['jumlah_exclude']) }}</td>
                     <td class="num">{{ $fmt($row['harga_include']) }}</td>
-                    <td class="num">{{ $fmt($row['extra_include']) }}</td>
+                    <td class="{{ ($row['extra_include'] ?? 0) > 0 ? 'num' : 'blank' }}">{{ ($row['extra_include'] ?? 0) > 0 ? $fmt($row['extra_include']) : '' }}</td>
                     <td class="num">{{ $fmt($row['jumlah_include']) }}</td>
                 </tr>
             @empty

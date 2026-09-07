@@ -151,6 +151,11 @@ class User extends Authenticatable
         return $this->isSuperAdmin() || $this->isProduct() || $this->isPurchasing();
     }
 
+    public function canManageCatalog(): bool
+    {
+        return $this->canManageBrands() || $this->canManageCategories() || $this->canManageVendors();
+    }
+
     /** Customer: Sales/Admin/Superadmin + Purchasing + Finance */
     public function canViewCustomers(): bool
     {

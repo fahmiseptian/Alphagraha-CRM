@@ -80,17 +80,19 @@ class VendorStockService
     }
 
     /**
-     * @return list<array{id:int,name:string,top:string}>
+     * @return list<array{id:int,name:string,top:string,is_pkp:bool,company_status:?string}>
      */
     public function vendorOptions(): array
     {
         return Vendor::query()
             ->ordered()
-            ->get(['id', 'name', 'top'])
+            ->get(['id', 'name', 'top', 'is_pkp', 'company_status'])
             ->map(fn (Vendor $vendor) => [
                 'id' => $vendor->id,
                 'name' => $vendor->name,
                 'top' => $vendor->topValue(),
+                'is_pkp' => (bool) $vendor->is_pkp,
+                'company_status' => $vendor->company_status ? (string) $vendor->company_status : null,
             ])
             ->values()
             ->all();

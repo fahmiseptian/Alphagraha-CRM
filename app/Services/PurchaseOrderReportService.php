@@ -17,7 +17,7 @@ class PurchaseOrderReportService
      */
     public function build(Opportunity $opportunity): array
     {
-        $opportunity->loadMissing(['account', 'assignedUser', 'purchaseOrders.vendor', 'purchaseOrders.items']);
+        $opportunity->loadMissing(['account', 'assignedUser', 'purchaseOrders.vendor', 'purchaseOrders.items', 'salesOrders']);
 
         $currency = $opportunity->amount_currency ?: 'IDR';
         $products = $opportunity->products;
@@ -28,14 +28,18 @@ class PurchaseOrderReportService
         $nilaiJualIncl = round($products->sum(
             fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_include'] ?? $p['sell_include'] ?? 0)
         ), 2);
+        // PPh 23 = Σ (qty × PPH per item). Barang Non Wapu = 0; barang/jasa Wapu/Inaproc & jasa Non Wapu ikut tarif setting.
+        $pph23 = round($products->sum(
+            fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['pph'] ?? 0)
+        ), 2);
+        $terimaUang = round($nilaiJualIncl - $pph23, 2);
 
         $poRows = $this->buildPoRows($opportunity->purchaseOrders);
         $hasSurcharge = $poRows->contains(fn (array $row) => ($row['surcharge_percent'] ?? 0) > 0);
         $hasCash = $poRows->contains(fn (array $row) => $row['is_cash']);
 
-        // Modal = total semua Purchase Order (bukan cost dari produk opportunity).
-        $modalExcl = round((float) $opportunity->purchaseOrders->sum('total'), 2);
-        $modalIncl = round($poRows->sum('jumlah_include'), 2);
+        $modalExcl = round((float) $poRows->sum('jumlah_exclude'), 2);
+        $modalIncl = round((float) $poRows->sum('jumlah_include'), 2);
 
         $modalOngkirExcl = $opportunity->crm_shipping_cost !== null
             ? round((float) $opportunity->crm_shipping_cost, 2)
@@ -44,27 +48,38 @@ class PurchaseOrderReportService
             ? OpportunityProductPricing::includeFromExclude($modalOngkirExcl)
             : null;
 
-        $diskonExcl = $opportunity->hasActiveDiscount()
+        $diskonAmount = $opportunity->hasActiveDiscount()
             ? round((float) $opportunity->crm_discount_amount, 2)
-            : 0.0;
-        $diskonIncl = $diskonExcl > 0
-            ? OpportunityProductPricing::includeFromExclude($diskonExcl)
-            : 0.0;
-        $diskonPercent = $nilaiJualExcl > 0 && $diskonExcl > 0
-            ? round(($diskonExcl / $nilaiJualExcl) * 100, 2)
             : 0.0;
 
         $jualOngkirExcl = null;
         $jualOngkirIncl = null;
+        if ($opportunity->crm_has_shipping_charge && (float) ($opportunity->crm_shipping_sell ?? 0) > 0) {
+            $jualOngkirExcl = round((float) $opportunity->crm_shipping_sell, 2);
+            $jualOngkirIncl = OpportunityProductPricing::includeFromExclude($jualOngkirExcl);
+        }
 
-        $profitBarang = round($nilaiJualExcl - $modalExcl - $diskonExcl, 2);
+        $netJualExclBeforeDiskon = round($nilaiJualExcl - $pph23, 2);
+        $grossMarginBase = round($nilaiJualExcl - $modalExcl - $pph23, 2);
+        $profitBarang = round($grossMarginBase - $diskonAmount, 2);
         $profitOngkir = round(
             (float) ($jualOngkirExcl ?? 0) - (float) ($modalOngkirExcl ?? 0),
             2
         );
         $totalProfit = round($profitBarang + $profitOngkir, 2);
-        $marginPercent = $nilaiJualExcl > 0
-            ? round(($totalProfit / $nilaiJualExcl) * 100, 2)
+
+        $modalRowPercent = $netJualExclBeforeDiskon > 0
+            ? round(($grossMarginBase / $netJualExclBeforeDiskon) * 100, 2)
+            : null;
+        $diskonPercent = $grossMarginBase > 0 && $diskonAmount > 0
+            ? round(($diskonAmount / $grossMarginBase) * 100, 2)
+            : null;
+        $totalProfitPercent = $grossMarginBase > 0
+            ? round(($totalProfit / $grossMarginBase) * 100, 2)
+            : null;
+        $netJualExcl = round($nilaiJualExcl - $diskonAmount - $pph23, 2);
+        $marginPercent = $netJualExcl > 0
+            ? round(($totalProfit / $netJualExcl) * 100, 2)
             : null;
 
         return [
@@ -72,7 +87,7 @@ class PurchaseOrderReportService
             'currency' => $currency,
             'invoice_date' => null,
             'invoice_number' => null,
-            'payment_term_label' => null,
+            'payment_term_label' => $this->resolveSoPaymentLabel($opportunity),
             'settled_at' => null,
             'sales_name' => optional($opportunity->assignedUser)->display_name
                 ?: optional($opportunity->assignedUser)->user_name
@@ -86,18 +101,22 @@ class PurchaseOrderReportService
             'summary' => [
                 'nilai_jual_incl' => $nilaiJualIncl,
                 'nilai_jual_excl' => $nilaiJualExcl,
+                'pph_23' => $pph23 > 0 ? $pph23 : null,
+                'terima_uang' => $terimaUang,
                 'modal_incl' => $modalIncl,
                 'modal_excl' => $modalExcl,
+                'modal_row_percent' => $modalRowPercent,
                 'jual_ongkir_incl' => $jualOngkirIncl,
                 'jual_ongkir_excl' => $jualOngkirExcl,
                 'modal_ongkir_incl' => $modalOngkirIncl,
                 'modal_ongkir_excl' => $modalOngkirExcl,
-                'diskon_incl' => $diskonIncl > 0 ? $diskonIncl : null,
-                'diskon_excl' => $diskonExcl > 0 ? $diskonExcl : null,
+                'diskon_incl' => $diskonAmount > 0 ? $diskonAmount : null,
+                'diskon_excl' => null,
                 'diskon_percent' => $diskonPercent,
                 'profit_barang' => $profitBarang,
                 'profit_ongkir' => $profitOngkir,
                 'total_profit' => $totalProfit,
+                'total_profit_percent' => $totalProfitPercent,
                 'margin_percent' => $marginPercent,
             ],
             'po_rows' => $poRows->all(),
@@ -148,5 +167,17 @@ class PurchaseOrderReportService
                 'jumlah_include' => round($jumlahIncl, 2),
             ];
         });
+    }
+
+    protected function resolveSoPaymentLabel(Opportunity $opportunity): string
+    {
+        $salesOrder = $opportunity->salesOrders->first();
+        if (! $salesOrder) {
+            return '—';
+        }
+
+        $label = trim($salesOrder->paymentLabel());
+
+        return $label !== '' && $label !== '—' ? $label : '—';
     }
 }
