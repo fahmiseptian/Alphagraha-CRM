@@ -725,6 +725,8 @@ class OpportunityController extends Controller
             abort(403, 'Purchasing hanya dapat mengedit deal Closed Won.');
         }
 
+        $this->hydrateProductsFromJson($request);
+
         $data = $request->validate([
             'products' => ['required', 'array', 'min:1'],
             'products.*.name' => ['nullable', 'string', 'max:255'],
@@ -947,6 +949,11 @@ class OpportunityController extends Controller
     {
         $allowedStages = $creating ? Opportunity::CREATE_STAGES : Opportunity::STAGES;
 
+        $request->merge([
+            'crm_top' => CustomerTop::canonicalize($request->input('crm_top')),
+        ]);
+        $this->hydrateProductsFromJson($request);
+
         $rules = [
             'company' => ['required', 'string', 'max:255'],
             'type' => ['required', 'string', Rule::in(Opportunity::TYPES)],
@@ -1157,6 +1164,24 @@ class OpportunityController extends Controller
         $this->applyDiscountData($opportunity, $data, $isNew);
         $this->applyShippingChargeData($opportunity, $data);
         $opportunity->syncWonMargin();
+    }
+
+    /**
+     * Produk dikirim sebagai JSON agar tidak terpotong PHP max_input_vars (~1000).
+     */
+    protected function hydrateProductsFromJson(Request $request): void
+    {
+        $raw = $request->input('products_json');
+        if (! is_string($raw) || trim($raw) === '') {
+            return;
+        }
+
+        $decoded = json_decode($raw, true);
+        if (! is_array($decoded)) {
+            return;
+        }
+
+        $request->merge(['products' => array_values($decoded)]);
     }
 
     /**

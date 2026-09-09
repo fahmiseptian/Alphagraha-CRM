@@ -35,9 +35,15 @@
             </select>
         </div>
         <div>
-            <label class="crm-label">Industry</label>
-            <input type="text" name="industry" value="{{ old('industry', $account->industry) }}"
-                   class="crm-field">
+            <label class="crm-label">Industry <span class="text-red-500">*</span></label>
+            <select name="industry" class="select2 w-full @error('industry') border-red-400 @enderror" required data-placeholder="— Pilih industri —">
+                <option value="">— Pilih industri —</option>
+                @foreach ($industries ?? [] as $industry)
+                    <option value="{{ $industry->name }}" @selected(old('industry', $account->industry) === $industry->name)>{{ $industry->name }}</option>
+                @endforeach
+            </select>
+            <p class="mt-1 text-xs text-slate-400">Wajib sesuai master industri. Jika belum ada, hubungi Superadmin.</p>
+            @error('industry')<p class="mt-1 text-xs text-red-600">{{ $message }}</p>@enderror
         </div>
         <div>
             <label class="crm-label">Email</label>
@@ -125,10 +131,10 @@
             <label class="crm-label">TOP <span class="text-red-500">*</span></label>
             <select name="crm_top" class="select2 w-full" required data-placeholder="— Pilih TOP —">
                 @foreach ($topOptions as $value => $label)
-                    <option value="{{ $value }}" @selected(old('crm_top', $account->crm_top ?: 'cash') === (string) $value)>{{ $label }}</option>
+                    <option value="{{ $value }}" @selected(old('crm_top', $account->top()) === (string) $value)>{{ $label }}</option>
                 @endforeach
             </select>
-            <p class="mt-1 text-xs text-slate-400">Terms of Payment. Default: Cash.</p>
+            <p class="mt-1 text-xs text-slate-400">Terms of Payment. Default: CBD.</p>
         </div>
         <div class="sm:col-span-2">
             <label class="crm-label">Description</label>

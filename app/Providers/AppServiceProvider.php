@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Models\Espo\Account;
 use App\Services\NotificationService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -30,6 +32,7 @@ class AppServiceProvider extends ServiceProvider
                     'crmUnreadNotificationCount' => 0,
                     'crmRecentNotifications' => collect(),
                     'crmPopupNotifications' => collect(),
+                    'crmMissingIndustryCount' => 0,
                 ]);
 
                 return;
@@ -49,10 +52,25 @@ class AppServiceProvider extends ServiceProvider
                 }
             }
 
+            $missingIndustryCount = 0;
+            if ($user->isSales() && Schema::hasTable('account')) {
+                try {
+                    $missingIndustryCount = Account::query()
+                        ->where('assigned_user_id', $user->id)
+                        ->where(function ($q) {
+                            $q->whereNull('industry')->orWhere('industry', '');
+                        })
+                        ->count();
+                } catch (\Throwable $e) {
+                    $missingIndustryCount = 0;
+                }
+            }
+
             $view->with([
                 'crmUnreadNotificationCount' => $service->unreadCount($user->id),
                 'crmRecentNotifications' => $service->recent($user->id),
                 'crmPopupNotifications' => $service->unreadPopups($user->id),
+                'crmMissingIndustryCount' => $missingIndustryCount,
             ]);
         });
     }

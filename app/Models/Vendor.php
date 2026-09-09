@@ -72,7 +72,7 @@ class Vendor extends Model
 
     public function topValue(): string
     {
-        return CustomerTop::isValid($this->top) ? (string) $this->top : CustomerTop::DAYS_30;
+        return CustomerTop::isValid($this->top) ? CustomerTop::normalize($this->top) : CustomerTop::DAYS_30;
     }
 
     public function topLabel(): string

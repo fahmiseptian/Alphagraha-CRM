@@ -11,6 +11,7 @@ class DatabaseSeeder extends Seeder
         // Pengguna berasal dari tabel `user` EspoCRM (tidak di-seed di sini).
         $this->call([
             QuotationTemplateSeeder::class,
+            IndustrySeeder::class,
         ]);
     }
 }

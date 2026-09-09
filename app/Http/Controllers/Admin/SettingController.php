@@ -198,7 +198,8 @@ class SettingController extends Controller
         ]);
 
         $topSettingLabels = [
-            CustomerTop::CASH => 'Minimal Margin Cash (%)',
+            CustomerTop::CASH => 'Minimal Margin CBD (%)',
+            CustomerTop::COD => 'Minimal Margin COD (%)',
             CustomerTop::DAYS_7 => 'Minimal Margin TOP 7 Hari (%)',
             CustomerTop::DAYS_14 => 'Minimal Margin TOP 14 Hari (%)',
             CustomerTop::DAYS_30 => 'Minimal Margin TOP 30 Hari (%)',

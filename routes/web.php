@@ -4,6 +4,7 @@ use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActivityMediaController;
 use App\Http\Controllers\Admin\BrandController;
 use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Admin\IndustryController;
 use App\Http\Controllers\Admin\SalesOrderLogController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\TemplateController;
@@ -163,6 +164,10 @@ Route::middleware('auth')->group(function () {
     Route::middleware('role:superadmin')->group(function () {
         Route::get('/sales-order-logs', [SalesOrderLogController::class, 'index'])->name('sales-order-logs.index');
         Route::get('/sales-order-logs/{log}', [SalesOrderLogController::class, 'show'])->name('sales-order-logs.show');
+        Route::get('/industries/export', [IndustryController::class, 'export'])->name('industries.export');
+        Route::get('/industries/template', [IndustryController::class, 'template'])->name('industries.template');
+        Route::post('/industries/import', [IndustryController::class, 'import'])->name('industries.import');
+        Route::resource('industries', IndustryController::class)->except(['show']);
         Route::resource('templates', TemplateController::class);
         Route::resource('users', UserController::class)->except(['show']);
         Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');

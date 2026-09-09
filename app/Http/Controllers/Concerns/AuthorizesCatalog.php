@@ -18,4 +18,9 @@ trait AuthorizesCatalog
     {
         abort_unless(auth()->user()?->canManageVendors(), 403, 'Anda tidak memiliki akses untuk mengelola vendor.');
     }
+
+    protected function authorizeIndustryManagement(): void
+    {
+        abort_unless(auth()->user()?->canManageIndustries(), 403, 'Anda tidak memiliki akses untuk mengelola industri.');
+    }
 }

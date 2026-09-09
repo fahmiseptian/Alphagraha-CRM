@@ -192,6 +192,12 @@
                     <i class="bi bi-folder shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Categories</span>
                 </a>
+                <a href="{{ route('industries.index') }}" title="Industries"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('industries.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-buildings shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Industries</span>
+                </a>
                 <a href="{{ route('vendors.index') }}" title="Vendors"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
                           {{ request()->routeIs('vendors.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
@@ -348,6 +354,16 @@
         <main class="mx-auto w-full max-w-[1600px] px-4 py-6 lg:px-8">
             @include('partials.flash')
             @auth
+                @if (auth()->user()->isSales() && ($crmMissingIndustryCount ?? 0) > 0)
+                    <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        <span>
+                            <i class="bi bi-building"></i>
+                            Mohon perbarui industri customer Anda sesuai daftar yang tersedia.
+                            <strong>{{ number_format($crmMissingIndustryCount) }} customer</strong> belum memiliki industri.
+                        </span>
+                        <a href="{{ route('customers.index', ['missing_industry' => 1]) }}" class="font-semibold text-amber-800 underline hover:text-amber-950">Update sekarang</a>
+                    </div>
+                @endif
                 @if (auth()->user()->isSales() && ! auth()->user()->hasDigitalSignature())
                     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         <span>

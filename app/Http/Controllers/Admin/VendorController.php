@@ -157,6 +157,10 @@ class VendorController extends Controller
      */
     protected function validated(Request $request, ?Vendor $vendor = null): array
     {
+        $request->merge([
+            'top' => CustomerTop::canonicalize($request->input('top')),
+        ]);
+
         $data = $request->validate([
             'name' => [
                 'required',
@@ -175,7 +179,7 @@ class VendorController extends Controller
             'name' => trim($data['name']),
             'company_status' => $status !== '' ? $status : null,
             'top' => CustomerTop::isValid($data['top'] ?? null)
-                ? (string) $data['top']
+                ? CustomerTop::normalize($data['top'])
                 : CustomerTop::DAYS_30,
             'is_pkp' => $request->boolean('is_pkp'),
             'is_active' => $request->boolean('is_active'),

@@ -7,11 +7,15 @@
         'assigned_user_id' => ($assignedUserId ?? '') !== '' ? $assignedUserId : null,
         'level' => ($levelFilter ?? '') !== '' ? $levelFilter : null,
         'type' => ($type ?? '') !== '' ? $type : null,
+        'industry' => ($industryFilter ?? '') !== '' ? $industryFilter : null,
+        'missing_industry' => ($missingIndustry ?? false) ? 1 : null,
     ], fn ($v) => $v !== null && $v !== '');
     $hasFilters = ($search ?? '') !== ''
         || ($assignedUserId ?? '') !== ''
         || ($levelFilter ?? '') !== ''
-        || ($type ?? '') !== '';
+        || ($type ?? '') !== ''
+        || ($industryFilter ?? '') !== ''
+        || ($missingIndustry ?? false);
 @endphp
 
 @section('content')
@@ -66,6 +70,18 @@
                     @endforeach
                 </select>
             </div>
+
+            <div class="crm-opp-filters__field">
+                <label class="crm-label">Industri</label>
+                <select name="industry" class="select2 select2-search w-full" data-placeholder="Semua industri">
+                    <option value="">Semua industri</option>
+                    @foreach ($industries ?? [] as $industry)
+                        <option value="{{ $industry->name }}" @selected(($industryFilter ?? '') === $industry->name)>
+                            {{ $industry->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
         </div>
 
         <div class="crm-opp-filters__actions">
@@ -81,6 +97,21 @@
         </div>
     </form>
 </x-card>
+
+    <div class="mb-4">
+        <a href="{{ route('customers.index', collect($filterQuery)->except('industry')->put('missing_industry', 1)->all()) }}"
+           @class([
+               'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition',
+               'border-amber-300 bg-amber-50 text-amber-800' => $missingIndustry ?? false,
+               'border-slate-200 bg-white text-slate-600 hover:border-slate-300' => ! ($missingIndustry ?? false),
+           ])>
+            <i class="bi bi-exclamation-circle"></i> Belum ada industri
+        </a>
+        @if ($missingIndustry ?? false)
+            <a href="{{ route('customers.index', collect($filterQuery)->except('missing_industry')->all()) }}"
+               class="ml-2 text-xs font-medium text-slate-500 underline hover:text-slate-700">Tampilkan semua</a>
+        @endif
+    </div>
 
 @if ($types->isNotEmpty())
     <div class="mb-4 flex flex-wrap items-center gap-2">
@@ -115,6 +146,7 @@
                         <th>Customer</th>
                         <th>Contact</th>
                         <th>Type</th>
+                        <th>Industry</th>
                         <th>Level</th>
                         <th>Sales</th>
                         <th class="text-center">Deal</th>
@@ -141,6 +173,13 @@
                                 @if ($account->type)
                                     <x-badge color="slate">{{ $account->type }}</x-badge>
                                 @else <span class="text-slate-300">—</span> @endif
+                            </td>
+                            <td>
+                                @if ($account->industry)
+                                    <span class="text-slate-600">{{ $account->industry }}</span>
+                                @else
+                                    <x-badge color="amber">Belum diisi</x-badge>
+                                @endif
                             </td>
                             <td>
                                 @php

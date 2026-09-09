@@ -151,6 +151,12 @@ class User extends Authenticatable
         return $this->isSuperAdmin() || $this->isProduct() || $this->isPurchasing();
     }
 
+    /** Industri customer: Superadmin only */
+    public function canManageIndustries(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     public function canManageCatalog(): bool
     {
         return $this->canManageBrands() || $this->canManageCategories() || $this->canManageVendors();

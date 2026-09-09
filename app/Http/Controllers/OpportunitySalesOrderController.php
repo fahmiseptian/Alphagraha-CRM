@@ -291,6 +291,10 @@ class OpportunitySalesOrderController extends Controller
         $accountId = (string) ($opportunity->account_id ?? '');
         $addressRule = Rule::exists('crm_customer_addresses', 'id')->where('account_id', $accountId);
 
+        $request->merge([
+            'payment' => CustomerTop::canonicalize($request->input('payment')),
+        ]);
+
         $data = $request->validate([
             'email' => ['nullable', 'email', 'max:255'],
             'payment' => ['required', 'string', Rule::in($allowedTop)],

@@ -802,6 +802,7 @@ class NotificationService
                 CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
                 CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
                 CrmNotification::TYPE_SALES_ORDER_CREATED,
+                CrmNotification::TYPE_CUSTOMER_INDUSTRY_UPDATE,
             ])
             ->update([
                 'read_at' => now(),
@@ -1160,6 +1161,46 @@ class NotificationService
                 'assigned_user_id' => $newUserId,
             ], $this->actorPayload($assignedByUserId)),
         );
+    }
+
+    /**
+     * Minta sales mengisi ulang industri customer sesuai master data.
+     */
+    public function notifySalesUpdateCustomerIndustry(): void
+    {
+        $title = 'Perbarui industri customer';
+        $body = 'Daftar industri customer sudah distandarkan. Mohon perbarui data customer Anda sesuai industri yang tersedia.';
+        $link = route('customers.index', ['missing_industry' => 1]);
+
+        $salesIds = User::query()
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SALES))
+            ->pluck('id');
+
+        foreach ($salesIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_CUSTOMER_INDUSTRY_UPDATE,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'customer_industry_update:'.$userId,
+                data: ['scope' => 'all'],
+            );
+        }
+    }
+
+    public function markCustomerIndustryUpdateActioned(string $userId): void
+    {
+        CrmNotification::query()
+            ->where('user_id', $userId)
+            ->where('type', CrmNotification::TYPE_CUSTOMER_INDUSTRY_UPDATE)
+            ->whereNull('read_at')
+            ->update([
+                'read_at' => now(),
+                'show_popup' => false,
+            ]);
     }
 
     protected function deadlineLabel(Carbon $date): string

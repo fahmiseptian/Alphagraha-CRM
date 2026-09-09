@@ -6,6 +6,7 @@ use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Activity;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Lead;
+use App\Models\Industry;
 use App\Services\EspoEntityWriter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -63,7 +64,7 @@ class LeadController extends Controller
             'assigned_user_id' => auth()->id(),
         ]);
 
-        return view('leads.create', $this->formData() + compact('lead'));
+        return view('leads.create', $this->formData($lead) + compact('lead'));
     }
 
     public function store(Request $request)
@@ -110,13 +111,13 @@ class LeadController extends Controller
             ->with(['emailAddresses', 'phoneNumbers'])
             ->findOrFail($id);
 
-        return view('leads.edit', $this->formData() + compact('lead'));
+        return view('leads.edit', $this->formData($lead) + compact('lead'));
     }
 
     public function update(Request $request, string $id)
     {
         $lead = $this->scopeAssigned(Lead::query())->findOrFail($id);
-        $data = $this->validateData($request);
+        $data = $this->validateData($request, $lead);
 
         $this->applyValidatedData($lead, $data);
         $lead->modified_at = Carbon::now()->format('Y-m-d H:i:s');
@@ -162,7 +163,7 @@ class LeadController extends Controller
         return back()->with('success', 'Lead updated successfully.');
     }
 
-    protected function validateData(Request $request): array
+    protected function validateData(Request $request, ?Lead $lead = null): array
     {
         return $request->validate([
             'salutation_name' => ['nullable', 'string', 'max:50'],
@@ -172,7 +173,7 @@ class LeadController extends Controller
             'account_name' => ['nullable', 'string', 'max:255'],
             'status' => ['required', Rule::in(Lead::STATUSES)],
             'source' => ['nullable', 'string', 'max:255'],
-            'industry' => ['nullable', 'string', 'max:255'],
+            'industry' => ['nullable', 'string', 'max:255', Industry::existsRule($lead?->industry)],
             'website' => ['nullable', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
@@ -200,7 +201,7 @@ class LeadController extends Controller
             'account_name' => $data['account_name'] ?? null,
             'status' => $data['status'],
             'source' => $data['source'] ?? null,
-            'industry' => $data['industry'] ?? null,
+            'industry' => ($data['industry'] ?? null) ?: null,
             'website' => $data['website'] ?? null,
             'address_street' => $data['address_street'] ?? null,
             'address_city' => $data['address_city'] ?? null,
@@ -217,11 +218,12 @@ class LeadController extends Controller
         }
     }
 
-    protected function formData(): array
+    protected function formData(?Lead $lead = null): array
     {
         return [
             'statuses' => Lead::STATUSES,
             'salesUsers' => EspoUser::query()->activeRegular()->orderBy('name')->get(),
+            'industries' => Industry::optionsForSelect($lead?->industry),
         ];
     }
 }

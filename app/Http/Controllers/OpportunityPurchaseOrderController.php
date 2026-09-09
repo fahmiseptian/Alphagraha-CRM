@@ -317,7 +317,9 @@ class OpportunityPurchaseOrderController extends Controller
                 'vendor_name' => $vendorName,
                 'product_name' => $itemName,
                 'status' => $quote['status'],
-                'top' => CustomerTop::isValid($quote['top'] ?? null) ? $quote['top'] : CustomerTop::DAYS_30,
+                'top' => CustomerTop::isValid($quote['top'] ?? null)
+                    ? CustomerTop::normalize($quote['top'])
+                    : CustomerTop::DAYS_30,
                 'unit_price' => $this->normalizeQuoteUnitPrice($quote),
                 'price_basis' => $this->normalizeQuotePriceBasis($quote),
                 'is_pkp' => $this->normalizeQuoteIsPkp($quote, $vendorId),
@@ -416,7 +418,9 @@ class OpportunityPurchaseOrderController extends Controller
                     'vendor_name' => $vendorName,
                     'product_name' => $itemName,
                     'status' => $quote['status'],
-                    'top' => CustomerTop::isValid($quote['top'] ?? null) ? $quote['top'] : CustomerTop::DAYS_30,
+                    'top' => CustomerTop::isValid($quote['top'] ?? null)
+                    ? CustomerTop::normalize($quote['top'])
+                    : CustomerTop::DAYS_30,
                     'unit_price' => $quote['unit_price'],
                     'is_pkp' => $this->normalizeQuoteIsPkp($quote, $vendorId),
                     'quoted_at' => $this->normalizeQuoteDate($quote['quoted_at'] ?? null),

@@ -37,7 +37,16 @@
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-envelope mr-1"></i>Email</dt><dd class="text-slate-700">{{ $account->email ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-telephone mr-1"></i>Phone</dt><dd class="text-slate-700">{{ $account->phone ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-globe mr-1"></i>Website</dt><dd class="text-slate-700">{{ $account->website ?: '—' }}</dd></div>
-                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-building mr-1"></i>Industry</dt><dd class="text-slate-700">{{ $account->industry ?: '—' }}</dd></div>
+                <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-building mr-1"></i>Industry</dt>
+                    <dd class="text-slate-700">
+                        @if ($account->industry)
+                            {{ $account->industry }}
+                        @else
+                            <span class="text-amber-700">Belum diisi</span>
+                            <a href="{{ route('customers.edit', $account->id) }}" class="ml-1 text-xs font-semibold text-amber-800 underline">Update</a>
+                        @endif
+                    </dd>
+                </div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-geo-alt mr-1"></i>Address</dt><dd class="text-slate-700">{{ $account->billing_address ?: '—' }}@if (($addresses ?? collect())->count() > 1) <span class="text-xs text-slate-400">({{ $addresses->count() }} alamat)</span>@endif</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-person mr-1"></i>Sales</dt><dd class="text-slate-700">{{ optional($account->assignedUser)->display_name ?: '—' }}</dd></div>
                 <div class="flex gap-3"><dt class="w-24 shrink-0 text-slate-400"><i class="bi bi-cash-coin mr-1"></i>Level</dt><dd class="text-slate-700">{{ $account->paymentLevelLabel() }}@if ($account->minMarginPercent() !== null) <span class="text-xs text-slate-400">(min margin {{ number_format($account->minMarginPercent(), 0) }}%)</span>@endif</dd></div>

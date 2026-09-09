@@ -39,6 +39,8 @@ class CrmNotification extends Model
 
     public const TYPE_OPPORTUNITY_ASSIGNED = 'opportunity_assigned';
 
+    public const TYPE_CUSTOMER_INDUSTRY_UPDATE = 'customer_industry_update';
+
     public const TYPE_GENERAL = 'general';
 
     protected $fillable = [
@@ -74,6 +76,7 @@ class CrmNotification extends Model
             self::TYPE_EVENT_APPROVAL_REQUESTED,
             self::TYPE_OPPORTUNITY_DEADLINE,
             self::TYPE_SALES_ORDER_CREATED,
+            self::TYPE_CUSTOMER_INDUSTRY_UPDATE,
         ], true);
     }
 
@@ -98,6 +101,7 @@ class CrmNotification extends Model
             self::TYPE_OPPORTUNITY_DEADLINE => 'bi-briefcase',
             self::TYPE_SALES_ORDER_CREATED => 'bi-receipt',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bi-person-check',
+            self::TYPE_CUSTOMER_INDUSTRY_UPDATE => 'bi-buildings',
             default => 'bi-bell',
         };
     }
@@ -120,6 +124,7 @@ class CrmNotification extends Model
             self::TYPE_OPPORTUNITY_DEADLINE => 'bg-rose-50 text-rose-600',
             self::TYPE_SALES_ORDER_CREATED => 'bg-indigo-50 text-indigo-600',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bg-brand-50 text-brand-600',
+            self::TYPE_CUSTOMER_INDUSTRY_UPDATE => 'bg-amber-50 text-amber-600',
             default => 'bg-slate-100 text-slate-600',
         };
     }

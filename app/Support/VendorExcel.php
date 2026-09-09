@@ -306,7 +306,7 @@ class VendorExcel
     {
         $raw = trim((string) $value);
         if (CustomerTop::isValid($raw)) {
-            return $raw;
+            return CustomerTop::normalize($raw);
         }
 
         $lower = Str::lower($raw);
@@ -320,8 +320,12 @@ class VendorExcel
             }
         }
 
-        if (str_contains($lower, 'cash')) {
+        if (str_contains($lower, 'cbd') || str_contains($lower, 'cash')) {
             return CustomerTop::CASH;
+        }
+
+        if (preg_match('/\bcod\b/', $lower)) {
+            return CustomerTop::COD;
         }
 
         if (preg_match('/(\d+)/', $raw, $matches) && CustomerTop::isValid($matches[1])) {

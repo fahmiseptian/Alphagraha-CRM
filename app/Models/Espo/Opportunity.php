@@ -1089,7 +1089,7 @@ class Opportunity extends Model implements HasMedia
     public function top(): string
     {
         if (CustomerTop::isValid($this->crm_top)) {
-            return (string) $this->crm_top;
+            return CustomerTop::normalize($this->crm_top);
         }
 
         $this->loadMissing('account');

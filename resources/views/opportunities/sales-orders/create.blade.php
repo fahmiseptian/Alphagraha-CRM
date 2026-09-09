@@ -72,7 +72,7 @@
                         @endforeach
                     </select>
                     <p class="mt-1 text-xs text-slate-400">
-                        Customer: {{ $form['customerTopLabel'] ?? 'Cash' }}.
+                        Customer: {{ $form['customerTopLabel'] ?? 'CBD' }}.
                     </p>
                 </div>
                 <div>
@@ -222,7 +222,7 @@ function salesOrderForm(cfg) {
 
     return {
         email: cfg.form.email || '',
-        payment: cfg.form.payment || 'cash',
+        payment: cfg.form.payment || @js(\App\Support\CustomerTop::DEFAULT),
         poNumber: cfg.form.poNumber || '',
         requiredDelivery: cfg.form.requiredDelivery || todayYmd(),
         note: cfg.form.note || '',

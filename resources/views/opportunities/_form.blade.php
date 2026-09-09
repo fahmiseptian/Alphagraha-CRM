@@ -58,7 +58,7 @@
           'contacts' => $contactOptions,
           'accountId' => old('account_id', $opportunity->account_id),
           'contactId' => old('contact_id', $opportunity->contact_id),
-          'crmTop' => old('crm_top', $opportunity->crm_top ?: ($opportunity->account?->crm_top ?? \App\Support\CustomerTop::DEFAULT)),
+          'crmTop' => old('crm_top', $opportunity->top()),
           'topMargins' => $topMargins ?? \App\Support\CustomerTop::allMinMargins(),
           'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
           'ppnPercent' => $ppnPercent,
@@ -86,9 +86,10 @@
           'noApprovalStages' => \App\Models\Espo\Opportunity::NO_APPROVAL_STAGES,
           'catalogCanAdd' => $catalogCanAdd,
           'catalogQuickUrls' => $catalogQuickUrls,
-      ]) }})">
+      ]) }})" @submit="packProductsPayload()">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
+    <textarea name="products_json" x-ref="productsJson" hidden></textarea>
 
     @if ($purchasingMode)
         <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -148,10 +149,10 @@
                         <label class="crm-label">TOP <span class="text-red-500">*</span></label>
                         <select name="crm_top" required class="select2 w-full" data-placeholder="— Pilih TOP —" @disabled($purchasingMode)>
                             @foreach ($topOptions ?? \App\Support\CustomerTop::LABELS as $value => $label)
-                                <option value="{{ $value }}" @selected(old('crm_top', $opportunity->crm_top ?: ($opportunity->account?->crm_top ?? 'cash')) === (string) $value)>{{ $label }}</option>
+                                <option value="{{ $value }}" @selected(old('crm_top', $opportunity->top()) === (string) $value)>{{ $label }}</option>
                             @endforeach
                         </select>
-                        @if ($purchasingMode)<input type="hidden" name="crm_top" value="{{ $opportunity->crm_top ?: ($opportunity->account?->crm_top ?? 'cash') }}">@endif
+                        @if ($purchasingMode)<input type="hidden" name="crm_top" value="{{ $opportunity->top() }}">@endif
                         <p class="mt-1 text-xs text-slate-400">Default dari customer. Bisa diubah untuk deal ini.</p>
                     </div>
                     <div>
@@ -737,6 +738,7 @@
                     <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
                         <div class="flex flex-wrap items-center gap-2" x-show="!purchasingMode">
                             <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()" x-bind:disabled="productImportBusy">Add Item</x-btn>
+                            <span class="text-xs text-slate-500" x-text="products.length + ' item'"></span>
                             <x-btn variant="secondary" icon="bi-download" :href="route('opportunities.products.template')" x-bind:class="productImportBusy ? 'pointer-events-none opacity-50' : ''">Download Template</x-btn>
                             <button type="button"
                                     @click="$refs.productImportInput.click()"
@@ -1096,7 +1098,7 @@
             contacts: config.contacts || [],
             accountId: config.accountId || '',
             contactId: config.contactId || '',
-            crmTop: config.crmTop || 'cash',
+            crmTop: config.crmTop || @js(\App\Support\CustomerTop::DEFAULT),
             topMargins: config.topMargins || {},
             _accountReady: false,
             currency: config.currency || 'IDR',
@@ -1674,7 +1676,7 @@
             applyCustomerTopDefault() {
                 if (this.purchasingMode) return;
 
-                const nextTop = this.accountMeta?.top || 'cash';
+                const nextTop = this.accountMeta?.top || @js(\App\Support\CustomerTop::DEFAULT);
                 this.crmTop = nextTop;
                 this.syncTopSelect();
             },
@@ -1682,7 +1684,7 @@
                 const el = this.$root.querySelector('[name="crm_top"]');
                 if (!el || !window.CrmSelect2 || !window.jQuery) return;
 
-                window.jQuery(el).val(this.crmTop || 'cash').trigger('change');
+                window.jQuery(el).val(this.crmTop || @js(\App\Support\CustomerTop::DEFAULT)).trigger('change');
             },
             refreshContactSelect() {
                 const el = this.$root.querySelector('[name="contact_id"]');
@@ -1746,6 +1748,45 @@
                 this.refreshBrandSelects();
                 this.refreshCategorySelects();
                 this.refreshVendorSelects();
+            },
+            packProductsPayload() {
+                const rows = (this.products || []).map((p) => ({
+                    name: p.name ?? '',
+                    quantity: p.quantity ?? 1,
+                    sell_exclude: p.sell_exclude ?? 0,
+                    cost_exclude: p.cost_exclude ?? 0,
+                    discount_exclude: p.discount_exclude ?? 0,
+                    shipping_exclude: p.shipping_exclude ?? 0,
+                    vendor: p.vendor ?? '',
+                    brand: p.brand ?? '',
+                    sku: p.sku ?? '',
+                    category: p.category ?? '',
+                    tax_category: p.tax_category ?? '',
+                    item_kind: p.item_kind ?? 'barang',
+                    royalty_type: p.royalty_type ?? '',
+                    has_royalty: p.royalty_type ? 1 : 0,
+                    image: p.remove_image ? '' : (p.image || ''),
+                    remove_image: p.remove_image ? 1 : 0,
+                    cost_foreign: p.cost_foreign ? 1 : 0,
+                    cost_in_usd: p.cost_foreign ? 1 : 0,
+                    cost_fx_code: p.cost_fx_code ?? '',
+                    cost_fx: p.cost_fx ?? 0,
+                    cost_usd: p.cost_fx ?? 0,
+                    fx_rate: p.fx_rate ?? 0,
+                    usd_rate: p.fx_rate ?? 0,
+                }));
+                if (this.$refs.productsJson) {
+                    this.$refs.productsJson.value = JSON.stringify(rows);
+                }
+                this.$root.querySelectorAll('[name^="products["]').forEach((el) => {
+                    if (el.type === 'file') {
+                        if (!el.files || !el.files.length) {
+                            el.disabled = true;
+                        }
+                    } else {
+                        el.disabled = true;
+                    }
+                });
             },
             removeProduct(i) {
                 const brandEl = this.$root.querySelector(`select[name="products[${i}][brand]"]`);

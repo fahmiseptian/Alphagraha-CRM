@@ -505,12 +505,15 @@
                 return this.poNumberPrefix || '';
             },
             paymentTermFromVendorTop(top) {
-                return String(top || '') === 'cash' ? 'cash' : 'top';
+                return ['CBD', 'cbd', 'cash'].includes(String(top || '')) ? 'cash' : 'top';
             },
             vendorTopLabel(top) {
                 const t = String(top || '');
                 const labels = {
-                    cash: 'Cash',
+                    CBD: 'CBD',
+                    cbd: 'CBD',
+                    cash: 'CBD',
+                    cod: 'COD',
                     '7': 'TOP 7 hari',
                     '14': 'TOP 14 hari',
                     '30': 'TOP 30 hari',

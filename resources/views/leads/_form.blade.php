@@ -46,8 +46,12 @@
         </div>
         <div>
             <label class="crm-label">Industry</label>
-            <input type="text" name="industry" value="{{ old('industry', $lead->industry) }}"
-                   class="crm-field">
+            <select name="industry" class="select2 w-full" data-placeholder="— Pilih industri —">
+                <option value="">— None —</option>
+                @foreach ($industries ?? [] as $industry)
+                    <option value="{{ $industry->name }}" @selected(old('industry', $lead->industry) === $industry->name)>{{ $industry->name }}</option>
+                @endforeach
+            </select>
         </div>
         <div>
             <label class="crm-label">Website</label>

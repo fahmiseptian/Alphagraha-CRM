@@ -9,7 +9,9 @@ use App\Models\CrmSetting;
  */
 class CustomerTop
 {
-    public const CASH = 'cash';
+    public const CASH = 'CBD';
+
+    public const COD = 'cod';
 
     public const DAYS_7 = '7';
 
@@ -25,6 +27,7 @@ class CustomerTop
 
     public const OPTIONS = [
         self::CASH,
+        self::COD,
         self::DAYS_7,
         self::DAYS_14,
         self::DAYS_30,
@@ -33,7 +36,8 @@ class CustomerTop
     ];
 
     public const LABELS = [
-        self::CASH => 'Cash',
+        self::CASH => 'CBD',
+        self::COD => 'COD',
         self::DAYS_7 => 'TOP 7 hari',
         self::DAYS_14 => 'TOP 14 hari',
         self::DAYS_30 => 'TOP 30 hari',
@@ -44,6 +48,7 @@ class CustomerTop
     /** Default minimal margin (%) per jenis TOP. */
     public const DEFAULT_MARGINS = [
         self::CASH => 0.0,
+        self::COD => 0.0,
         self::DAYS_7 => 5.0,
         self::DAYS_14 => 5.0,
         self::DAYS_30 => 5.0,
@@ -58,12 +63,31 @@ class CustomerTop
 
     public static function isValid(?string $value): bool
     {
-        return in_array((string) $value, self::OPTIONS, true);
+        return in_array(self::canonicalize($value), self::OPTIONS, true);
     }
 
     public static function normalize(?string $value): string
     {
-        return self::isValid($value) ? (string) $value : self::DEFAULT;
+        $key = self::canonicalize($value);
+
+        return in_array($key, self::OPTIONS, true) ? $key : self::DEFAULT;
+    }
+
+    /**
+     * Samakan nilai lama `cash` / `cbd` ke `CBD`.
+     */
+    public static function canonicalize(?string $value): string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return '';
+        }
+
+        if (strcasecmp($raw, 'cash') === 0 || strcasecmp($raw, 'cbd') === 0) {
+            return self::CASH;
+        }
+
+        return $raw;
     }
 
     public static function label(?string $value): string
@@ -74,17 +98,32 @@ class CustomerTop
     }
 
     /**
-     * Jumlah hari jatuh tempo. Cash = 0.
+     * Urutan level TOP (lebih kecil = lebih ketat).
+     * CBD < COD < TOP 7 < ... agar opsi SO tidak melebihi TOP customer.
+     */
+    public static function rank(?string $value): int
+    {
+        $key = self::normalize($value);
+
+        return match ($key) {
+            self::CASH => 0,
+            self::COD => 1,
+            default => (int) $key,
+        };
+    }
+
+    /**
+     * Jumlah hari jatuh tempo. CBD/COD = 0.
      */
     public static function days(?string $value): int
     {
         $key = self::normalize($value);
 
-        return $key === self::CASH ? 0 : (int) $key;
+        return in_array($key, [self::CASH, self::COD], true) ? 0 : (int) $key;
     }
 
     /**
-     * Nilai payment untuk API AGC: cash → top0, TOP 30 hari → top30.
+     * Nilai payment untuk API AGC: CBD/COD → top0, TOP 30 hari → top30.
      */
     public static function apiValue(?string $value): string
     {
@@ -92,16 +131,16 @@ class CustomerTop
     }
 
     /**
-     * Opsi TOP yang boleh dipilih: tidak melebihi TOP customer.
+     * Opsi TOP yang boleh dipilih: tidak melebihi level TOP customer.
      *
      * @return array<string, string>
      */
     public static function optionsAllowedFor(?string $customerTop): array
     {
-        $maxDays = self::days($customerTop);
+        $maxRank = self::rank($customerTop);
         $out = [];
         foreach (self::LABELS as $value => $label) {
-            if (self::days($value) <= $maxDays) {
+            if (self::rank($value) <= $maxRank) {
                 $out[$value] = $label;
             }
         }

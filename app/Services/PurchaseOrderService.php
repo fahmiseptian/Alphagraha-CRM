@@ -119,7 +119,7 @@ class PurchaseOrderService
         }
 
         $top = Vendor::query()->whereKey($vendorId)->value('top');
-        $top = CustomerTop::isValid($top) ? (string) $top : CustomerTop::DAYS_30;
+        $top = CustomerTop::isValid($top) ? CustomerTop::normalize($top) : CustomerTop::DAYS_30;
 
         return $top === CustomerTop::CASH
             ? PurchaseOrder::PAYMENT_CASH
@@ -370,7 +370,7 @@ class PurchaseOrderService
                 'vendor_name' => $vendorName,
                 'product_name' => trim((string) ($row['product_name'] ?? $productName)) ?: $productName,
                 'status' => VendorStock::normalizeStatus($row['status'] ?? VendorStock::STATUS_READY),
-                'top' => CustomerTop::isValid($row['top'] ?? null) ? (string) $row['top'] : CustomerTop::DAYS_30,
+                'top' => CustomerTop::isValid($row['top'] ?? null) ? CustomerTop::normalize($row['top']) : CustomerTop::DAYS_30,
                 'unit_price' => round((float) ($row['unit_price'] ?? 0), 2),
                 'is_pkp' => $this->resolveQuoteIsPkp($row, $vendorId),
                 'quoted_at' => $this->normalizeQuoteDate($row['quoted_at'] ?? null),

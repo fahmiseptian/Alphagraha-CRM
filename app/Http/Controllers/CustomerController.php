@@ -5,11 +5,13 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Account;
 use App\Models\Espo\EspoUser;
+use App\Models\Industry;
 use App\Models\WilayahDistrict;
 use App\Models\WilayahProvince;
 use App\Models\WilayahRegency;
 use App\Services\CustomerAddressService;
 use App\Services\EspoEntityWriter;
+use App\Services\NotificationService;
 use App\Support\CustomerTop;
 use App\Support\PaymentLevel;
 use Illuminate\Http\Request;
@@ -38,6 +40,8 @@ class CustomerController extends Controller
         if ($levelFilter !== '' && ! PaymentLevel::isValid($levelFilter)) {
             $levelFilter = '';
         }
+        $industryFilter = trim((string) $request->get('industry', ''));
+        $missingIndustry = $request->boolean('missing_industry');
 
         $query = $this->scopeAssigned(Account::query())
             ->with(['assignedUser', 'emailAddresses', 'phoneNumbers'])
@@ -82,6 +86,14 @@ class CustomerController extends Controller
             $query->where('account.crm_payment_level', $levelFilter);
         }
 
+        if ($missingIndustry) {
+            $query->where(function ($q) {
+                $q->whereNull('account.industry')->orWhere('account.industry', '');
+            });
+        } elseif ($industryFilter !== '') {
+            $query->where('account.industry', $industryFilter);
+        }
+
         $accounts = $query->orderByDesc('account.created_at')->paginate(15)->withQueryString();
 
         $types = $this->scopeAssigned(Account::query())
@@ -100,9 +112,12 @@ class CustomerController extends Controller
             'types' => $types,
             'assignedUserId' => $assignedUserId ?? '',
             'levelFilter' => $levelFilter,
+            'industryFilter' => $industryFilter,
+            'missingIndustry' => $missingIndustry,
             'canFilterSales' => $canFilterSales,
             'salesUsers' => $salesUsers,
             'paymentLevels' => PaymentLevel::LEVELS,
+            'industries' => Industry::query()->ordered()->get(),
         ]);
     }
 
@@ -141,7 +156,7 @@ class CustomerController extends Controller
             'assigned_user_id' => auth()->id(),
         ]);
 
-        return view('customers.create', $this->formData() + compact('account'));
+        return view('customers.create', $this->formData($account) + compact('account'));
     }
 
     public function store(Request $request)
@@ -165,6 +180,7 @@ class CustomerController extends Controller
         $this->writer->syncPrimaryEmail($account->id, 'Account', $data['email'] ?? null);
         $this->writer->syncPrimaryPhone($account->id, 'Account', $data['phone'] ?? null);
         $this->addresses->upsertPrimaryFromAccount($account->fresh());
+        $this->maybeCompleteIndustryUpdateNotification();
 
         return redirect()->route('customers.show', $account->id)
             ->with('success', 'Customer created successfully.');
@@ -180,7 +196,7 @@ class CustomerController extends Controller
             ->with(['emailAddresses', 'phoneNumbers'])
             ->findOrFail($id);
 
-        return view('customers.edit', $this->formData() + compact('account'));
+        return view('customers.edit', $this->formData($account) + compact('account'));
     }
 
     public function update(Request $request, string $id)
@@ -190,7 +206,7 @@ class CustomerController extends Controller
         }
 
         $account = $this->scopeAssigned(Account::query())->findOrFail($id);
-        $data = $this->validateData($request);
+        $data = $this->validateData($request, $account);
 
         $this->applyValidatedData($account, $data);
         $account->modified_at = Carbon::now()->format('Y-m-d H:i:s');
@@ -199,6 +215,7 @@ class CustomerController extends Controller
         $this->writer->syncPrimaryEmail($account->id, 'Account', $data['email'] ?? null);
         $this->writer->syncPrimaryPhone($account->id, 'Account', $data['phone'] ?? null);
         $this->addresses->upsertPrimaryFromAccount($account->fresh());
+        $this->maybeCompleteIndustryUpdateNotification();
 
         return redirect()->route('customers.show', $account->id)
             ->with('success', 'Customer updated successfully.');
@@ -259,18 +276,19 @@ class CustomerController extends Controller
         return view('customers.show', compact('account', 'contacts', 'addresses', 'provinces', 'opportunities', 'quotations', 'activities'));
     }
 
-    protected function validateData(Request $request): array
+    protected function validateData(Request $request, ?Account $account = null): array
     {
         $request->merge([
             'crm_province_code' => $request->filled('crm_province_code') ? $request->input('crm_province_code') : null,
             'crm_regency_code' => $request->filled('crm_regency_code') ? $request->input('crm_regency_code') : null,
             'crm_district_code' => $request->filled('crm_district_code') ? $request->input('crm_district_code') : null,
+            'crm_top' => CustomerTop::canonicalize($request->input('crm_top')),
         ]);
 
         $rules = [
             'name' => ['required', 'string', 'max:255'],
             'type' => ['nullable', 'string', 'max:255'],
-            'industry' => ['nullable', 'string', 'max:255'],
+            'industry' => ['required', 'string', 'max:255', Industry::existsRule($account?->industry)],
             'website' => ['nullable', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
@@ -289,7 +307,10 @@ class CustomerController extends Controller
             $rules['crm_payment_level'] = ['required', Rule::in(PaymentLevel::LEVELS)];
         }
 
-        $data = $request->validate($rules);
+        $data = $request->validate($rules, [
+            'industry.required' => 'Industri wajib dipilih dari daftar yang tersedia.',
+            'industry.exists' => 'Industri tidak valid. Pilih dari daftar yang tersedia.',
+        ]);
 
         // Isi nama alamat dari master wilayah (state=provinsi, city=kota, district=kecamatan).
         $province = ! empty($data['crm_province_code'])
@@ -355,7 +376,7 @@ class CustomerController extends Controller
         }
     }
 
-    protected function formData(): array
+    protected function formData(?Account $account = null): array
     {
         return [
             'types' => Account::TYPES,
@@ -363,6 +384,28 @@ class CustomerController extends Controller
             'topOptions' => CustomerTop::LABELS,
             'salesUsers' => EspoUser::query()->activeRegular()->orderBy('name')->get(),
             'provinces' => WilayahProvince::query()->orderBy('name')->get(['code', 'name']),
+            'industries' => Industry::optionsForSelect($account?->industry),
         ];
+    }
+
+    /**
+     * Tutup notifikasi update industri jika sales sudah mengisi semua customernya.
+     */
+    protected function maybeCompleteIndustryUpdateNotification(): void
+    {
+        $user = auth()->user();
+        if (! $user?->isSales()) {
+            return;
+        }
+
+        $remaining = $this->scopeAssigned(Account::query())
+            ->where(function ($q) {
+                $q->whereNull('industry')->orWhere('industry', '');
+            })
+            ->count();
+
+        if ($remaining === 0) {
+            app(NotificationService::class)->markCustomerIndustryUpdateActioned($user->id);
+        }
     }
 }
