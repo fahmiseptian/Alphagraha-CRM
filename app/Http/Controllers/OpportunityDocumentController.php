@@ -22,9 +22,18 @@ class OpportunityDocumentController extends Controller
             'file' => ['required', 'file', 'max:20480'], // max 20 MB
         ]);
 
+        $fileName = $request->file('file')->getClientOriginalName();
+
         $opportunity->addMediaFromRequest('file')
-            ->usingFileName($request->file('file')->getClientOriginalName())
+            ->usingFileName($fileName)
             ->toMediaCollection('documents');
+
+        app(\App\Services\OpportunityLogService::class)->record(
+            $opportunity,
+            \App\Models\OpportunityLog::ACTION_DOCUMENT_UPLOADED,
+            null,
+            ['force' => true, 'summary' => 'Mengunggah dokumen: '.$fileName]
+        );
 
         return back()->with('success', 'Document uploaded successfully.');
     }
@@ -40,7 +49,15 @@ class OpportunityDocumentController extends Controller
             abort(404);
         }
 
+        $fileName = $media->file_name;
         $media->delete();
+
+        app(\App\Services\OpportunityLogService::class)->record(
+            $opportunity,
+            \App\Models\OpportunityLog::ACTION_DOCUMENT_DELETED,
+            null,
+            ['force' => true, 'summary' => 'Menghapus dokumen: '.$fileName]
+        );
 
         return back()->with('success', 'Document deleted.');
     }

@@ -3,6 +3,8 @@
 namespace App\Models\Espo;
 
 use App\Models\Espo\Concerns\EspoEntity;
+use App\Models\OpportunityEntertainment;
+use App\Models\OpportunityLog;
 use App\Models\OpportunityNote;
 use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
@@ -475,6 +477,11 @@ class Opportunity extends Model implements HasMedia
         return $this->hasMany(OpportunityNote::class, 'opportunity_id')->latest();
     }
 
+    public function entertainments(): HasMany
+    {
+        return $this->hasMany(OpportunityEntertainment::class, 'opportunity_id')->latest();
+    }
+
     /**
      * Purchase Order (PO) — 1 opportunity : banyak PO.
      */
@@ -489,6 +496,90 @@ class Opportunity extends Model implements HasMedia
     public function salesOrders(): HasMany
     {
         return $this->hasMany(OpportunitySalesOrder::class, 'opportunity_id')->latest();
+    }
+
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(OpportunityLog::class, 'opportunity_id')->orderByDesc('id');
+    }
+
+    /**
+     * Snapshot ringkas untuk audit trail (bukan dump seluruh kolom JSON).
+     *
+     * @return array<string, mixed>
+     */
+    public function toLogSnapshot(): array
+    {
+        if ($this->isDirty('assigned_user_id')) {
+            $this->unsetRelation('assignedUser');
+        }
+        if ($this->isDirty('account_id')) {
+            $this->unsetRelation('account');
+        }
+        if ($this->isDirty('contact_id')) {
+            $this->unsetRelation('contact');
+        }
+
+        $this->loadMissing(['account', 'assignedUser', 'contact']);
+
+        $products = $this->products->values()->map(function (array $p) {
+            return [
+                'name' => (string) ($p['name'] ?? ''),
+                'sku' => (string) ($p['sku'] ?? ''),
+                'brand' => (string) ($p['brand'] ?? ''),
+                'category' => (string) ($p['category'] ?? ''),
+                'quantity' => round((float) ($p['quantity'] ?? 1), 4),
+                'sell_exclude' => round((float) ($p['sell_exclude'] ?? 0), 2),
+                'cost_exclude' => round((float) ($p['cost_exclude'] ?? 0), 2),
+                'discount_exclude' => round((float) ($p['discount_exclude'] ?? 0), 2),
+                'shipping_exclude' => round((float) ($p['shipping_exclude'] ?? 0), 2),
+                'vendor' => (string) ($p['vendor'] ?? ''),
+                'tax_category' => (string) ($p['tax_category'] ?? ''),
+                'item_kind' => (string) ($p['item_kind'] ?? ''),
+                'royalty_type' => (string) ($p['royalty_type'] ?? ''),
+            ];
+        })->all();
+
+        $closeDate = $this->close_date;
+        if ($closeDate instanceof \DateTimeInterface) {
+            $closeDate = $closeDate->format('Y-m-d');
+        }
+
+        return [
+            'id' => $this->id,
+            'name' => (string) $this->name,
+            'company' => (string) ($this->company ?? ''),
+            'stage' => (string) ($this->stage ?? ''),
+            'type' => (string) ($this->type ?? ''),
+            'amount' => $this->amount !== null ? round((float) $this->amount, 2) : null,
+            'amount_currency' => (string) ($this->amount_currency ?: 'IDR'),
+            'crm_top' => (string) ($this->crm_top ?? ''),
+            'close_date' => $closeDate ? (string) $closeDate : null,
+            'probability' => $this->probability !== null ? (float) $this->probability : null,
+            'lead_source' => (string) ($this->lead_source ?? ''),
+            'description' => (string) ($this->description ?? ''),
+            'assigned_user_id' => $this->assigned_user_id,
+            'assigned_user_name' => $this->assignedUser?->display_name,
+            'account_id' => $this->account_id,
+            'account_name' => $this->account?->name,
+            'contact_id' => $this->contact_id,
+            'contact_name' => $this->contact?->full_name ?? $this->contact?->name,
+            'crm_lost_reason' => (string) ($this->crm_lost_reason ?? ''),
+            'crm_has_discount' => (bool) $this->crm_has_discount,
+            'crm_discount_amount' => $this->crm_discount_amount !== null ? round((float) $this->crm_discount_amount, 2) : null,
+            'crm_discount_status' => $this->crm_discount_status,
+            'crm_discount_note' => (string) ($this->crm_discount_note ?? ''),
+            'crm_margin_status' => $this->crm_margin_status,
+            'crm_margin_percent' => $this->crm_margin_percent !== null ? round((float) $this->crm_margin_percent, 2) : null,
+            'crm_margin_nominal' => $this->crm_margin_nominal !== null ? round((float) $this->crm_margin_nominal, 2) : null,
+            'crm_margin_note' => (string) ($this->crm_margin_note ?? ''),
+            'crm_has_shipping_charge' => (bool) $this->crm_has_shipping_charge,
+            'crm_shipping_sell' => $this->crm_shipping_sell !== null ? round((float) $this->crm_shipping_sell, 2) : null,
+            'crm_shipping_cost' => $this->crm_shipping_cost !== null ? round((float) $this->crm_shipping_cost, 2) : null,
+            'crm_won_margin' => $this->crm_won_margin !== null ? round((float) $this->crm_won_margin, 2) : null,
+            'crm_sales_order_no' => (string) ($this->crm_sales_order_no ?? ''),
+            'products' => $products,
+        ];
     }
 
     public function registerMediaCollections(): void

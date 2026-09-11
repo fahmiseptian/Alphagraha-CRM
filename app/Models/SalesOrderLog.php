@@ -18,10 +18,19 @@ class SalesOrderLog extends Model
 
     public const ACTION_DELETED = 'deleted';
 
+    public const ACTION_CANCEL_REQUESTED = 'cancel_requested';
+
+    public const ACTION_CANCEL_APPROVED = 'cancel_approved';
+
+    public const ACTION_CANCEL_REJECTED = 'cancel_rejected';
+
     public const ACTIONS = [
         self::ACTION_CREATED => 'Dibuat',
         self::ACTION_UPDATED => 'Diubah',
         self::ACTION_DELETED => 'Diarsipkan',
+        self::ACTION_CANCEL_REQUESTED => 'Request pembatalan',
+        self::ACTION_CANCEL_APPROVED => 'Pembatalan disetujui',
+        self::ACTION_CANCEL_REJECTED => 'Pembatalan ditolak',
     ];
 
     protected $fillable = [
@@ -66,9 +75,10 @@ class SalesOrderLog extends Model
     public function actionBadgeColor(): string
     {
         return match ($this->action) {
-            self::ACTION_CREATED => 'green',
+            self::ACTION_CREATED, self::ACTION_CANCEL_APPROVED => 'green',
             self::ACTION_UPDATED => 'blue',
-            self::ACTION_DELETED => 'amber',
+            self::ACTION_DELETED, self::ACTION_CANCEL_REQUESTED => 'amber',
+            self::ACTION_CANCEL_REJECTED => 'red',
             default => 'slate',
         };
     }

@@ -12,6 +12,12 @@ class OpportunitySalesOrder extends Model
 {
     use SoftDeletes;
 
+    public const CANCEL_PENDING = 'pending';
+
+    public const CANCEL_APPROVED = 'approved';
+
+    public const CANCEL_REJECTED = 'rejected';
+
     protected $table = 'crm_opportunity_sales_orders';
 
     protected $fillable = [
@@ -93,6 +99,8 @@ class OpportunitySalesOrder extends Model
             'items' => $this->items,
             'payload' => $this->agc_payload,
             'status' => $this->statusSnapshot(),
+            'cancel_status' => $this->cancelStatus(),
+            'cancel_reason' => $this->cancelReason(),
             'created_by' => $this->created_by,
             'created_by_name' => $this->creator?->display_name,
             'created_at' => optional($this->created_at)->toDateTimeString(),
@@ -169,6 +177,43 @@ class OpportunitySalesOrder extends Model
             'so_status' => $data['so_status'] ?? null,
             'payment_status' => $data['payment_status'] ?? null,
             'delivery_status' => $data['delivery_status'] ?? null,
+            'cancel_status' => $data['cancel_status'] ?? null,
         ];
+    }
+
+    public function payloadValue(string $key, mixed $default = null): mixed
+    {
+        $payload = is_array($this->agc_payload) ? $this->agc_payload : [];
+
+        return $payload[$key] ?? $default;
+    }
+
+    public function cancelStatus(): ?string
+    {
+        $status = strtolower(trim((string) $this->payloadValue('cancel_status', '')));
+
+        return $status !== '' ? $status : null;
+    }
+
+    public function cancelReason(): string
+    {
+        return trim((string) $this->payloadValue('cancel_reason', ''));
+    }
+
+    public function cancelReviewNote(): string
+    {
+        return trim((string) $this->payloadValue('cancel_review_note', ''));
+    }
+
+    public function isCancelPending(): bool
+    {
+        return $this->cancelStatus() === self::CANCEL_PENDING;
+    }
+
+    public function isCancelled(): bool
+    {
+        $soStatus = strtolower((string) ($this->statusSnapshot()['so_status'] ?? ''));
+
+        return $soStatus === 'cancelled' || $this->cancelStatus() === self::CANCEL_APPROVED;
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunityLog;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\Vendor;
@@ -314,6 +315,8 @@ class PurchaseOrderService
             return;
         }
 
+        $before = app(OpportunityLogService::class)->capture($opportunity);
+
         $rows = $opportunity->products->values()->map(function (array $p) use ($costByProduct) {
             $key = mb_strtolower(trim((string) ($p['name'] ?? '')));
             if ($key !== '' && isset($costByProduct[$key])) {
@@ -336,6 +339,11 @@ class PurchaseOrderService
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_PO_SYNCED,
+            $before
+        );
         $opportunity->syncProductsToLinkedQuotation();
     }
 

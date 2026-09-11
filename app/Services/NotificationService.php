@@ -802,6 +802,7 @@ class NotificationService
                 CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
                 CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
                 CrmNotification::TYPE_SALES_ORDER_CREATED,
+                CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
                 CrmNotification::TYPE_CUSTOMER_INDUSTRY_UPDATE,
             ])
             ->update([
@@ -847,12 +848,13 @@ class NotificationService
         ?string $opportunityId = null,
         int|string|null $quotationId = null,
         int|string|null $activityId = null,
+        int|string|null $salesOrderId = null,
     ): void {
         CrmNotification::query()
             ->where('user_id', $userId)
-            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId, $activityId) {
+            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId, $activityId, $salesOrderId) {
                 $q->where('unique_key', $uniqueKey)
-                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId, $activityId) {
+                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId, $activityId, $salesOrderId) {
                         $q2->where('type', $type)
                             ->whereNull('read_at');
 
@@ -864,6 +866,9 @@ class NotificationService
                         }
                         if ($activityId) {
                             $q2->where('data->activity_id', $activityId);
+                        }
+                        if ($salesOrderId) {
+                            $q2->where('data->sales_order_id', $salesOrderId);
                         }
                     });
             })
@@ -1112,6 +1117,159 @@ class NotificationService
     public function markSalesOrderCreatedActioned(int|string $salesOrderId): void
     {
         $this->markActioned(CrmNotification::TYPE_SALES_ORDER_CREATED, [
+            'sales_order_id' => $salesOrderId,
+        ]);
+    }
+
+    /**
+     * Popup + lonceng untuk Superadmin/Admin saat Sales request Cancel SO.
+     */
+    public function notifySalesOrderCancelRequested(
+        OpportunitySalesOrder $salesOrder,
+        Opportunity $opportunity,
+        User $requester,
+        string $reason
+    ): void {
+        $soNumber = $salesOrder->displayNumber();
+        $oppName = $opportunity->name ?: $opportunity->id;
+        $requesterName = $requester->display_name ?: 'Sales';
+        $title = 'Request pembatalan Sales Order';
+        $body = $requesterName.' mengajukan pembatalan SO '.$soNumber.' pada Opportunity "'.$oppName.'". Alasan: '.$reason;
+        $link = route('opportunities.sales-orders.show', [$opportunity, $salesOrder]);
+        $uniqueKey = 'so_cancel_request:'.$salesOrder->id;
+
+        $recipientIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->whereIn('app_role', [
+                User::ROLE_SUPERADMIN,
+                User::ROLE_ADMIN,
+            ]))
+            ->pluck('id')
+            ->filter(fn ($id) => (string) $id !== (string) $requester->id)
+            ->values();
+
+        foreach ($recipientIds as $userId) {
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
+                $uniqueKey,
+                opportunityId: $opportunity->id,
+                salesOrderId: $salesOrder->id,
+            );
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey,
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'sales_order_id' => $salesOrder->id,
+                    'sales_order_number' => $soNumber,
+                    'requested_by' => $requester->id,
+                    'sales_user_id' => $requester->id,
+                    'reason' => $reason,
+                ],
+            );
+        }
+    }
+
+    public function notifySalesOrderCancelApproved(
+        OpportunitySalesOrder $salesOrder,
+        Opportunity $opportunity,
+        ?string $note = null
+    ): void {
+        $soNumber = $salesOrder->displayNumber();
+        $oppName = $opportunity->name ?: $opportunity->id;
+        $actor = $this->actorName($salesOrder->payloadValue('cancel_reviewed_by') ?: auth()->id());
+        $title = 'Sales Order dibatalkan';
+        $body = $actor.' menyetujui pembatalan SO '.$soNumber.' pada Opportunity "'.$oppName.'".';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notifySalesOrderCancelResult(
+            $salesOrder,
+            $opportunity,
+            CrmNotification::TYPE_SALES_ORDER_CANCEL_APPROVED,
+            $title,
+            $body,
+        );
+    }
+
+    public function notifySalesOrderCancelRejected(
+        OpportunitySalesOrder $salesOrder,
+        Opportunity $opportunity,
+        ?string $note = null
+    ): void {
+        $soNumber = $salesOrder->displayNumber();
+        $oppName = $opportunity->name ?: $opportunity->id;
+        $actor = $this->actorName($salesOrder->payloadValue('cancel_reviewed_by') ?: auth()->id());
+        $title = 'Pembatalan SO ditolak';
+        $body = $actor.' menolak permintaan pembatalan SO '.$soNumber.' pada Opportunity "'.$oppName.'".';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $this->notifySalesOrderCancelResult(
+            $salesOrder,
+            $opportunity,
+            CrmNotification::TYPE_SALES_ORDER_CANCEL_REJECTED,
+            $title,
+            $body,
+        );
+    }
+
+    protected function notifySalesOrderCancelResult(
+        OpportunitySalesOrder $salesOrder,
+        Opportunity $opportunity,
+        string $type,
+        string $title,
+        string $body,
+    ): void {
+        $requesterId = $salesOrder->payloadValue('cancel_requested_by')
+            ?: $salesOrder->created_by
+            ?: $opportunity->assigned_user_id;
+
+        $userIds = collect([
+            $requesterId,
+            $opportunity->assigned_user_id,
+            $salesOrder->created_by,
+        ])->filter()->unique()->values();
+
+        $link = route('opportunities.sales-orders.show', [$opportunity, $salesOrder]);
+
+        foreach ($userIds as $userId) {
+            if ((string) $userId === (string) auth()->id()) {
+                continue;
+            }
+
+            $this->notify(
+                $userId,
+                $type,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $type.':'.$salesOrder->id.':'.uniqid('', true),
+                data: array_merge([
+                    'opportunity_id' => $opportunity->id,
+                    'sales_order_id' => $salesOrder->id,
+                    'sales_order_number' => $salesOrder->displayNumber(),
+                    'requested_by' => $requesterId,
+                    'sales_user_id' => $opportunity->assigned_user_id,
+                ], $this->actorPayload()),
+            );
+        }
+    }
+
+    public function markSalesOrderCancelRequestActioned(int|string $salesOrderId): void
+    {
+        $this->markActioned(CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED, [
             'sales_order_id' => $salesOrderId,
         ]);
     }

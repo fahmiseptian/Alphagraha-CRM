@@ -153,10 +153,16 @@ class OpportunityPurchaseOrderController extends Controller
         ]);
 
         $raw = $data['crm_shipping_cost'] ?? null;
+        $before = app(\App\Services\OpportunityLogService::class)->capture($opportunity);
         $opportunity->crm_shipping_cost = ($raw === null || $raw === '')
             ? null
             : round((float) $raw, 2);
         $opportunity->save();
+        app(\App\Services\OpportunityLogService::class)->record(
+            $opportunity,
+            \App\Models\OpportunityLog::ACTION_SHIPPING_UPDATED,
+            $before
+        );
 
         return back()->with('success', 'Ongkir berhasil disimpan.');
     }

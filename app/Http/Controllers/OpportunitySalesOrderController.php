@@ -6,9 +6,11 @@ use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Account;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunityLog;
 use App\Models\OpportunitySalesOrder;
 use App\Models\SalesOrderLog;
 use App\Services\CustomerAddressService;
+use App\Services\OpportunityLogService;
 use App\Services\SalesOrderService;
 use App\Support\CustomerTop;
 use App\Support\OpportunityProductPricing;
@@ -41,7 +43,18 @@ class OpportunitySalesOrderController extends Controller
 
         abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
 
+        $number = $salesOrder->displayNumber();
         $this->salesOrders->archive($salesOrder, $opportunity, $user);
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_ARCHIVED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Sales Order diarsipkan: '.$number,
+                'actor' => $user,
+            ]
+        );
 
         return redirect()
             ->route('sales-orders.index')
@@ -391,6 +404,15 @@ class OpportunitySalesOrderController extends Controller
         }
 
         $this->salesOrders->recordLog($record, SalesOrderLog::ACTION_CREATED);
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_CREATED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Sales Order dibuat: '.$record->displayNumber(),
+            ]
+        );
 
         app(\App\Services\NotificationService::class)
             ->notifySalesOrderCreated($record->loadMissing('creator'), $opportunity);
@@ -419,9 +441,16 @@ class OpportunitySalesOrderController extends Controller
 
         /** @var \App\Models\User|null $user */
         $user = auth()->user();
-        $canEdit = (bool) ($user?->canUpdateSalesOrderFields() && $opportunity->stage === Opportunity::WON_STAGE);
-        $canEditInvoice = (bool) ($user?->canEditSalesOrderInvoice() && $opportunity->stage === Opportunity::WON_STAGE);
-        $canEditDelivery = (bool) ($user?->canEditSalesOrderDelivery() && $opportunity->stage === Opportunity::WON_STAGE);
+        $canEdit = (bool) ($user?->canUpdateSalesOrderFields() && $opportunity->stage === Opportunity::WON_STAGE)
+            && ! $salesOrder->isCancelled();
+        $canEditInvoice = (bool) ($user?->canEditSalesOrderInvoice() && $opportunity->stage === Opportunity::WON_STAGE)
+            && ! $salesOrder->isCancelled();
+        $canEditDelivery = (bool) ($user?->canEditSalesOrderDelivery() && $opportunity->stage === Opportunity::WON_STAGE)
+            && ! $salesOrder->isCancelled();
+        $canRequestCancel = (bool) ($user?->canRequestSalesOrderCancel() && $opportunity->stage === Opportunity::WON_STAGE)
+            && ! $salesOrder->isCancelled()
+            && (! $salesOrder->isCancelPending() || $user->canApproveSalesOrderCancel());
+        $canApproveCancel = (bool) ($user?->canApproveSalesOrderCancel() && $salesOrder->isCancelPending());
 
         return view('opportunities.sales-orders.show', [
             'opportunity' => $opportunity,
@@ -430,6 +459,8 @@ class OpportunitySalesOrderController extends Controller
             'canEdit' => $canEdit,
             'canEditInvoice' => $canEditInvoice,
             'canEditDelivery' => $canEditDelivery,
+            'canRequestCancel' => $canRequestCancel,
+            'canApproveCancel' => $canApproveCancel,
             'editForm' => [
                 'updateUrl' => route('opportunities.sales-orders.update', [$opportunity, $salesOrder]),
                 'email' => (string) ($detail['email'] ?? ''),
@@ -490,6 +521,15 @@ class OpportunitySalesOrderController extends Controller
     {
         $this->authorizeUpdate($opportunity);
         abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
+
+        if ($salesOrder->isCancelled()) {
+            $message = 'Sales Order yang dibatalkan tidak dapat diubah.';
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => $message], 422);
+            }
+
+            return back()->with('error', $message);
+        }
 
         $data = $request->validate([
             'po_number' => ['nullable', 'string', 'max:100'],
@@ -620,6 +660,15 @@ class OpportunitySalesOrderController extends Controller
             SalesOrderLog::ACTION_UPDATED,
             array_keys($payload)
         );
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_UPDATED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Sales Order diubah: '.$salesOrder->displayNumber(),
+            ]
+        );
         $detail = $this->salesOrders->present($salesOrder->fresh(), $opportunity);
 
         if ($request->expectsJson()) {
@@ -633,6 +682,173 @@ class OpportunitySalesOrderController extends Controller
         return redirect()
             ->route('opportunities.sales-orders.show', [$opportunity, $salesOrder])
             ->with('success', 'Sales Order berhasil diperbarui.');
+    }
+
+    public function requestCancel(Request $request, Opportunity $opportunity, OpportunitySalesOrder $salesOrder): RedirectResponse
+    {
+        $this->authorizeView($opportunity);
+        abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
+
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+        if (! $user?->canRequestSalesOrderCancel()) {
+            abort(403, 'Anda tidak dapat mengajukan pembatalan Sales Order.');
+        }
+        if ($opportunity->stage !== Opportunity::WON_STAGE) {
+            abort(403, 'Sales Order hanya untuk opportunity Closed Won.');
+        }
+
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'min:5', 'max:2000'],
+        ], [
+            'reason.required' => 'Alasan pembatalan wajib diisi.',
+            'reason.min' => 'Alasan pembatalan minimal 5 karakter.',
+        ]);
+
+        try {
+            $result = $this->salesOrders->requestCancel($salesOrder, $user, $data['reason']);
+        } catch (\RuntimeException $e) {
+            return back()->withInput()->with('error', $e->getMessage());
+        }
+
+        $salesOrder = $salesOrder->fresh();
+        $number = $salesOrder->displayNumber();
+        $notifications = app(\App\Services\NotificationService::class);
+
+        if ($result === 'cancelled') {
+            app(OpportunityLogService::class)->record(
+                $opportunity,
+                OpportunityLog::ACTION_SALES_ORDER_CANCEL_APPROVED,
+                null,
+                [
+                    'force' => true,
+                    'summary' => 'Sales Order dibatalkan: '.$number,
+                    'note' => $data['reason'],
+                    'actor' => $user,
+                ]
+            );
+            $notifications->markSalesOrderCancelRequestActioned($salesOrder->id);
+            $notifications->markSalesOrderCreatedActioned($salesOrder->id);
+            $notifications->notifySalesOrderCancelApproved($salesOrder, $opportunity, $data['reason']);
+
+            return redirect()
+                ->route('opportunities.sales-orders.show', [$opportunity, $salesOrder])
+                ->with('success', 'Sales Order '.$number.' dibatalkan.');
+        }
+
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_CANCEL_REQUESTED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Request pembatalan SO: '.$number,
+                'note' => $data['reason'],
+                'actor' => $user,
+            ]
+        );
+        $notifications->notifySalesOrderCancelRequested($salesOrder, $opportunity, $user, $data['reason']);
+
+        return redirect()
+            ->route('opportunities.sales-orders.show', [$opportunity, $salesOrder])
+            ->with('success', 'Permintaan pembatalan SO dikirim. Menunggu approval admin.');
+    }
+
+    public function approveCancel(Request $request, Opportunity $opportunity, OpportunitySalesOrder $salesOrder): RedirectResponse
+    {
+        $this->authorizeCancelApproval($opportunity, $salesOrder);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = auth()->user();
+
+        try {
+            $this->salesOrders->approveCancel($salesOrder, $user, $data['note'] ?? null);
+        } catch (\RuntimeException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        $salesOrder = $salesOrder->fresh();
+        $number = $salesOrder->displayNumber();
+        $note = trim((string) ($data['note'] ?? ''));
+
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_CANCEL_APPROVED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Pembatalan SO disetujui: '.$number,
+                'note' => $note !== '' ? $note : $salesOrder->cancelReason(),
+                'actor' => $user,
+            ]
+        );
+
+        $notifications = app(\App\Services\NotificationService::class);
+        $notifications->markSalesOrderCancelRequestActioned($salesOrder->id);
+        $notifications->markSalesOrderCreatedActioned($salesOrder->id);
+        $notifications->notifySalesOrderCancelApproved($salesOrder, $opportunity, $note !== '' ? $note : null);
+
+        return redirect()
+            ->route('opportunities.sales-orders.show', [$opportunity, $salesOrder])
+            ->with('success', 'Pembatalan Sales Order '.$number.' disetujui.');
+    }
+
+    public function rejectCancel(Request $request, Opportunity $opportunity, OpportunitySalesOrder $salesOrder): RedirectResponse
+    {
+        $this->authorizeCancelApproval($opportunity, $salesOrder);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = auth()->user();
+
+        try {
+            $this->salesOrders->rejectCancel($salesOrder, $user, $data['note'] ?? null);
+        } catch (\RuntimeException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        $salesOrder = $salesOrder->fresh();
+        $number = $salesOrder->displayNumber();
+        $note = trim((string) ($data['note'] ?? ''));
+
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_CANCEL_REJECTED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Pembatalan SO ditolak: '.$number,
+                'note' => $note,
+                'actor' => $user,
+            ]
+        );
+
+        $notifications = app(\App\Services\NotificationService::class);
+        $notifications->markSalesOrderCancelRequestActioned($salesOrder->id);
+        $notifications->notifySalesOrderCancelRejected($salesOrder, $opportunity, $note !== '' ? $note : null);
+
+        return redirect()
+            ->route('opportunities.sales-orders.show', [$opportunity, $salesOrder])
+            ->with('success', 'Permintaan pembatalan Sales Order '.$number.' ditolak.');
+    }
+
+    protected function authorizeCancelApproval(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): void
+    {
+        $this->authorizeView($opportunity);
+        abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
+
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+        if (! $user?->canApproveSalesOrderCancel()) {
+            abort(403, 'Hanya admin yang dapat menyetujui pembatalan Sales Order.');
+        }
     }
 
     /**

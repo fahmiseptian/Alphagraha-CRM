@@ -110,13 +110,21 @@
     $canEditDelivery = (bool) ($canEditDelivery ?? false);
     $paymentStatusKey = strtolower((string) ($detail['payment_status'] ?? ''));
     $deliveryStatusKey = strtolower((string) ($detail['delivery_status'] ?? ''));
+    $cancelLocked = $salesOrder->isCancelled() || $salesOrder->isCancelPending();
+    $canRequestCancel = (bool) ($canRequestCancel ?? false);
+    $canApproveCancel = (bool) ($canApproveCancel ?? false);
     $canMarkPaid = (bool) ($canEditInvoice ?? false)
-        && ! in_array($paymentStatusKey, ['paid', 'settlement'], true);
+        && ! in_array($paymentStatusKey, ['paid', 'settlement'], true)
+        && ! $cancelLocked;
     $canCompleteDelivery = (bool) ($canEditDelivery ?? false)
-        && ! in_array($deliveryStatusKey, ['completed', 'complete'], true);
+        && ! in_array($deliveryStatusKey, ['completed', 'complete'], true)
+        && ! $cancelLocked;
     $soStatusKey = strtolower((string) ($detail['so_status'] ?? ''));
     $canCompleteSo = (bool) (($canEdit ?? false) && (auth()->user()?->canCreateSalesOrder() ?? false))
-        && ! in_array($soStatusKey, ['completed', 'complete'], true);
+        && ! in_array($soStatusKey, ['completed', 'complete', 'cancelled'], true)
+        && ! $salesOrder->isCancelPending();
+    $cancelRequestedAt = $fmtDate($detail['cancel_requested_at'] ?? null);
+    $cancelReviewedAt = $fmtDate($detail['cancel_reviewed_at'] ?? $detail['cancelled_at'] ?? null);
     $requiredDeliveryRaw = $detail['required_delivery'] ?? $salesOrder->required_delivery;
     $requiredDeliveryLabel = $requiredDeliveryRaw ? $fmtDate($requiredDeliveryRaw, 'd M Y') : null;
     $noteText = (string) ($detail['note'] ?? $salesOrder->note ?? '');
@@ -191,6 +199,15 @@
                title="Download PDF Sales Order">
                 <i class="bi bi-file-earmark-pdf"></i>
             </a>
+            @if ($canRequestCancel)
+                <button type="button"
+                        @click="$dispatch('open-cancel-so')"
+                        class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                        title="{{ auth()->user()?->canApproveSalesOrderCancel() ? 'Batalkan Sales Order' : 'Ajukan Pembatalan' }}">
+                    <i class="bi bi-x-octagon"></i>
+                    <span>{{ auth()->user()?->canApproveSalesOrderCancel() ? 'Batalkan SO' : 'Ajukan Pembatalan' }}</span>
+                </button>
+            @endif
         </div>
         <p class="crm-page-desc">{{ $opportunity->name }} · {{ $customerName }}</p>
     </div>
@@ -201,6 +218,81 @@
         </div>
     </div>
 </div>
+
+@if ($salesOrder->isCancelled() || $salesOrder->isCancelPending() || $salesOrder->cancelStatus() === \App\Models\OpportunitySalesOrder::CANCEL_REJECTED)
+    <div @class([
+        'mb-5 rounded-lg border px-4 py-3 text-sm',
+        'border-amber-200 bg-amber-50 text-amber-900' => $salesOrder->isCancelPending(),
+        'border-red-200 bg-red-50 text-red-800' => $salesOrder->isCancelled(),
+        'border-slate-200 bg-slate-50 text-slate-700' => $salesOrder->cancelStatus() === \App\Models\OpportunitySalesOrder::CANCEL_REJECTED && ! $salesOrder->isCancelled(),
+    ])>
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+                <p class="font-semibold">
+                    @if ($salesOrder->isCancelPending())
+                        <i class="bi bi-hourglass-split mr-1"></i> Permintaan pembatalan menunggu approval admin
+                    @elseif ($salesOrder->isCancelled())
+                        <i class="bi bi-x-octagon mr-1"></i> Sales Order dibatalkan
+                    @else
+                        <i class="bi bi-slash-circle mr-1"></i> Permintaan pembatalan ditolak
+                    @endif
+                </p>
+                @if ($salesOrder->cancelReason() !== '')
+                    <div class="mt-2 rounded-lg border border-black/10 bg-white/70 px-3 py-2">
+                        <p class="text-[11px] font-bold uppercase tracking-wider opacity-70">Alasan pembatalan</p>
+                        <p class="mt-0.5 whitespace-pre-line font-medium">{{ $salesOrder->cancelReason() }}</p>
+                    </div>
+                @endif
+                @if ($salesOrder->cancelReviewNote() !== '' && ! $salesOrder->isCancelPending())
+                    <p class="mt-2 text-xs">Catatan admin: {{ $salesOrder->cancelReviewNote() }}</p>
+                @endif
+                @if ($detail['cancel_requested_by_name'] || $cancelRequestedAt)
+                    <p class="mt-1 text-xs opacity-80">
+                        Diajukan
+                        @if ($detail['cancel_requested_by_name'])
+                            oleh <strong>{{ $detail['cancel_requested_by_name'] }}</strong>
+                        @endif
+                        @if ($cancelRequestedAt)
+                            · {{ $cancelRequestedAt }}
+                        @endif
+                    </p>
+                @endif
+                @if (! $salesOrder->isCancelPending() && ($detail['cancel_reviewed_by_name'] || $cancelReviewedAt))
+                    <p class="mt-1 text-xs opacity-80">
+                        {{ $salesOrder->isCancelled() ? 'Disetujui' : 'Ditolak' }}
+                        @if ($detail['cancel_reviewed_by_name'])
+                            oleh <strong>{{ $detail['cancel_reviewed_by_name'] }}</strong>
+                        @endif
+                        @if ($cancelReviewedAt)
+                            · {{ $cancelReviewedAt }}
+                        @endif
+                    </p>
+                @endif
+            </div>
+            @if ($canApproveCancel)
+                <div class="flex w-full max-w-md shrink-0 flex-col gap-3">
+                    <form method="POST" action="{{ route('opportunities.sales-orders.cancel.approve', [$opportunity, $salesOrder]) }}" class="space-y-2">
+                        @csrf
+                        <input type="text" name="note" placeholder="Catatan approve (opsional)"
+                               class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <x-btn type="submit" icon="bi-check-lg" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Setujui pembatalan</x-btn>
+                    </form>
+                    <form method="POST" action="{{ route('opportunities.sales-orders.cancel.reject', [$opportunity, $salesOrder]) }}"
+                          onsubmit="return confirm('Tolak permintaan pembatalan Sales Order ini?')"
+                          class="space-y-2">
+                        @csrf
+                        <input type="text" name="note" placeholder="Catatan reject (opsional)"
+                               class="w-full rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <button type="submit"
+                                class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                            <i class="bi bi-x-lg"></i> Tolak
+                        </button>
+                    </form>
+                </div>
+            @endif
+        </div>
+    </div>
+@endif
 
 <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
     @foreach ([
@@ -637,6 +729,50 @@
         </dl>
     </x-card>
 </div>
+
+@if ($canRequestCancel)
+    <div x-data="{ open: {{ $errors->has('reason') ? 'true' : 'false' }} }"
+         @open-cancel-so.window="open = true"
+         x-cloak>
+        <div x-show="open" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+            <div class="absolute inset-0 bg-slate-900/50" @click="open = false"></div>
+            <div class="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl" @click.stop>
+                <div class="border-b border-slate-100 px-5 py-4">
+                    <h3 class="font-semibold text-slate-800">
+                        {{ auth()->user()?->canApproveSalesOrderCancel() ? 'Batalkan Sales Order' : 'Ajukan pembatalan Sales Order' }}
+                    </h3>
+                    <p class="mt-0.5 text-sm text-slate-500">
+                        {{ auth()->user()?->canApproveSalesOrderCancel()
+                            ? 'SO akan langsung berstatus cancelled. Isi alasan pembatalan.'
+                            : 'Permintaan akan dikirim ke admin dan muncul di pop-up aksi untuk approval.' }}
+                    </p>
+                </div>
+                <form method="POST" action="{{ route('opportunities.sales-orders.cancel', [$opportunity, $salesOrder]) }}" class="space-y-4 px-5 py-4">
+                    @csrf
+                    <div>
+                        <label class="crm-label">Alasan pembatalan <span class="text-red-500">*</span></label>
+                        <textarea name="reason" rows="4" required minlength="5" maxlength="2000"
+                                  placeholder="Jelaskan alasan pembatalan SO ini"
+                                  class="crm-field @error('reason') border-red-300 @enderror">{{ old('reason') }}</textarea>
+                        @error('reason')
+                            <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    <div class="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                        <button type="button" @click="open = false"
+                                class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                            Batal
+                        </button>
+                        <button type="submit"
+                                class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+                            {{ auth()->user()?->canApproveSalesOrderCancel() ? 'Batalkan SO' : 'Kirim permintaan' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+@endif
 
 @if ($canEdit ?? false)
     <div x-show="editOpen" x-cloak x-ref="editModalRoot"

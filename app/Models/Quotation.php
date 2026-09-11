@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Models\Espo\Account;
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunityLog;
+use App\Services\OpportunityLogService;
 use App\Support\OpportunityProductPricing;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -363,6 +365,7 @@ class Quotation extends Model
         $this->loadMissing('items');
 
         $pricingBefore = $opportunity->productsPricingFingerprint();
+        $before = app(OpportunityLogService::class)->capture($opportunity);
 
         if (! $opportunity->replaceProductsFromQuotationItems($this->items)) {
             return ['synced' => false, 'notify_margin' => false, 'notify_discount' => false];
@@ -374,6 +377,11 @@ class Quotation extends Model
         $opportunity->modified_at = now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_QUOTATION_SYNCED,
+            $before
+        );
         $opportunity->setRelation('quotation', $this);
         $opportunity->syncLinkedQuotationMarginApproval();
 

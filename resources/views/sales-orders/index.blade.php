@@ -177,6 +177,9 @@
                                     @if (! empty($status['so_status']))
                                         <x-badge :color="$statusColor($status['so_status'])">{{ $status['so_status'] }}</x-badge>
                                     @endif
+                                    @if ($so->isCancelPending())
+                                        <x-badge color="amber">Menunggu pembatalan</x-badge>
+                                    @endif
                                     @if (! empty($status['payment_status']))
                                         <x-badge :color="$statusColor($status['payment_status'])">{{ $status['payment_status'] }}</x-badge>
                                     @endif

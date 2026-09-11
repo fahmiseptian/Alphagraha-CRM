@@ -251,6 +251,21 @@ class User extends Authenticatable
         return $this->isSuperAdmin();
     }
 
+    public function canViewOpportunityLogs(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
+    public function canCompleteEntertainment(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin();
+    }
+
+    public function canViewEntertainmentReport(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     public function canApproveDiscount(): bool
     {
         return $this->isSuperAdmin();
@@ -264,6 +279,16 @@ class User extends Authenticatable
     public function canApproveEventTraining(): bool
     {
         return $this->isSuperAdmin();
+    }
+
+    public function canRequestSalesOrderCancel(): bool
+    {
+        return $this->canCreateSalesOrder();
+    }
+
+    public function canApproveSalesOrderCancel(): bool
+    {
+        return $this->isAdmin();
     }
 
     public function canEditPaymentLevel(): bool

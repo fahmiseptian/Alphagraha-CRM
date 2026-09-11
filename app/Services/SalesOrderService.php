@@ -328,6 +328,16 @@ class SalesOrderService
             'updated_date' => optional($salesOrder->updated_at)->format('Y-m-d H:i:s'),
             'expired_date' => null,
             'accept_date' => null,
+            'cancel_status' => $salesOrder->cancelStatus(),
+            'cancel_reason' => $salesOrder->cancelReason(),
+            'cancel_requested_by' => $snap['cancel_requested_by'] ?? null,
+            'cancel_requested_by_name' => $snap['cancel_requested_by_name'] ?? null,
+            'cancel_requested_at' => $snap['cancel_requested_at'] ?? null,
+            'cancel_reviewed_by' => $snap['cancel_reviewed_by'] ?? null,
+            'cancel_reviewed_by_name' => $snap['cancel_reviewed_by_name'] ?? null,
+            'cancel_reviewed_at' => $snap['cancel_reviewed_at'] ?? null,
+            'cancel_review_note' => $salesOrder->cancelReviewNote(),
+            'cancelled_at' => $snap['cancelled_at'] ?? null,
         ];
     }
 
@@ -485,6 +495,128 @@ class SalesOrderService
             'ip_address' => request()?->ip(),
             'created_at' => now(),
         ]);
+    }
+
+    /**
+     * Sales mengajukan pembatalan SO. Admin/Superadmin membatalkan langsung.
+     *
+     * @return 'requested'|'cancelled'
+     */
+    public function requestCancel(
+        OpportunitySalesOrder $salesOrder,
+        User $actor,
+        string $reason
+    ): string {
+        if ($salesOrder->isCancelled()) {
+            throw new \RuntimeException('Sales Order ini sudah dibatalkan.');
+        }
+
+        if ($salesOrder->isCancelPending() && ! $actor->canApproveSalesOrderCancel()) {
+            throw new \RuntimeException('Permintaan pembatalan masih menunggu approval admin.');
+        }
+
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw new \RuntimeException('Alasan pembatalan wajib diisi.');
+        }
+
+        $now = now()->format('Y-m-d H:i:s');
+        $payload = [
+            'cancel_status' => OpportunitySalesOrder::CANCEL_PENDING,
+            'cancel_reason' => $reason,
+            'cancel_requested_by' => $actor->id,
+            'cancel_requested_by_name' => $actor->display_name,
+            'cancel_requested_at' => $now,
+            'cancel_reviewed_by' => null,
+            'cancel_reviewed_by_name' => null,
+            'cancel_reviewed_at' => null,
+            'cancel_review_note' => null,
+            'cancelled_at' => null,
+            'cancelled_by' => null,
+        ];
+
+        if ($actor->canApproveSalesOrderCancel()) {
+            $payload['cancel_status'] = OpportunitySalesOrder::CANCEL_APPROVED;
+            $payload['so_status'] = 'cancelled';
+            $payload['cancelled_at'] = $now;
+            $payload['cancelled_by'] = $actor->id;
+            $payload['cancel_reviewed_by'] = $actor->id;
+            $payload['cancel_reviewed_by_name'] = $actor->display_name;
+            $payload['cancel_reviewed_at'] = $now;
+        }
+
+        $this->mergeSnapshot($salesOrder, $payload);
+        $this->recordLog(
+            $salesOrder->fresh(),
+            $actor->canApproveSalesOrderCancel()
+                ? SalesOrderLog::ACTION_CANCEL_APPROVED
+                : SalesOrderLog::ACTION_CANCEL_REQUESTED,
+            ['cancel_reason' => $reason],
+            $actor
+        );
+
+        return $actor->canApproveSalesOrderCancel() ? 'cancelled' : 'requested';
+    }
+
+    public function approveCancel(
+        OpportunitySalesOrder $salesOrder,
+        User $actor,
+        ?string $note = null
+    ): void {
+        if ($salesOrder->isCancelled()) {
+            throw new \RuntimeException('Sales Order ini sudah dibatalkan.');
+        }
+
+        if (! $salesOrder->isCancelPending()) {
+            throw new \RuntimeException('Tidak ada permintaan pembatalan yang menunggu approval.');
+        }
+
+        $now = now()->format('Y-m-d H:i:s');
+        $note = trim((string) $note);
+
+        $this->mergeSnapshot($salesOrder, [
+            'cancel_status' => OpportunitySalesOrder::CANCEL_APPROVED,
+            'so_status' => 'cancelled',
+            'cancelled_at' => $now,
+            'cancelled_by' => $actor->id,
+            'cancel_reviewed_by' => $actor->id,
+            'cancel_reviewed_by_name' => $actor->display_name,
+            'cancel_reviewed_at' => $now,
+            'cancel_review_note' => $note !== '' ? $note : null,
+        ]);
+        $this->recordLog(
+            $salesOrder->fresh(),
+            SalesOrderLog::ACTION_CANCEL_APPROVED,
+            array_filter(['cancel_review_note' => $note !== '' ? $note : null]),
+            $actor
+        );
+    }
+
+    public function rejectCancel(
+        OpportunitySalesOrder $salesOrder,
+        User $actor,
+        ?string $note = null
+    ): void {
+        if (! $salesOrder->isCancelPending()) {
+            throw new \RuntimeException('Tidak ada permintaan pembatalan yang menunggu approval.');
+        }
+
+        $now = now()->format('Y-m-d H:i:s');
+        $note = trim((string) $note);
+
+        $this->mergeSnapshot($salesOrder, [
+            'cancel_status' => OpportunitySalesOrder::CANCEL_REJECTED,
+            'cancel_reviewed_by' => $actor->id,
+            'cancel_reviewed_by_name' => $actor->display_name,
+            'cancel_reviewed_at' => $now,
+            'cancel_review_note' => $note !== '' ? $note : null,
+        ]);
+        $this->recordLog(
+            $salesOrder->fresh(),
+            SalesOrderLog::ACTION_CANCEL_REJECTED,
+            array_filter(['cancel_review_note' => $note !== '' ? $note : null]),
+            $actor
+        );
     }
 
     /**

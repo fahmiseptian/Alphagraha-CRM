@@ -24,6 +24,17 @@ class OpportunityNoteController extends Controller
             'created_by' => auth()->id(),
         ]);
 
+        app(\App\Services\OpportunityLogService::class)->record(
+            $opportunity,
+            \App\Models\OpportunityLog::ACTION_NOTE_ADDED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Menambah catatan',
+                'note' => mb_substr(trim($data['body']), 0, 200),
+            ]
+        );
+
         return back()->with('success', 'Note added successfully.');
     }
 
@@ -40,6 +51,13 @@ class OpportunityNoteController extends Controller
         }
 
         $note->delete();
+
+        app(\App\Services\OpportunityLogService::class)->record(
+            $opportunity,
+            \App\Models\OpportunityLog::ACTION_NOTE_DELETED,
+            null,
+            ['force' => true, 'summary' => 'Menghapus catatan']
+        );
 
         return back()->with('success', 'Note deleted.');
     }

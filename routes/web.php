@@ -5,6 +5,7 @@ use App\Http\Controllers\ActivityMediaController;
 use App\Http\Controllers\Admin\BrandController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\IndustryController;
+use App\Http\Controllers\Admin\OpportunityLogController;
 use App\Http\Controllers\Admin\SalesOrderLogController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\TemplateController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\LeadController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OpportunityController;
 use App\Http\Controllers\OpportunityDocumentController;
+use App\Http\Controllers\OpportunityEntertainmentController;
 use App\Http\Controllers\OpportunityNoteController;
 use App\Http\Controllers\OpportunityPurchaseOrderController;
 use App\Http\Controllers\OpportunitySalesOrderController;
@@ -111,6 +113,10 @@ Route::middleware('auth')->group(function () {
     Route::delete('/opportunities/{opportunity}/documents/{media}', [OpportunityDocumentController::class, 'destroy'])->name('opportunities.documents.destroy');
     Route::post('/opportunities/{opportunity}/notes', [OpportunityNoteController::class, 'store'])->name('opportunities.notes.store');
     Route::delete('/opportunities/{opportunity}/notes/{note}', [OpportunityNoteController::class, 'destroy'])->name('opportunities.notes.destroy');
+    Route::post('/opportunities/{opportunity}/entertainments', [OpportunityEntertainmentController::class, 'store'])->name('opportunities.entertainments.store');
+    Route::get('/opportunities/{opportunity}/entertainments/report', [OpportunityEntertainmentController::class, 'report'])->name('opportunities.entertainments.report');
+    Route::post('/opportunities/{opportunity}/entertainments/{entertainment}/complete', [OpportunityEntertainmentController::class, 'complete'])->name('opportunities.entertainments.complete');
+    Route::delete('/opportunities/{opportunity}/entertainments/{entertainment}', [OpportunityEntertainmentController::class, 'destroy'])->name('opportunities.entertainments.destroy');
     Route::get('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'index'])->name('opportunities.purchase-orders.index');
     Route::get('/opportunities/{opportunity}/purchase-orders/preview', [OpportunityPurchaseOrderController::class, 'preview'])->name('opportunities.purchase-orders.preview');
     Route::get('/opportunities/{opportunity}/purchase-orders/pdf', [OpportunityPurchaseOrderController::class, 'pdf'])->name('opportunities.purchase-orders.pdf');
@@ -133,6 +139,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/preview', [OpportunitySalesOrderController::class, 'preview'])->name('opportunities.sales-orders.preview')->whereNumber('salesOrder');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/pdf', [OpportunitySalesOrderController::class, 'pdf'])->name('opportunities.sales-orders.pdf')->whereNumber('salesOrder');
     Route::put('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'update'])->name('opportunities.sales-orders.update')->whereNumber('salesOrder');
+    Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel', [OpportunitySalesOrderController::class, 'requestCancel'])->name('opportunities.sales-orders.cancel')->whereNumber('salesOrder');
+    Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel/approve', [OpportunitySalesOrderController::class, 'approveCancel'])->name('opportunities.sales-orders.cancel.approve')->whereNumber('salesOrder');
+    Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel/reject', [OpportunitySalesOrderController::class, 'rejectCancel'])->name('opportunities.sales-orders.cancel.reject')->whereNumber('salesOrder');
     Route::delete('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'destroy'])->name('opportunities.sales-orders.destroy')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders', [OpportunitySalesOrderController::class, 'store'])->name('opportunities.sales-orders.store');
 
@@ -164,6 +173,8 @@ Route::middleware('auth')->group(function () {
     Route::middleware('role:superadmin')->group(function () {
         Route::get('/sales-order-logs', [SalesOrderLogController::class, 'index'])->name('sales-order-logs.index');
         Route::get('/sales-order-logs/{log}', [SalesOrderLogController::class, 'show'])->name('sales-order-logs.show');
+        Route::get('/opportunity-logs', [OpportunityLogController::class, 'index'])->name('opportunity-logs.index');
+        Route::get('/opportunity-logs/{log}', [OpportunityLogController::class, 'show'])->name('opportunity-logs.show');
         Route::get('/industries/export', [IndustryController::class, 'export'])->name('industries.export');
         Route::get('/industries/template', [IndustryController::class, 'template'])->name('industries.template');
         Route::post('/industries/import', [IndustryController::class, 'import'])->name('industries.import');

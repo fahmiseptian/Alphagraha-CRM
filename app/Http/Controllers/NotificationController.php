@@ -71,6 +71,7 @@ class NotificationController extends Controller
                 CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
                 CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
                 CrmNotification::TYPE_SALES_ORDER_CREATED,
+                CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
             ]),
             default => null,
         };

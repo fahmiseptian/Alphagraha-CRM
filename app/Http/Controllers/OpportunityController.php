@@ -8,11 +8,13 @@ use App\Models\Espo\Contact;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
 use App\Models\Espo\Team;
+use App\Models\OpportunityLog;
 use App\Support\CustomerTop;
 use App\Support\OpportunityProductBulkExcel;
 use App\Support\OpportunityProductPricing;
 use App\Support\PaymentLevel;
 use App\Services\CatalogService;
+use App\Services\OpportunityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -252,7 +254,7 @@ class OpportunityController extends Controller
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'purchaseOrders.creator', 'purchaseOrders.vendor', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'purchaseOrders.creator', 'purchaseOrders.vendor', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator']);
 
         // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
         if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {
@@ -267,6 +269,13 @@ class OpportunityController extends Controller
         $nextStage = $opportunity->nextStage();
         $closingStages = $opportunity->closingStageOptions();
         $duplicates = $opportunity->potentialDuplicates();
+        $activityLogs = null;
+        if (auth()->user()?->canViewOpportunityLogs()) {
+            $activityLogs = $opportunity->activityLogs()
+                ->with('actor')
+                ->paginate(20, ['*'], 'log_page')
+                ->withQueryString();
+        }
 
         return view('opportunities.show', [
             'opportunity' => $opportunity,
@@ -274,6 +283,7 @@ class OpportunityController extends Controller
             'nextStage' => $nextStage,
             'closingStages' => $closingStages,
             'duplicates' => $duplicates,
+            'activityLogs' => $activityLogs,
             'indexUrl' => $this->opportunitiesIndexUrl(),
         ]);
     }
@@ -341,6 +351,7 @@ class OpportunityController extends Controller
         $notifyDiscount = $opportunity->discountNeedsAttention();
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
+        $this->opportunityLogs()->record($opportunity, OpportunityLog::ACTION_CREATED);
 
         $notifications = app(\App\Services\NotificationService::class);
 
@@ -403,6 +414,7 @@ class OpportunityController extends Controller
         $data = $this->validateData($request, creating: false, opportunity: $opportunity);
         $pricingBefore = $opportunity->productsPricingFingerprint();
         $previousAssignedUserId = $opportunity->assigned_user_id;
+        $before = $this->opportunityLogs()->capture($opportunity);
         $this->applyValidatedData($opportunity, $data, $request);
         $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
 
@@ -426,6 +438,7 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record($opportunity, OpportunityLog::ACTION_UPDATED, $before);
         $syncedQuotationItems = $opportunity->syncProductsToLinkedQuotation();
         $opportunity->syncLinkedQuotationMarginApproval();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
@@ -490,6 +503,7 @@ class OpportunityController extends Controller
 
         $note = $data['note'] ?? null;
         $requestedAmount = (float) $opportunity->crm_discount_amount;
+        $before = $this->opportunityLogs()->capture($opportunity);
 
         if ($request->filled('discount_amount')) {
             $approvedAmount = (float) $data['discount_amount'];
@@ -510,6 +524,12 @@ class OpportunityController extends Controller
             $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
             $opportunity->modified_by_id = auth()->id();
             $opportunity->save();
+            $this->opportunityLogs()->record(
+                $opportunity,
+                OpportunityLog::ACTION_DISCOUNT_APPROVED,
+                $before,
+                ['note' => $note]
+            );
 
             app(\App\Services\NotificationService::class)->notifyDiscountApproved(
                 $opportunity,
@@ -534,6 +554,12 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record(
+            $opportunity,
+            OpportunityLog::ACTION_DISCOUNT_APPROVED,
+            $before,
+            ['note' => $note]
+        );
 
         app(\App\Services\NotificationService::class)->notifyDiscountApproved(
             $opportunity,
@@ -569,6 +595,7 @@ class OpportunityController extends Controller
         $requestedAmount = (float) $opportunity->crm_discount_amount;
         $approvedAmount = (float) ($data['discount_amount'] ?? 0);
         $note = $data['note'] ?? null;
+        $before = $this->opportunityLogs()->capture($opportunity);
 
         if ($approvedAmount <= 0) {
             $opportunity->crm_has_discount = false;
@@ -587,6 +614,12 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record(
+            $opportunity,
+            OpportunityLog::ACTION_DISCOUNT_REJECTED,
+            $before,
+            ['note' => $note]
+        );
 
         app(\App\Services\NotificationService::class)->notifyDiscountRejected(
             $opportunity,
@@ -628,6 +661,7 @@ class OpportunityController extends Controller
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
+        $before = $this->opportunityLogs()->capture($opportunity);
         $opportunity->crm_discount_status = Opportunity::DISCOUNT_PENDING;
         $opportunity->crm_discount_reviewed_by = null;
         $opportunity->crm_discount_reviewed_at = null;
@@ -636,6 +670,12 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record(
+            $opportunity,
+            OpportunityLog::ACTION_DISCOUNT_REVERTED,
+            $before,
+            ['note' => $data['note'] ?? null]
+        );
 
         app(\App\Services\NotificationService::class)->notifyDiscountReverted(
             $opportunity,
@@ -660,6 +700,7 @@ class OpportunityController extends Controller
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
+        $before = $this->opportunityLogs()->capture($opportunity);
         $opportunity->crm_margin_status = Opportunity::MARGIN_APPROVED;
         $opportunity->crm_margin_reviewed_by = auth()->id();
         $opportunity->crm_margin_reviewed_at = now();
@@ -667,6 +708,12 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record(
+            $opportunity,
+            OpportunityLog::ACTION_MARGIN_APPROVED,
+            $before,
+            ['note' => $data['note'] ?? null]
+        );
         $opportunity->syncLinkedQuotationMarginApproval();
 
         app(\App\Services\NotificationService::class)->notifyOpportunityMarginApproved(
@@ -697,6 +744,7 @@ class OpportunityController extends Controller
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
+        $before = $this->opportunityLogs()->capture($opportunity);
         $opportunity->crm_margin_status = Opportunity::MARGIN_REJECTED;
         $opportunity->crm_margin_reviewed_by = auth()->id();
         $opportunity->crm_margin_reviewed_at = now();
@@ -704,6 +752,12 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record(
+            $opportunity,
+            OpportunityLog::ACTION_MARGIN_REJECTED,
+            $before,
+            ['note' => $data['note'] ?? null]
+        );
         $opportunity->syncLinkedQuotationMarginApproval();
 
         app(\App\Services\NotificationService::class)->notifyOpportunityMarginRejected(
@@ -790,6 +844,7 @@ class OpportunityController extends Controller
         })->filter(fn ($p) => filled($p['name'] ?? null))->values();
 
         $pricingBefore = $opportunity->productsPricingFingerprint();
+        $before = $this->opportunityLogs()->capture($opportunity);
         $opportunity->applyProductRows($rows);
         $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
         $opportunity->syncWonMargin();
@@ -801,6 +856,7 @@ class OpportunityController extends Controller
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record($opportunity, OpportunityLog::ACTION_PRODUCTS_UPDATED, $before);
         $syncedQuotationItems = $opportunity->syncProductsToLinkedQuotation();
         $opportunity->syncLinkedQuotationMarginApproval();
 
@@ -846,6 +902,7 @@ class OpportunityController extends Controller
 
         if ($data['stage'] !== $opportunity->stage) {
             $previousStage = $opportunity->stage;
+            $before = $this->opportunityLogs()->capture($opportunity);
             $opportunity->stage = $data['stage'];
             $opportunity->probability = Opportunity::defaultProbabilityForStage($data['stage']);
 
@@ -872,6 +929,7 @@ class OpportunityController extends Controller
             $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: $leavingSkipApproval);
             $opportunity->clearPendingApprovalsForLost();
             $opportunity->save();
+            $this->opportunityLogs()->record($opportunity, OpportunityLog::ACTION_STAGE_CHANGED, $before);
             $opportunity->syncLinkedQuotationMarginApproval();
 
             $notifications = app(\App\Services\NotificationService::class);
@@ -912,10 +970,12 @@ class OpportunityController extends Controller
             return back()->with('error', 'Opportunity tidak bisa dihapus karena masih terhubung ke quotation.');
         }
 
+        $before = $this->opportunityLogs()->capture($opportunity);
         $opportunity->deleted = 1;
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
+        $this->opportunityLogs()->record($opportunity, OpportunityLog::ACTION_DELETED, $before);
 
         return redirect()->to($this->opportunitiesIndexUrl())
             ->with('success', 'Opportunity berhasil dihapus.');
@@ -1596,5 +1656,10 @@ class OpportunityController extends Controller
             'margin_rate' => $wonValue > 0 ? (int) round(($wonMargin / $wonValue) * 100) : null,
             'stage_stats' => $stageStats,
         ];
+    }
+
+    protected function opportunityLogs(): OpportunityLogService
+    {
+        return app(OpportunityLogService::class);
     }
 }

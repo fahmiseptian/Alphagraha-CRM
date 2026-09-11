@@ -37,6 +37,9 @@
         @if (auth()->user()->canEditOpportunityFully() || (auth()->user()->isPurchasing() && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE))
             <x-btn href="{{ route('opportunities.edit', $opportunity) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
         @endif
+        @if (auth()->user()?->canViewOpportunityLogs())
+            <x-btn href="#activity-log" variant="secondary" icon="bi-clock-history">Riwayat</x-btn>
+        @endif
         @if (auth()->user()->canDeleteOpportunity())
             <form method="POST" action="{{ route('opportunities.destroy', $opportunity) }}"
                   onsubmit="return confirm('Hapus opportunity ini? Tindakan tidak bisa dibatalkan.')">
@@ -1025,6 +1028,8 @@
             @endif
         </x-card>
 
+        @include('opportunities._entertainments')
+
         {{-- Notes (append-only, seperti dokumen) --}}
         <x-card :padding="false" x-data="{ adding: false }">
             <div class="flex items-center justify-between px-5 pt-4">
@@ -1143,4 +1148,8 @@
         @include('opportunities._sales_orders')
     </div>
 </div>
+
+@if (auth()->user()?->canViewOpportunityLogs())
+    @include('opportunities._activity_logs')
+@endif
 @endsection

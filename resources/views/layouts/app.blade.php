@@ -210,6 +210,12 @@
                     <i class="bi bi-journal-text shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Log SO</span>
                 </a>
+                <a href="{{ route('opportunity-logs.index') }}" title="Log Opportunity"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('opportunity-logs.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-clock-history shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Log Opportunity</span>
+                </a>
                 <a href="{{ route('templates.index') }}" title="Quotation Templates"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
                           {{ request()->routeIs('templates.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
