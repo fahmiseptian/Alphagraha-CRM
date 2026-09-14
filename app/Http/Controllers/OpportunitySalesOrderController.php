@@ -85,7 +85,8 @@ class OpportunitySalesOrderController extends Controller
         $periodLabel = $this->periodLabel($period);
 
         $query = OpportunitySalesOrder::query()
-            ->with(['opportunity.account', 'opportunity.assignedUser', 'opportunity.purchaseOrders', 'creator'])
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->withCount('purchaseOrders')
             ->whereHas('opportunity', function ($q) use ($user, $accountId, $companyFilter, $selectedUserId) {
                 if ($user->canViewAllOpportunities()
                     || $user->isProduct()

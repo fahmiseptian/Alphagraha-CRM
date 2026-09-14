@@ -33,15 +33,19 @@ class OpportunityPurchaseOrderController extends Controller
             'account',
             'purchaseOrders.creator',
             'purchaseOrders.vendor',
+            'purchaseOrders.salesOrder',
             'purchaseOrders.items.vendorQuotes.vendor',
+            'salesOrders',
         ]);
 
         $backUrl = null;
         $fromSo = $request->query('from_so');
+        $preselectedSalesOrderId = null;
         if ($fromSo !== null && $fromSo !== '' && ctype_digit((string) $fromSo)) {
             $salesOrder = $opportunity->salesOrders()->whereKey((int) $fromSo)->first();
             if ($salesOrder) {
                 $backUrl = route('opportunities.sales-orders.show', [$opportunity, $salesOrder]);
+                $preselectedSalesOrderId = (int) $salesOrder->id;
             }
         }
 
@@ -49,41 +53,64 @@ class OpportunityPurchaseOrderController extends Controller
             'opportunity' => $opportunity,
             'backUrl' => $backUrl,
             'poStandalone' => true,
+            'preselectedSalesOrderId' => $preselectedSalesOrderId,
         ]);
     }
 
-    public function preview(Opportunity $opportunity)
+    public function preview(Request $request, Opportunity $opportunity)
     {
         $this->authorizeView($opportunity);
 
-        $report = $this->reports->build($opportunity);
+        $salesOrder = $this->resolveReportSalesOrder($request, $opportunity);
+        $report = $this->reports->build($opportunity, $salesOrder);
 
-        return view('opportunities.purchase-orders.preview', compact('opportunity', 'report'));
+        return view('opportunities.purchase-orders.preview', compact('opportunity', 'report', 'salesOrder'));
     }
 
-    public function pdf(Opportunity $opportunity)
+    public function pdf(Request $request, Opportunity $opportunity)
     {
         $this->authorizeView($opportunity);
 
-        $report = $this->reports->build($opportunity);
-        $filename = 'Laporan-PO-'.str_replace(['/', '\\', ' '], '-', $opportunity->name ?: $opportunity->id).'.pdf';
+        $salesOrder = $this->resolveReportSalesOrder($request, $opportunity);
+        $report = $this->reports->build($opportunity, $salesOrder);
+        $scopeSlug = $salesOrder
+            ? 'SO-'.str_replace(['/', '\\', ' '], '-', $salesOrder->displayNumber())
+            : 'keseluruhan';
+        $filename = 'Laporan-PO-'.$scopeSlug.'-'.str_replace(['/', '\\', ' '], '-', $opportunity->name ?: $opportunity->id).'.pdf';
 
-        return Pdf::loadView('opportunities.purchase-orders.pdf', compact('opportunity', 'report'))
+        return Pdf::loadView('opportunities.purchase-orders.pdf', compact('opportunity', 'report', 'salesOrder'))
             ->setPaper('a4', 'landscape')
             ->download($filename);
+    }
+
+    protected function resolveReportSalesOrder(Request $request, Opportunity $opportunity): ?\App\Models\OpportunitySalesOrder
+    {
+        $raw = $request->query('sales_order_id');
+        if ($raw === null || $raw === '' || ! ctype_digit((string) $raw)) {
+            return null;
+        }
+
+        $salesOrder = $opportunity->salesOrders()->whereKey((int) $raw)->first();
+        if (! $salesOrder) {
+            abort(404, 'Sales Order tidak ditemukan di opportunity ini.');
+        }
+
+        return $salesOrder;
     }
 
     public function store(Request $request, Opportunity $opportunity)
     {
         $this->authorizeManage($opportunity);
 
-        // Mode rencana: banyak PO digroup per vendor.
+        // Mode rencana: banyak PO digroup per vendor, semua untuk 1 Sales Order.
         if ($request->boolean('plan_mode') || $request->has('pos')) {
-            $data = $this->validatePlanPayload($request);
+            $data = $this->validatePlanPayload($request, $opportunity);
             $created = $this->purchaseOrders->createMany(
                 $opportunity,
                 $data['pos'],
-                auth()->id()
+                auth()->id(),
+                $data['sales_order_id'],
+                $data['report_top'] ?? null
             );
 
             $count = count($created);
@@ -95,7 +122,7 @@ class OpportunityPurchaseOrderController extends Controller
             );
         }
 
-        $data = $this->validatePayload($request);
+        $data = $this->validatePayload($request, null, $opportunity);
 
         $this->purchaseOrders->create(
             $opportunity,
@@ -104,7 +131,9 @@ class OpportunityPurchaseOrderController extends Controller
             $data['payment_term'],
             auth()->id(),
             $data['vendor_id'],
-            $data['vendor_name'] ?? null
+            $data['vendor_name'] ?? null,
+            $data['sales_order_id'],
+            $data['report_top'] ?? null
         );
 
         return back()->with('success', 'Purchase Order berhasil ditambahkan. Total per produk di-mirror ke modal opportunity & ketersediaan vendor diperbarui.');
@@ -115,7 +144,7 @@ class OpportunityPurchaseOrderController extends Controller
         $this->authorizeManage($opportunity);
         $this->ensureBelongsToOpportunity($opportunity, $purchaseOrder);
 
-        $data = $this->validatePayload($request, $purchaseOrder);
+        $data = $this->validatePayload($request, $purchaseOrder, $opportunity);
 
         $this->purchaseOrders->update(
             $purchaseOrder,
@@ -124,10 +153,42 @@ class OpportunityPurchaseOrderController extends Controller
             $data['payment_term'],
             auth()->id(),
             $data['vendor_id'],
-            $data['vendor_name'] ?? null
+            $data['vendor_name'] ?? null,
+            $data['sales_order_id'] ?? null,
+            $data['report_top'] ?? null
         );
 
         return back()->with('success', 'Purchase Order berhasil diperbarui. Total per produk di-mirror ke modal opportunity & ketersediaan vendor diperbarui.');
+    }
+
+    /**
+     * Backfill: Purchasing mengisi Sales Order terkait untuk PO lama.
+     */
+    public function attachSalesOrder(Request $request, Opportunity $opportunity, PurchaseOrder $purchaseOrder)
+    {
+        $this->authorizeManage($opportunity);
+        $this->ensureBelongsToOpportunity($opportunity, $purchaseOrder);
+
+        $data = $request->validate([
+            'sales_order_id' => [
+                'required',
+                'integer',
+                Rule::exists('crm_opportunity_sales_orders', 'id')->where(
+                    fn ($q) => $q->where('opportunity_id', $opportunity->id)->whereNull('deleted_at')
+                ),
+            ],
+        ], [
+            'sales_order_id.required' => 'Pilih Sales Order terkait.',
+            'sales_order_id.exists' => 'Sales Order tidak ditemukan di opportunity ini.',
+        ]);
+
+        $this->purchaseOrders->attachSalesOrder(
+            $opportunity,
+            $purchaseOrder,
+            (int) $data['sales_order_id']
+        );
+
+        return back()->with('success', 'Sales Order terkait berhasil disimpan untuk PO '.$purchaseOrder->number.'.');
     }
 
     public function destroy(Opportunity $opportunity, PurchaseOrder $purchaseOrder)
@@ -168,14 +229,24 @@ class OpportunityPurchaseOrderController extends Controller
     }
 
     /**
-     * Validasi rencana pembelian → banyak PO (1 vendor = 1 PO).
+     * Validasi rencana pembelian → banyak PO (1 vendor = 1 PO) untuk 1 Sales Order.
      * Kondisi TOP/Cash per PO (default dari master vendor).
+     * report_top mengisi kotak TOP di laporan PO.
      *
-     * @return array{pos:list<array{number:string,vendor_id:int,vendor_name:?string,payment_term:string,items:list<array<string,mixed>>}>}
+     * @return array{sales_order_id:int,report_top:?string,pos:list<array{number:string,vendor_id:int,vendor_name:?string,payment_term:string,items:list<array<string,mixed>>}>}
      */
-    protected function validatePlanPayload(Request $request): array
+    protected function validatePlanPayload(Request $request, Opportunity $opportunity): array
     {
         $data = $request->validate([
+            'sales_order_id' => [
+                'required',
+                'integer',
+                Rule::exists('crm_opportunity_sales_orders', 'id')->where(
+                    fn ($q) => $q->where('opportunity_id', $opportunity->id)->whereNull('deleted_at')
+                ),
+            ],
+            'report_top_source' => ['required', Rule::in(['custom', 'so'])],
+            'report_top_value' => ['nullable', 'string', Rule::in(CustomerTop::OPTIONS)],
             'pos' => ['required', 'array', 'min:1'],
             'pos.*.number' => [
                 'required',
@@ -208,6 +279,10 @@ class OpportunityPurchaseOrderController extends Controller
             'pos.*.items.*.vendors.*.quoted_at' => ['nullable', 'date', 'before_or_equal:today'],
             'pos.*.items.*.vendors.*.is_selected' => ['nullable'],
         ], [
+            'sales_order_id.required' => 'Pilih Sales Order terkait. Satu batch PO hanya untuk satu Sales Order.',
+            'sales_order_id.exists' => 'Sales Order tidak ditemukan di opportunity ini.',
+            'report_top_source.required' => 'Pilih sumber TOP untuk laporan PO.',
+            'report_top_value.in' => 'Pilihan TOP tidak valid.',
             'pos.required' => 'Belum ada PO yang bisa dibuat. Lengkapi item dan pilih vendor Dipilih.',
             'pos.*.vendor_id.distinct' => 'Setiap vendor hanya boleh satu PO dalam satu kali buat.',
             'pos.*.number.distinct' => 'Nomor PO tidak boleh sama.',
@@ -216,6 +291,18 @@ class OpportunityPurchaseOrderController extends Controller
             'pos.*.items.*.vendors.*.quoted_at.before_or_equal' => 'Tanggal vendor tidak boleh lebih dari hari ini.',
         ]);
 
+        if (($data['report_top_source'] ?? '') === 'custom' && empty($data['report_top_value'])) {
+            throw ValidationException::withMessages([
+                'report_top_value' => 'Pilih nilai TOP untuk laporan PO.',
+            ]);
+        }
+
+        $reportTop = $this->resolveReportTopLabel(
+            $opportunity,
+            (string) $data['report_top_source'],
+            $data['report_top_value'] ?? null,
+            (int) $data['sales_order_id']
+        );
         $pos = [];
         foreach ($data['pos'] as $poIndex => $poRow) {
             $vendorId = (int) $poRow['vendor_id'];
@@ -286,6 +373,8 @@ class OpportunityPurchaseOrderController extends Controller
         }
 
         return [
+            'sales_order_id' => (int) $data['sales_order_id'],
+            'report_top' => $reportTop,
             'pos' => $pos,
         ];
     }
@@ -342,10 +431,13 @@ class OpportunityPurchaseOrderController extends Controller
     }
 
     /**
-     * @return array{number:string,payment_term:string,vendor_id:int,vendor_name:?string,items:list<array<string, mixed>>}
+     * @return array{number:string,payment_term:string,vendor_id:int,vendor_name:?string,sales_order_id:?int,items:list<array<string, mixed>>}
      */
-    protected function validatePayload(Request $request, ?PurchaseOrder $existing = null): array
+    protected function validatePayload(Request $request, ?PurchaseOrder $existing = null, ?Opportunity $opportunity = null): array
     {
+        $opportunity = $opportunity ?: ($existing?->opportunity()->first());
+        $requireSalesOrder = $existing === null || $existing->sales_order_id === null;
+
         $data = $request->validate([
             'number' => [
                 'required',
@@ -354,6 +446,17 @@ class OpportunityPurchaseOrderController extends Controller
                 Rule::unique('crm_purchase_orders', 'number')->ignore($existing?->id),
                 $this->poNumberSequenceRule(),
             ],
+            'sales_order_id' => array_values(array_filter([
+                $requireSalesOrder ? 'required' : 'nullable',
+                'integer',
+                $opportunity
+                    ? Rule::exists('crm_opportunity_sales_orders', 'id')->where(
+                        fn ($q) => $q->where('opportunity_id', $opportunity->id)->whereNull('deleted_at')
+                    )
+                    : 'exists:crm_opportunity_sales_orders,id',
+            ])),
+            'report_top_source' => ['nullable', Rule::in(['custom', 'so'])],
+            'report_top_value' => ['nullable', 'string', Rule::in(CustomerTop::OPTIONS)],
             'vendor_id' => ['required', 'integer', 'exists:crm_vendors,id'],
             'vendor_name' => ['nullable', 'string', 'max:255'],
             'payment_term' => ['required', Rule::in([PurchaseOrder::PAYMENT_TOP, PurchaseOrder::PAYMENT_CASH])],
@@ -378,6 +481,8 @@ class OpportunityPurchaseOrderController extends Controller
             'items.*.vendors.*.is_selected' => ['nullable'],
         ], [
             'number.required' => 'Isi nomor urut PO. Contoh: '.PurchaseOrderService::numberExample().'.',
+            'sales_order_id.required' => 'Pilih Sales Order terkait untuk Purchase Order ini.',
+            'sales_order_id.exists' => 'Sales Order tidak ditemukan di opportunity ini.',
             'vendor_id.required' => 'Pilih vendor untuk Purchase Order ini (satu PO = satu vendor).',
             'items.*.opportunity_product_name.required' => 'Setiap item harus terikat ke produk opportunity.',
             'items.*.vendors.*.quoted_at.before_or_equal' => 'Tanggal vendor tidak boleh lebih dari hari ini.',
@@ -387,7 +492,25 @@ class OpportunityPurchaseOrderController extends Controller
         $data['vendor_id'] = (int) $data['vendor_id'];
         $vendor = \App\Models\Vendor::query()->whereKey($data['vendor_id'])->first();
         $data['vendor_name'] = $vendor?->name ?: trim((string) ($data['vendor_name'] ?? ''));
+        $data['sales_order_id'] = isset($data['sales_order_id']) && $data['sales_order_id'] !== '' && $data['sales_order_id'] !== null
+            ? (int) $data['sales_order_id']
+            : ($existing?->sales_order_id ? (int) $existing->sales_order_id : null);
 
+        if (! empty($data['report_top_source']) && $opportunity && $data['sales_order_id']) {
+            if ($data['report_top_source'] === 'custom' && empty($data['report_top_value'])) {
+                throw ValidationException::withMessages([
+                    'report_top_value' => 'Pilih nilai TOP untuk laporan PO.',
+                ]);
+            }
+            $data['report_top'] = $this->resolveReportTopLabel(
+                $opportunity,
+                (string) $data['report_top_source'],
+                $data['report_top_value'] ?? null,
+                (int) $data['sales_order_id']
+            );
+        } else {
+            $data['report_top'] = null;
+        }
         $items = [];
         foreach ($data['items'] as $itemIndex => $item) {
             $itemName = trim((string) $item['product_name']);
@@ -600,6 +723,36 @@ class OpportunityPurchaseOrderController extends Controller
         }
 
         return $date > $today ? $today : $date;
+    }
+
+    /**
+     * Label TOP untuk kotak laporan PO.
+     */
+    protected function resolveReportTopLabel(
+        Opportunity $opportunity,
+        string $source,
+        ?string $customValue,
+        int $salesOrderId
+    ): string {
+        if ($source === 'custom') {
+            return CustomerTop::reportLabel($customValue);
+        }
+
+        $salesOrder = $opportunity->salesOrders()->whereKey($salesOrderId)->first();
+        if (! $salesOrder) {
+            throw ValidationException::withMessages([
+                'sales_order_id' => 'Sales Order tidak ditemukan di opportunity ini.',
+            ]);
+        }
+
+        $label = trim($salesOrder->paymentLabel());
+        if ($label === '' || $label === '—') {
+            throw ValidationException::withMessages([
+                'report_top_source' => 'Sales Order belum punya TOP/payment. Pilih buat sendiri atau lengkapi TOP di SO.',
+            ]);
+        }
+
+        return $label;
     }
 
     /**

@@ -28,6 +28,56 @@
         'cost_exclude' => (float) ($p['cost_exclude'] ?? 0),
     ])->filter(fn ($p) => trim($p['name']) !== '')->values()->all();
 
+    $poSalesOrders = ($opportunity->salesOrders ?? collect())->map(function ($so) {
+        $items = collect(is_array($so->items) ? $so->items : [])->map(function ($item) {
+            $name = trim((string) ($item['name'] ?? ''));
+            if ($name === '') {
+                return null;
+            }
+
+            return [
+                'name' => $name,
+                'brand' => (string) ($item['brand'] ?? ''),
+                'sku' => (string) ($item['sku'] ?? ''),
+                'quantity' => (float) ($item['qty'] ?? $item['quantity'] ?? 1),
+                'index' => isset($item['index']) ? (int) $item['index'] : null,
+            ];
+        })->filter()->values()->all();
+
+        $soPayment = trim((string) $so->payment);
+        if ($soPayment === '') {
+            $payload = is_array($so->agc_payload) ? $so->agc_payload : [];
+            $soPayment = trim((string) ($payload['payment_method'] ?? $payload['payment'] ?? ''));
+        }
+        $soPaymentLower = mb_strtolower($soPayment);
+        $soPaymentTerm = in_array($soPaymentLower, ['cash', 'cbd', 'cod'], true)
+            || preg_match('/^top0$/i', $soPayment)
+            ? 'cash'
+            : 'top';
+
+        return [
+            'id' => (int) $so->id,
+            'number' => $so->displayNumber(),
+            'item_count' => count($items),
+            'items' => $items,
+            'payment' => $soPayment,
+            'payment_label' => $so->paymentLabel(),
+            'payment_term' => $soPaymentTerm,
+        ];
+    })->values()->all();
+
+    $poSalesOrderOptions = collect($poSalesOrders)->map(fn ($so) => [
+        'id' => $so['id'],
+        'number' => $so['number'],
+        'item_count' => $so['item_count'],
+    ])->values()->all();
+
+    $preselectedSalesOrderId = isset($preselectedSalesOrderId) && $preselectedSalesOrderId
+        ? (int) $preselectedSalesOrderId
+        : (old('sales_order_id') ? (int) old('sales_order_id') : null);
+    if ($preselectedSalesOrderId && ! collect($poSalesOrders)->contains(fn ($so) => (int) $so['id'] === $preselectedSalesOrderId)) {
+        $preselectedSalesOrderId = null;
+    }
     $poToday = now()->toDateString();
     $poDateValue = function ($raw) use ($poToday): ?string {
         if ($raw instanceof \DateTimeInterface) {
@@ -132,16 +182,17 @@
     $poNumberExample = \App\Services\PurchaseOrderService::numberExample();
     $poItemErrors = collect($errors->keys())->filter(fn ($k) => str_starts_with($k, 'items') || str_starts_with($k, 'pos'))->map(fn ($k) => $errors->first($k))->unique()->values();
 
-    // Tree tampilan: Produk → PO → Item → Vendor
-    $poTreeByProduct = [];
+    // Tree tampilan: Sales Order → PO → Item → Vendor
+    $poTreeBySalesOrder = [];
     $poPayloadById = [];
-    $oppProductOrder = collect($poOppProducts)->pluck('name')->all();
+    $soOrder = collect($poSalesOrders)->pluck('number', 'id')->all();
     foreach ($poList as $po) {
         $poEditPayload = [
             'id' => $po->id,
             'number' => $po->number,
             'vendor_id' => $po->vendor_id,
             'payment_term' => $po->payment_term ?: 'top',
+            'sales_order_id' => $po->sales_order_id,
             'items' => $po->items->map(fn ($i) => [
                 'opportunity_product_name' => $i->opportunity_product_name ?? '',
                 'product_name' => $i->product_name,
@@ -165,51 +216,54 @@
         ];
         $poPayloadById[$po->id] = $poEditPayload;
 
-        $itemsByProduct = $po->items->groupBy(function ($i) {
-            $name = trim((string) ($i->opportunity_product_name ?? ''));
+        $so = $po->salesOrder;
+        $soKey = $so ? (string) $so->id : 'none';
+        $soLabel = $so ? $so->displayNumber() : 'Tanpa Sales Order';
 
-            return $name !== '' ? $name : '(Tanpa produk opportunity)';
-        });
-
-        foreach ($itemsByProduct as $productName => $items) {
-            if (! isset($poTreeByProduct[$productName])) {
-                $poTreeByProduct[$productName] = [
-                    'product_name' => $productName,
-                    'pos' => [],
-                    'item_count' => 0,
-                    'total_modal' => 0.0,
-                ];
-            }
-            $lineModal = 0.0;
-            foreach ($items as $item) {
-                $selected = $item->selectedVendorQuote();
-                $unit = $selected ? (float) $selected->unit_price : (float) $item->unit_price;
-                $lineModal += round((float) $item->quantity * $unit, 2);
-            }
-            $poTreeByProduct[$productName]['pos'][] = [
-                'po' => $po,
-                'items' => $items,
-                'edit_payload' => $poEditPayload,
-                'modal_total' => $lineModal,
+        if (! isset($poTreeBySalesOrder[$soKey])) {
+            $poTreeBySalesOrder[$soKey] = [
+                'sales_order_id' => $so?->id,
+                'sales_order_number' => $soLabel,
+                'needs_sales_order' => $so === null,
+                'pos' => [],
+                'po_count' => 0,
+                'item_count' => 0,
+                'total_modal' => 0.0,
             ];
-            $poTreeByProduct[$productName]['item_count'] += $items->count();
-            $poTreeByProduct[$productName]['total_modal'] = round(
-                $poTreeByProduct[$productName]['total_modal'] + $lineModal,
-                2
-            );
         }
+
+        $lineModal = 0.0;
+        foreach ($po->items as $item) {
+            $selected = $item->selectedVendorQuote();
+            $unit = $selected ? (float) $selected->unit_price : (float) $item->unit_price;
+            $lineModal += round((float) $item->quantity * $unit, 2);
+        }
+
+        $poTreeBySalesOrder[$soKey]['pos'][] = [
+            'po' => $po,
+            'items' => $po->items,
+            'edit_payload' => $poEditPayload,
+            'modal_total' => $lineModal,
+        ];
+        $poTreeBySalesOrder[$soKey]['po_count']++;
+        $poTreeBySalesOrder[$soKey]['item_count'] += $po->items->count();
+        $poTreeBySalesOrder[$soKey]['total_modal'] = round(
+            $poTreeBySalesOrder[$soKey]['total_modal'] + $lineModal,
+            2
+        );
     }
 
-    uksort($poTreeByProduct, function ($a, $b) use ($oppProductOrder) {
-        $ia = array_search($a, $oppProductOrder, true);
-        $ib = array_search($b, $oppProductOrder, true);
-        $ia = $ia === false ? PHP_INT_MAX : $ia;
-        $ib = $ib === false ? PHP_INT_MAX : $ib;
-        if ($ia === $ib) {
-            return strcasecmp($a, $b);
+    uksort($poTreeBySalesOrder, function ($a, $b) use ($soOrder) {
+        if ($a === 'none') {
+            return 1;
         }
+        if ($b === 'none') {
+            return -1;
+        }
+        $na = $soOrder[(int) $a] ?? '';
+        $nb = $soOrder[(int) $b] ?? '';
 
-        return $ia <=> $ib;
+        return strcasecmp((string) $na, (string) $nb);
     });
 @endphp
 
@@ -244,10 +298,125 @@
             shippingExclude: @js((float) old('crm_shipping_cost', $opportunity->crm_shipping_cost ?? 0)),
             brandOptions: @js($poBrandOptions),
             opportunityProducts: @js($poOppProducts),
+            salesOrders: @js($poSalesOrders),
+            salesOrderId: @js($preselectedSalesOrderId ? (string) $preselectedSalesOrderId : ''),
+            productSource: 'so',
+            topSource: 'so',
+            reportTopValue: @js(\App\Support\CustomerTop::DAYS_30),
+            topOptions: @js(collect(\App\Support\CustomerTop::LABELS)->map(fn ($label, $value) => [
+                'value' => (string) $value,
+                'label' => $label,
+                'report_label' => \App\Support\CustomerTop::reportLabel($value),
+            ])->values()->all()),
             todayDate: @js($poToday),
             previousQuoteDates: @js($poPreviousQuoteDates),
             isCash() {
                 return this.paymentTerm === 'cash';
+            },
+            selectedSalesOrder() {
+                const id = String(this.salesOrderId || '');
+                if (!id) return null;
+                return (this.salesOrders || []).find((so) => String(so.id) === id) || null;
+            },
+            reportTopPreview() {
+                if (this.topSource === 'so') {
+                    const so = this.selectedSalesOrder();
+                    return so && so.payment_label && so.payment_label !== '—'
+                        ? so.payment_label
+                        : '';
+                }
+                const opt = (this.topOptions || []).find((o) => String(o.value) === String(this.reportTopValue));
+                return opt ? opt.report_label : '';
+            },
+            productsForPlan() {
+                if (this.productSource === 'opp') {
+                    return this.opportunityProducts || [];
+                }
+                const so = this.selectedSalesOrder();
+                return so && Array.isArray(so.items) ? so.items : [];
+            },
+            applyPlanProductsFromSource() {
+                this.planProducts = (this.productsForPlan() || []).map((p) => this.emptyPlanProduct(p));
+                this.poDrafts = [];
+                this.refreshPoVendorSelects();
+            },
+            setSalesOrderId(id, opts = {}) {
+                const next = id ? String(id) : '';
+                const changed = String(this.salesOrderId || '') !== next;
+                this.salesOrderId = next;
+                if (changed && this.mode === 'plan') {
+                    this.productSource = 'so';
+                    this.applyPlanProductsFromSource();
+                }
+                if (!opts.fromSelect) {
+                    this.syncSalesOrderSelects();
+                }
+            },
+            salesOrderSelectItems(withCount = true) {
+                return (this.salesOrders || []).map((so) => ({
+                    id: String(so.id),
+                    text: withCount
+                        ? (so.number + ' · ' + (so.item_count || 0) + ' item')
+                        : String(so.number || ''),
+                }));
+            },
+            initSalesOrderSelect(el, withCount = true) {
+                if (!el || !window.CrmSelect2 || !window.jQuery) return;
+                const jq = window.jQuery;
+                const $el = jq(el);
+                const disabled = !(this.salesOrders || []).length
+                    || (el.getAttribute('data-po-so-mode') === 'edit' && this.mode !== 'edit')
+                    || (el.getAttribute('data-po-so-mode') === 'plan' && this.mode !== 'plan');
+                el.disabled = disabled;
+
+                if (! $el.hasClass('select2-hidden-accessible')) {
+                    CrmSelect2.setOptions(
+                        el,
+                        this.salesOrderSelectItems(withCount),
+                        this.salesOrderId || '',
+                        el.getAttribute('data-placeholder') || 'Pilih Sales Order…'
+                    );
+                    CrmSelect2.bindAlpine(el, this, 'salesOrderId', (value) => {
+                        this.setSalesOrderId(value, { fromSelect: true });
+                    });
+                } else if (String($el.val() || '') !== String(this.salesOrderId || '')) {
+                    $el.val(this.salesOrderId || '').trigger('change.select2');
+                }
+
+                $el.prop('disabled', disabled).trigger('change.select2');
+            },
+            syncSalesOrderSelects() {
+                this.$nextTick(() => {
+                    window.setTimeout(() => {
+                        const planEl = this.$refs.planSalesOrderSelect;
+                        const editEl = this.$refs.editSalesOrderSelect;
+                        if (planEl) this.initSalesOrderSelect(planEl, true);
+                        if (editEl) this.initSalesOrderSelect(editEl, false);
+                        const topEl = this.$refs.reportTopValueSelect;
+                        if (topEl && window.CrmSelect2 && window.jQuery) {
+                            const topDisabled = this.mode !== 'plan' || this.topSource !== 'custom';
+                            topEl.disabled = topDisabled;
+                            const $top = window.jQuery(topEl);
+                            if (! $top.hasClass('select2-hidden-accessible')) {
+                                CrmSelect2.initElement(topEl);
+                                CrmSelect2.bindAlpine(topEl, this, 'reportTopValue');
+                            } else if (String($top.val() || '') !== String(this.reportTopValue || '')) {
+                                $top.val(this.reportTopValue || '').trigger('change.select2');
+                            }
+                            $top.prop('disabled', topDisabled).trigger('change.select2');
+                        }
+                    }, 30);
+                });
+            },
+            setProductSource(source) {
+                this.productSource = source === 'opp' ? 'opp' : 'so';
+                if (this.mode === 'plan') {
+                    this.applyPlanProductsFromSource();
+                }
+            },
+            setTopSource(source) {
+                this.topSource = source === 'so' ? 'so' : 'custom';
+                this.syncSalesOrderSelects();
             },
             surchargePercent() {
                 return this.isCash() ? Number(this.surchargeCash) || 0 : Number(this.surchargeTop) || 0;
@@ -448,9 +617,15 @@
                 this.paymentTerm = 'top';
                 this.groups = [];
                 this.items = [];
-                this.planProducts = (this.opportunityProducts || []).map((p) => this.emptyPlanProduct(p));
-                this.poDrafts = [];
+                if (!this.salesOrderId && (this.salesOrders || []).length === 1) {
+                    this.salesOrderId = String(this.salesOrders[0].id);
+                }
+                this.productSource = 'so';
+                this.topSource = 'so';
+                this.reportTopValue = '30';
+                this.applyPlanProductsFromSource();
                 this.refreshPoVendorSelects();
+                this.syncSalesOrderSelects();
             },
             startEdit(po) {
                 this.destroyPoVendorSelects();
@@ -459,12 +634,14 @@
                 this.number = po.number || '';
                 this.vendorId = po.vendor_id ? String(po.vendor_id) : '';
                 this.paymentTerm = po.payment_term || 'top';
+                this.salesOrderId = po.sales_order_id ? String(po.sales_order_id) : (this.salesOrderId || '');
                 this.groups = this.hydrateGroupsFromFlatItems(po.items && po.items.length ? po.items : []);
                 this.items = [];
                 this.planProducts = [];
                 this.poDrafts = [];
                 this.syncPoVendorFromSelected({ preservePaymentTerm: true });
                 this.refreshPoVendorSelects();
+                this.syncSalesOrderSelects();
             },
             cancelForm() {
                 this.destroyPoVendorSelects();
@@ -477,6 +654,7 @@
                 this.items = [];
                 this.planProducts = [];
                 this.poDrafts = [];
+                this.syncSalesOrderSelects();
             },
             addPlanItem(product) {
                 if (!product) return;
@@ -627,6 +805,7 @@
             canSubmitPlan() {
                 const drafts = this.poDrafts || [];
                 if (!drafts.length) return false;
+                if (!String(this.salesOrderId || '').trim()) return false;
                 return drafts.every((d) => {
                     const number = String(d.number || '').trim();
                     return d.vendor_id
@@ -1006,13 +1185,17 @@
             },
             destroyPoVendorSelects() {
                 const jq = window.jQuery;
-                this.$root.querySelectorAll('select[data-po-select2]').forEach((el) => {
+                this.$root.querySelectorAll('select[data-po-select2], select[data-po-so-select], select[data-po-vendor-select]').forEach((el) => {
                     if (window.CrmSelect2) {
                         CrmSelect2.destroy(el);
                     } else if (jq && jq(el).hasClass('select2-hidden-accessible')) {
                         jq(el).select2('destroy');
                     }
                 });
+                const topEl = this.$refs.reportTopValueSelect;
+                if (topEl && window.CrmSelect2) {
+                    CrmSelect2.destroy(topEl);
+                }
             },
             refreshPoVendorSelects() {
                 this.$nextTick(() => {
@@ -1078,7 +1261,10 @@
          }"
          x-init="
             if (mode === 'plan') {
-                planProducts = (opportunityProducts || []).map((p) => emptyPlanProduct(p));
+                if (!salesOrderId && (salesOrders || []).length === 1) {
+                    salesOrderId = String(salesOrders[0].id);
+                }
+                applyPlanProductsFromSource();
                 poDrafts = [];
             }
             if ((items || []).length) {
@@ -1087,13 +1273,14 @@
                 refreshPoVendorSelects();
             }
             items = [];
+            syncSalesOrderSelects();
          ">
         <div class="flex items-center justify-between gap-3 px-5 pt-4">
             @unless ($poStandalone ?? false)
                 <h3 class="text-sm font-semibold text-slate-800">Purchase Orders</h3>
             @else
                 <p class="text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                    Hierarki: Produk → PO → Item → Vendor
+                    Hierarki: Sales Order → PO → Item → Vendor
                 </p>
             @endunless
             <div class="flex items-center gap-1">
@@ -1104,22 +1291,51 @@
                     <i class="bi bi-boxes"></i>
                 </a>
                 @endif
-                <a href="{{ route('opportunities.purchase-orders.preview', $opportunity) }}"
-                   target="_blank"
-                   class="inline-flex items-center justify-center rounded-lg bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-brand-600"
-                   title="Preview laporan">
-                    <i class="bi bi-eye"></i>
-                </a>
-                <a href="{{ route('opportunities.purchase-orders.pdf', $opportunity) }}"
-                   class="inline-flex items-center justify-center rounded-lg bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-red-600"
-                   title="Download PDF">
-                    <i class="bi bi-file-earmark-pdf"></i>
-                </a>
+                <div class="relative" x-data="{ reportOpen: false }" @click.outside="reportOpen = false">
+                    <button type="button" @click="reportOpen = !reportOpen"
+                            class="inline-flex items-center justify-center gap-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-brand-600"
+                            title="Laporan PO">
+                        <i class="bi bi-eye"></i>
+                        <i class="bi bi-chevron-down text-[10px]"></i>
+                    </button>
+                    <div x-show="reportOpen" x-cloak
+                         class="absolute right-0 z-40 mt-1 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                        <p class="border-b border-slate-100 px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                            Laporan PO
+                        </p>
+                        <div class="flex items-center gap-1 px-2 py-1.5 hover:bg-slate-50">
+                            <a href="{{ route('opportunities.purchase-orders.preview', $opportunity) }}" target="_blank"
+                               class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700">
+                                <i class="bi bi-collection text-slate-400"></i>
+                                <span class="truncate">Keseluruhan</span>
+                            </a>
+                            <a href="{{ route('opportunities.purchase-orders.pdf', $opportunity) }}"
+                               class="rounded p-1.5 text-red-500 hover:bg-red-50" title="PDF keseluruhan">
+                                <i class="bi bi-file-earmark-pdf"></i>
+                            </a>
+                        </div>
+                        @foreach ($poSalesOrderOptions as $soOpt)
+                            <div class="flex items-center gap-1 border-t border-slate-50 px-2 py-1.5 hover:bg-slate-50">
+                                <a href="{{ route('opportunities.purchase-orders.preview', ['opportunity' => $opportunity, 'sales_order_id' => $soOpt['id']]) }}"
+                                   target="_blank"
+                                   class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700">
+                                    <i class="bi bi-receipt text-slate-400"></i>
+                                    <span class="truncate">Per SO · {{ $soOpt['number'] }}</span>
+                                </a>
+                                <a href="{{ route('opportunities.purchase-orders.pdf', ['opportunity' => $opportunity, 'sales_order_id' => $soOpt['id']]) }}"
+                                   class="rounded p-1.5 text-red-500 hover:bg-red-50"
+                                   title="PDF {{ $soOpt['number'] }}">
+                                    <i class="bi bi-file-earmark-pdf"></i>
+                                </a>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
                 @if ($canManagePo)
                     <button type="button"
                             @click="startCreate()"
                             class="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-100"
-                            title="Rencana pembelian — item per produk, PO digroup per vendor">
+                            title="Rencana pembelian per Sales Order — item dari SO, PO digroup per vendor">
                         <i class="bi bi-plus-lg"></i>
                         <span class="hidden sm:inline">PO</span>
                     </button>
@@ -1253,17 +1469,124 @@
                 {{-- ========== PLAN MODE ========== --}}
                 <div x-show="mode === 'plan'" class="space-y-4">
                     <div class="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                        <span class="text-brand-600">1. Produk</span>
+                        <span class="text-brand-600">1. Sales Order</span>
                         <i class="bi bi-chevron-right text-[10px]"></i>
-                        <span :class="planProducts.some(p => (p.items || []).length) ? 'text-brand-600' : ''">2. Item</span>
+                        <span :class="salesOrderId ? 'text-brand-600' : ''">2. Produk</span>
                         <i class="bi bi-chevron-right text-[10px]"></i>
-                        <span :class="poDrafts.length ? 'text-brand-600' : ''">3. Vendor</span>
+                        <span :class="planProducts.some(p => (p.items || []).length) ? 'text-brand-600' : ''">3. Item</span>
                         <i class="bi bi-chevron-right text-[10px]"></i>
-                        <span :class="poDrafts.length ? 'text-brand-600' : (planProducts.some(p => (p.items || []).length) ? 'text-slate-500' : '')">4. PO per Vendor</span>
+                        <span :class="poDrafts.length ? 'text-brand-600' : ''">4. Vendor</span>
+                        <i class="bi bi-chevron-right text-[10px]"></i>
+                        <span :class="poDrafts.length ? 'text-brand-600' : (planProducts.some(p => (p.items || []).length) ? 'text-slate-500' : '')">5. PO per Vendor</span>
+                    </div>
+
+                    <div class="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Sales Order terkait</p>
+                            <p class="mt-0.5 text-[11px] text-slate-400">
+                                Satu batch PO hanya untuk satu Sales Order.
+                            </p>
+                        </div>
+                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <div>
+                                <label class="crm-label">Sales Order <span class="text-red-500">*</span></label>
+                                <input type="hidden" name="sales_order_id" :value="salesOrderId" :disabled="mode !== 'plan'">
+                                <select x-ref="planSalesOrderSelect"
+                                        data-po-so-select
+                                        data-po-so-mode="plan"
+                                        data-placeholder="Pilih Sales Order…"
+                                        class="select2 select2-search w-full"
+                                        :disabled="mode !== 'plan' || !(salesOrders || []).length">
+                                    <option value="">Pilih Sales Order…</option>
+                                    @foreach ($poSalesOrders as $soOpt)
+                                        <option value="{{ $soOpt['id'] }}">{{ $soOpt['number'] }} · {{ $soOpt['item_count'] }} item</option>
+                                    @endforeach
+                                </select>
+                                @error('sales_order_id')
+                                    <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                                @enderror
+                                <p x-show="!(salesOrders || []).length" class="mt-1 text-xs text-amber-700">
+                                    Belum ada Sales Order. Buat Sales Order dulu sebelum membuat PO.
+                                </p>
+                            </div>
+                            <div>
+                                <label class="crm-label">Sumber produk</label>
+                                <div class="flex flex-wrap gap-3 pt-2">
+                                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                        <input type="radio" value="so" x-model="productSource"
+                                               @change="setProductSource('so')"
+                                               class="border-slate-300 text-brand-600 focus:ring-brand-500"
+                                               :disabled="!salesOrderId">
+                                        Dari Sales Order
+                                    </label>
+                                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                        <input type="radio" value="opp" x-model="productSource"
+                                               @change="setProductSource('opp')"
+                                               class="border-slate-300 text-brand-600 focus:ring-brand-500">
+                                        Dari Opportunity
+                                    </label>
+                                </div>
+                                <p class="mt-1 text-[11px] text-slate-400">
+                                    Default dari produk SO terkait. Opsional tarik dari produk opportunity.
+                                </p>
+                            </div>
+                            <div>
+                                <label class="crm-label">TOP laporan PO</label>
+                                <div class="flex flex-wrap gap-3 pt-2">
+                                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                        <input type="radio" name="report_top_source" value="custom" x-model="topSource"
+                                               @change="setTopSource('custom')"
+                                               :disabled="mode !== 'plan'"
+                                               class="border-slate-300 text-brand-600 focus:ring-brand-500">
+                                        Buat sendiri
+                                    </label>
+                                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                        <input type="radio" name="report_top_source" value="so" x-model="topSource"
+                                               @change="setTopSource('so')"
+                                               class="border-slate-300 text-brand-600 focus:ring-brand-500"
+                                               :disabled="mode !== 'plan' || !salesOrderId">
+                                        Dari Sales Order
+                                    </label>
+                                </div>
+                                <div x-show="topSource === 'custom'" class="mt-2">
+                                    <select x-ref="reportTopValueSelect"
+                                            name="report_top_value"
+                                            class="select2 select2-search w-full"
+                                            data-placeholder="Pilih TOP…"
+                                            x-model="reportTopValue"
+                                            :disabled="mode !== 'plan' || topSource !== 'custom'"
+                                            :required="mode === 'plan' && topSource === 'custom'">
+                                        @foreach (\App\Support\CustomerTop::LABELS as $topValue => $topLabel)
+                                            <option value="{{ $topValue }}">{{ $topLabel }} → {{ \App\Support\CustomerTop::reportLabel($topValue) }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <input type="hidden" name="report_top_value" value=""
+                                       :disabled="mode !== 'plan' || topSource !== 'so'">
+                                <p class="mt-1 text-[11px] text-slate-400">
+                                    Mengisi kotak <span class="font-semibold">TOP</span> di laporan PO.
+                                    <span x-show="reportTopPreview()" class="font-medium text-slate-600"
+                                          x-text="'Preview: ' + reportTopPreview()"></span>
+                                </p>
+                                <p class="mt-1 text-[11px] text-amber-700" x-show="topSource === 'so' && !salesOrderId">
+                                    Pilih Sales Order dulu untuk memakai TOP dari SO.
+                                </p>
+                                <p class="mt-1 text-[11px] text-amber-700" x-show="topSource === 'so' && salesOrderId && !reportTopPreview()">
+                                    Sales Order belum punya TOP/payment.
+                                </p>
+                                @error('report_top_value')
+                                    <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                                @enderror
+                                @error('report_top_source')
+                                    <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                                @enderror
+                            </div>
+                        </div>
                     </div>
 
                     <div>
-                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Produk opportunity</p>
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+                           x-text="productSource === 'opp' ? 'Produk opportunity' : 'Produk Sales Order'"></p>
                         <p class="mt-0.5 text-[11px] text-slate-400">
                             Tambah item di bawah tiap produk, pilih vendor Dipilih. PO digroup otomatis per vendor.
                         </p>
@@ -1275,10 +1598,13 @@
                     <p x-show="!getProductCatalog().length" class="text-xs text-slate-500">
                         Belum ada produk di ketersediaan vendor — ketik nama item baru, lalu isi vendor & harga. Data akan tersimpan saat Buat semua PO.
                     </p>
-                    <p x-show="!opportunityProducts.length" class="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 px-4 py-4 text-sm text-amber-800">
-                        Opportunity belum punya produk. Tambahkan produk di deal terlebih dahulu.
+                    <p x-show="mode === 'plan' && !salesOrderId" class="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 px-4 py-4 text-sm text-amber-800">
+                        Pilih Sales Order terlebih dahulu untuk memuat produk.
                     </p>
-
+                    <p x-show="mode === 'plan' && (productSource === 'opp' || salesOrderId) && !productsForPlan().length" class="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 px-4 py-4 text-sm text-amber-800">
+                        <span x-show="productSource === 'so'">Sales Order belum punya produk.</span>
+                        <span x-show="productSource === 'opp'">Opportunity belum punya produk. Tambahkan produk di deal terlebih dahulu.</span>
+                    </p>
                     <template x-for="product in planProducts" :key="product._uid">
                         <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3 sm:p-4">
                             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
@@ -1291,7 +1617,7 @@
                                         <span x-show="product.brand" x-text="product.brand"></span>
                                         <span x-show="product.brand && product.quantity"> · </span>
                                         <span x-show="product.quantity"
-                                              x-text="'Qty opp: ' + formatId(product.quantity, 2)"></span>
+                                              x-text="'Qty: ' + formatId(product.quantity, 2)"></span>
                                     </p>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-3">
@@ -2115,10 +2441,26 @@
                         <div>
                             <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">4. Nomor PO & Kondisi</p>
                             <p class="mt-0.5 text-[11px] text-slate-400">
-                                Isi nomor PO dan kondisi bayar. Vendor terisi otomatis dari yang ditandai Dipilih.
+                                Isi nomor PO, Sales Order terkait, dan kondisi bayar. Vendor terisi otomatis dari yang ditandai Dipilih.
                             </p>
                         </div>
-                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <div>
+                                <label class="crm-label">Sales Order <span class="text-red-500">*</span></label>
+                                <input type="hidden" name="sales_order_id" :value="salesOrderId" :disabled="mode !== 'edit'">
+                                <select x-ref="editSalesOrderSelect"
+                                        data-po-so-select
+                                        data-po-so-mode="edit"
+                                        data-placeholder="Pilih Sales Order…"
+                                        class="select2 select2-search w-full"
+                                        :disabled="mode !== 'edit' || !(salesOrders || []).length"
+                                        :required="mode === 'edit'">
+                                    <option value="">Pilih Sales Order…</option>
+                                    @foreach ($poSalesOrders as $soOpt)
+                                        <option value="{{ $soOpt['id'] }}">{{ $soOpt['number'] }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
                             <div>
                                 <label class="crm-label">Nomor PO <span class="text-red-500">*</span></label>
                                 <input type="text" name="number" x-model="number" maxlength="100"
@@ -2184,44 +2526,49 @@
             <div class="mt-2 space-y-3 px-5 pb-4">
                 @unless ($poStandalone ?? false)
                 <p class="text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                    Hierarki: Produk → PO → Item → Vendor
+                    Hierarki: Sales Order → PO → Item → Vendor
                 </p>
                 @endunless
 
-                @foreach ($poTreeByProduct as $productName => $productNode)
+                @foreach ($poTreeBySalesOrder as $soKey => $soNode)
                     @php
-                        $productKey = 'prod-'.md5((string) $productName);
-                        $productPoCount = count($productNode['pos']);
+                        $soGroupKey = 'so-'.md5((string) $soKey);
+                        $soPoCount = (int) $soNode['po_count'];
                     @endphp
-                    <div class="overflow-hidden rounded-xl border border-slate-200/80">
+                    <div class="overflow-hidden rounded-xl border border-slate-200/80 {{ ! empty($soNode['needs_sales_order']) ? 'border-amber-200' : '' }}">
                         <button type="button"
-                                @click="openProduct = openProduct === @js($productKey) ? null : @js($productKey)"
-                                class="flex w-full items-start gap-2 bg-slate-50/80 px-4 py-3 text-left hover:bg-slate-50">
+                                @click="openProduct = openProduct === @js($soGroupKey) ? null : @js($soGroupKey)"
+                                class="flex w-full items-start gap-2 {{ ! empty($soNode['needs_sales_order']) ? 'bg-amber-50/80' : 'bg-slate-50/80' }} px-4 py-3 text-left hover:bg-slate-50">
                             <span class="mt-0.5 shrink-0 rounded p-0.5 text-slate-400">
-                                <i class="bi" :class="openProduct === @js($productKey) ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
+                                <i class="bi" :class="openProduct === @js($soGroupKey) ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
                             </span>
                             <div class="min-w-0 flex-1">
                                 <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                    <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Produk</span>
-                                    <span class="text-sm font-semibold text-slate-800">{{ $productNode['product_name'] }}</span>
+                                    <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Sales Order</span>
+                                    <span class="text-sm font-semibold text-slate-800">{{ $soNode['sales_order_number'] }}</span>
+                                    @if (! empty($soNode['needs_sales_order']))
+                                        <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                                            Perlu diisi
+                                        </span>
+                                    @endif
                                 </div>
                                 <p class="mt-0.5 text-xs text-slate-400">
-                                    {{ $productPoCount }} PO
+                                    {{ $soPoCount }} PO
                                     &middot;
-                                    {{ (int) $productNode['item_count'] }} item
+                                    {{ (int) $soNode['item_count'] }} item
                                     &middot;
-                                    Modal {{ money($productNode['total_modal'], $poCurrency) }}
+                                    Modal {{ money($soNode['total_modal'], $poCurrency) }}
                                 </p>
                             </div>
                         </button>
 
-                        <div x-show="openProduct === @js($productKey)" x-cloak class="space-y-2 border-t border-slate-100 bg-white p-3">
-                            @foreach ($productNode['pos'] as $poNode)
+                        <div x-show="openProduct === @js($soGroupKey)" x-cloak class="space-y-2 border-t border-slate-100 bg-white p-3">
+                            @foreach ($soNode['pos'] as $poNode)
                                 @php
                                     $po = $poNode['po'];
                                     $poItems = $poNode['items'];
                                     $poEditPayload = $poNode['edit_payload'];
-                                    $poKey = 'po-'.$po->id.'-'.md5((string) $productName);
+                                    $poKey = 'po-'.$po->id.'-'.md5((string) $soKey);
                                     $poIsCash = $po->isCash();
                                     $poCurrencyCode = $po->currency ?: $poCurrency;
                                 @endphp
@@ -2250,6 +2597,29 @@
                                                 &middot;
                                                 {{ $po->created_at?->translatedFormat('d M Y H:i') }}
                                             </p>
+                                            @if ($canManagePo && ! $po->sales_order_id)
+                                                <form method="POST"
+                                                      action="{{ route('opportunities.purchase-orders.attach-sales-order', [$opportunity, $po]) }}"
+                                                      class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
+                                                    @csrf
+                                                    @method('PUT')
+                                                    <div class="min-w-[12rem] flex-1">
+                                                        <label class="crm-label text-[10px] text-amber-800">Isi Sales Order terkait</label>
+                                                        <select name="sales_order_id" required
+                                                                class="select2 select2-search w-full text-sm"
+                                                                data-placeholder="Pilih Sales Order…">
+                                                            <option value="">Pilih Sales Order…</option>
+                                                            @foreach ($poSalesOrderOptions as $soOpt)
+                                                                <option value="{{ $soOpt['id'] }}">{{ $soOpt['number'] }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                    </div>
+                                                    <button type="submit"
+                                                            class="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">
+                                                        Simpan
+                                                    </button>
+                                                </form>
+                                            @endif
                                         </div>
                                         <div class="flex shrink-0 items-center gap-1">
                                             <button type="button"
@@ -2298,23 +2668,21 @@
                                                     @if ($item->description)
                                                         <p class="mt-0.5 whitespace-pre-line text-xs text-slate-500">{{ $item->description }}</p>
                                                     @endif
-                                                    @if ($item->note)
-                                                        <p class="mt-0.5 whitespace-pre-line text-xs italic text-slate-400">{{ $item->note }}</p>
-                                                    @endif
-                                                    <p class="mt-1 text-xs text-slate-400">
+                                                    <p class="mt-0.5 text-xs text-slate-400">
                                                         Qty {{ rtrim(rtrim(number_format((float) $item->quantity, 2, ',', '.'), '0'), ',') }}
                                                         · Modal {{ money($itemModal, $poCurrencyCode) }}
-                                                        · Subtotal {{ money($item->line_total, $poCurrencyCode) }}
+                                                        @if ($item->opportunity_product_name)
+                                                            · Produk: {{ $item->opportunity_product_name }}
+                                                        @endif
                                                     </p>
                                                 </div>
                                                 <div class="overflow-x-auto">
                                                     <table class="w-full min-w-[640px] text-left text-sm">
-                                                        <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-400">
+                                                        <thead class="text-xs uppercase tracking-wider text-slate-400">
                                                             <tr>
                                                                 <th class="px-3 py-2 font-medium">Vendor</th>
-                                                                <th class="px-3 py-2 font-medium">Status vendor</th>
-                                                                <th class="w-24 px-3 py-2 font-medium">TOP</th>
                                                                 <th class="px-3 py-2 font-medium">Status</th>
+                                                                <th class="w-20 px-3 py-2 font-medium">TOP</th>
                                                                 <th class="px-3 py-2 font-medium">Tanggal</th>
                                                                 <th class="px-3 py-2 font-medium text-right">Exclude</th>
                                                                 <th class="px-3 py-2 font-medium text-right">Include</th>
@@ -2327,14 +2695,11 @@
                                                                     <td class="px-3 py-2 {{ $quote->is_selected ? 'font-medium text-slate-800' : 'text-slate-500' }}">
                                                                         {{ $quote->displayVendorName() }}
                                                                     </td>
-                                                                    <td class="px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
-                                                                        {{ $quote->companyStatusLabel() }}
-                                                                    </td>
-                                                                    <td class="w-24 px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
-                                                                        {{ $quote->topLabel() }}
-                                                                    </td>
                                                                     <td class="px-3 py-2">
                                                                         <x-badge :color="$quote->statusBadgeColor()">{{ $quote->statusLabel() }}</x-badge>
+                                                                    </td>
+                                                                    <td class="w-20 px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
+                                                                        {{ $quote->topLabel() }}
                                                                     </td>
                                                                     <td class="whitespace-nowrap px-3 py-2 {{ $quote->is_selected ? 'text-slate-700' : 'text-slate-500' }}">
                                                                         {{ $quote->quotedAtLabel() }}
@@ -2357,7 +2722,7 @@
                                                                 </tr>
                                                             @empty
                                                                 <tr>
-                                                                    <td colspan="8" class="px-3 py-3 text-center text-sm text-slate-400">Belum ada perbandingan vendor</td>
+                                                                    <td colspan="7" class="px-3 py-3 text-center text-sm text-slate-400">Belum ada perbandingan vendor</td>
                                                                 </tr>
                                                             @endforelse
                                                         </tbody>
@@ -2373,69 +2738,107 @@
                 @endforeach
             </div>
 
-            {{-- Daftar flat: satu baris per PO (per vendor) --}}
+            {{-- Daftar flat: digroup per Sales Order --}}
             <div class="mt-4 border-t border-slate-100 px-5 pb-5 pt-4">
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <p class="text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                        Semua PO · {{ $poList->count() }} vendor
+                        Semua PO · {{ $poList->count() }} PO · {{ count($poTreeBySalesOrder) }} Sales Order
                     </p>
                     <p class="text-sm font-semibold tabular-nums text-slate-800">
                         Total {{ money((float) $poList->sum(fn ($po) => $po->totalInclude()), $poCurrency) }}
                     </p>
                 </div>
-                <div class="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
-                    @foreach ($poList->sortBy('number') as $po)
-                        @php
-                            $poFlatPayload = $poPayloadById[$po->id] ?? null;
-                            $poFlatIsCash = $po->isCash();
-                            $poFlatCurrency = $po->currency ?: $poCurrency;
-                            $poFlatItemCount = $po->items->count();
-                        @endphp
-                        <div class="flex items-start gap-2 px-4 py-3 hover:bg-slate-50/60"
-                             x-show="!(mode === 'edit' && Number(editId) === {{ (int) $po->id }})">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                    <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">PO</span>
-                                    <span class="text-sm font-semibold text-slate-800">{{ $po->number }}</span>
-                                    <span class="text-sm font-medium text-slate-700">{{ $po->displayVendorName() }}</span>
-                                    <span @class([
-                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                                        'bg-amber-50 text-amber-700' => $poFlatIsCash,
-                                        'bg-slate-100 text-slate-600' => ! $poFlatIsCash,
-                                    ])>{{ $po->paymentTermLabel() }}</span>
-                                    <span class="text-sm font-semibold tabular-nums text-slate-800">{{ money($po->totalInclude(), $poFlatCurrency) }}</span>
-                                    <span class="text-xs text-slate-400">{{ $poFlatItemCount }} item</span>
-                                </div>
-                                <p class="mt-0.5 text-xs text-slate-400">
-                                    {{ optional($po->creator)->display_name ?: '—' }}
-                                    &middot;
-                                    {{ $po->created_at?->translatedFormat('d M Y H:i') }}
+                <div class="space-y-4">
+                    @foreach ($poTreeBySalesOrder as $soKey => $soNode)
+                        <div class="overflow-hidden rounded-xl border border-slate-200/80 bg-white">
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+                                <p class="text-xs font-semibold text-slate-700">
+                                    <span class="text-[10px] uppercase tracking-wide text-slate-400">SO</span>
+                                    {{ $soNode['sales_order_number'] }}
+                                    @if (! empty($soNode['needs_sales_order']))
+                                        <span class="ml-1 text-[10px] font-semibold uppercase text-amber-700">Perlu diisi</span>
+                                    @endif
+                                </p>
+                                <p class="text-xs text-slate-400">
+                                    {{ (int) $soNode['po_count'] }} PO · {{ money($soNode['total_modal'], $poCurrency) }}
                                 </p>
                             </div>
-                            <div class="flex shrink-0 items-center gap-1">
-                                <button type="button"
-                                        @click="previewPoId = {{ (int) $po->id }}"
-                                        class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
-                                        title="Preview perbandingan vendor">
-                                    <i class="bi bi-eye text-sm"></i>
-                                </button>
-                                @if ($canManagePo && $poFlatPayload)
-                                    <button type="button"
-                                            @click="startEdit(@js($poFlatPayload))"
-                                            class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
-                                            title="Edit">
-                                        <i class="bi bi-pencil text-sm"></i>
-                                    </button>
-                                    <form method="POST"
-                                          action="{{ route('opportunities.purchase-orders.destroy', [$opportunity, $po]) }}"
-                                          onsubmit="return confirm(@js('Hapus Purchase Order '.$po->number.'?'))"
-                                          class="inline">
-                                        @csrf @method('DELETE')
-                                        <button type="submit" class="rounded p-1.5 text-red-500 hover:bg-red-50" title="Hapus">
-                                            <i class="bi bi-trash text-sm"></i>
-                                        </button>
-                                    </form>
-                                @endif
+                            <div class="divide-y divide-slate-100">
+                                @foreach ($soNode['pos'] as $poNode)
+                                    @php
+                                        $po = $poNode['po'];
+                                        $poFlatPayload = $poNode['edit_payload'];
+                                        $poFlatIsCash = $po->isCash();
+                                        $poFlatCurrency = $po->currency ?: $poCurrency;
+                                        $poFlatItemCount = $po->items->count();
+                                    @endphp
+                                    <div class="flex items-start gap-2 px-4 py-3 hover:bg-slate-50/60"
+                                         x-show="!(mode === 'edit' && Number(editId) === {{ (int) $po->id }})">
+                                        <div class="min-w-0 flex-1">
+                                            <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">PO</span>
+                                                <span class="text-sm font-semibold text-slate-800">{{ $po->number }}</span>
+                                                <span class="text-sm font-medium text-slate-700">{{ $po->displayVendorName() }}</span>
+                                                <span @class([
+                                                    'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                                                    'bg-amber-50 text-amber-700' => $poFlatIsCash,
+                                                    'bg-slate-100 text-slate-600' => ! $poFlatIsCash,
+                                                ])>{{ $po->paymentTermLabel() }}</span>
+                                                <span class="text-sm font-semibold tabular-nums text-slate-800">{{ money($po->totalInclude(), $poFlatCurrency) }}</span>
+                                                <span class="text-xs text-slate-400">{{ $poFlatItemCount }} item</span>
+                                            </div>
+                                            <p class="mt-0.5 text-xs text-slate-400">
+                                                {{ optional($po->creator)->display_name ?: '—' }}
+                                                &middot;
+                                                {{ $po->created_at?->translatedFormat('d M Y H:i') }}
+                                            </p>
+                                            @if ($canManagePo && ! $po->sales_order_id)
+                                                <form method="POST"
+                                                      action="{{ route('opportunities.purchase-orders.attach-sales-order', [$opportunity, $po]) }}"
+                                                      class="mt-2 flex flex-wrap items-end gap-2">
+                                                    @csrf
+                                                    @method('PUT')
+                                                    <select name="sales_order_id" required
+                                                            class="select2 select2-search min-w-[12rem] flex-1 text-sm"
+                                                            data-placeholder="Pilih Sales Order…">
+                                                        <option value="">Pilih Sales Order…</option>
+                                                        @foreach ($poSalesOrderOptions as $soOpt)
+                                                            <option value="{{ $soOpt['id'] }}">{{ $soOpt['number'] }}</option>
+                                                        @endforeach
+                                                    </select>
+                                                    <button type="submit" class="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">
+                                                        Isi SO
+                                                    </button>
+                                                </form>
+                                            @endif
+                                        </div>
+                                        <div class="flex shrink-0 items-center gap-1">
+                                            <button type="button"
+                                                    @click="previewPoId = {{ (int) $po->id }}"
+                                                    class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
+                                                    title="Preview perbandingan vendor">
+                                                <i class="bi bi-eye text-sm"></i>
+                                            </button>
+                                            @if ($canManagePo && $poFlatPayload)
+                                                <button type="button"
+                                                        @click="startEdit(@js($poFlatPayload))"
+                                                        class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
+                                                        title="Edit">
+                                                    <i class="bi bi-pencil text-sm"></i>
+                                                </button>
+                                                <form method="POST"
+                                                      action="{{ route('opportunities.purchase-orders.destroy', [$opportunity, $po]) }}"
+                                                      onsubmit="return confirm(@js('Hapus Purchase Order '.$po->number.'?'))"
+                                                      class="inline">
+                                                    @csrf @method('DELETE')
+                                                    <button type="submit" class="rounded p-1.5 text-red-500 hover:bg-red-50" title="Hapus">
+                                                        <i class="bi bi-trash text-sm"></i>
+                                                    </button>
+                                                </form>
+                                            @endif
+                                        </div>
+                                    </div>
+                                @endforeach
                             </div>
                         </div>
                     @endforeach

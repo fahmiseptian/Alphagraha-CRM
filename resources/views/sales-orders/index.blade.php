@@ -107,9 +107,7 @@
                         @if ($canFilterSales ?? false)
                             <th>Sales</th>
                         @endif
-                        <th class="text-right">Harga jual (excl)</th>
-                        <th class="text-right">Modal (excl)</th>
-                        <th>Status</th>
+                        <th>Data PO</th>
                         <th class="text-right">Dibuat</th>
                         <th></th>
                     </tr>
@@ -117,25 +115,8 @@
                 <tbody>
                     @forelse ($salesOrders as $so)
                         @php
-                            $status = $so->statusSnapshot();
-                            $statusColor = fn (?string $value) => match (strtolower((string) $value)) {
-                                'pending', 'unpaid' => 'amber',
-                                'onprocess', 'ondelivery' => 'blue',
-                                'completed', 'paid', 'settlement' => 'green',
-                                'cancelled', 'rejected', 'refund' => 'red',
-                                default => 'slate',
-                            };
-                            $opp = $so->opportunity;
-                            $currency = $opp?->amount_currency ?: 'IDR';
-                            $nilaiJual = $opp
-                                ? round($opp->products->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude'] ?? 0)), 2)
-                                : 0;
-                            $modal = $opp
-                                ? round((float) $opp->purchaseOrders->sum('total'), 2)
-                                : 0;
-                            if ($modal <= 0 && $opp) {
-                                $modal = round($opp->products->sum(fn ($p) => (float) ($p['quantity'] ?? 1) * (float) ($p['cost_exclude'] ?? 0)), 2);
-                            }
+                            $poCount = (int) ($so->purchase_orders_count ?? 0);
+                            $hasPo = $poCount > 0;
                         @endphp
                         <tr>
                             <td style="white-space: nowrap;">
@@ -170,23 +151,12 @@
                                     {{ optional($so->opportunity?->assignedUser)->display_name ?: '—' }}
                                 </td>
                             @endif
-                            <td class="text-right tabular-nums text-slate-700">{{ money($nilaiJual, $currency) }}</td>
-                            <td class="text-right tabular-nums text-slate-700">{{ money($modal, $currency) }}</td>
                             <td>
-                                <div class="flex flex-wrap gap-1">
-                                    @if (! empty($status['so_status']))
-                                        <x-badge :color="$statusColor($status['so_status'])">{{ $status['so_status'] }}</x-badge>
-                                    @endif
-                                    @if ($so->isCancelPending())
-                                        <x-badge color="amber">Menunggu pembatalan</x-badge>
-                                    @endif
-                                    @if (! empty($status['payment_status']))
-                                        <x-badge :color="$statusColor($status['payment_status'])">{{ $status['payment_status'] }}</x-badge>
-                                    @endif
-                                    @if (! empty($status['delivery_status']))
-                                        <x-badge :color="$statusColor($status['delivery_status'])">{{ $status['delivery_status'] }}</x-badge>
-                                    @endif
-                                </div>
+                                @if ($hasPo)
+                                    <x-badge color="green">Ada PO · {{ $poCount }}</x-badge>
+                                @else
+                                    <x-badge color="slate">Belum ada PO</x-badge>
+                                @endif
                             </td>
                             <td class="text-right text-slate-600">
                                 {{ $so->created_at?->translatedFormat('d M Y H:i') }}
@@ -211,7 +181,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="{{ ($canFilterSales ?? false) ? 8 : 7 }}" class="py-10 text-center text-slate-500">
+                            <td colspan="{{ ($canFilterSales ?? false) ? 6 : 5 }}" class="py-10 text-center text-slate-500">
                                 @if ($hasFilters)
                                     Tidak ada Sales Order sesuai filter.
                                     <a href="{{ route('sales-orders.index') }}" class="ml-1 text-brand-600 hover:underline">Reset</a>

@@ -37,10 +37,11 @@
 <body>
     <div class="toolbar">
         <a href="{{ route('opportunities.purchase-orders.index', $opportunity) }}" class="btn-light"><i class="bi bi-arrow-left"></i> Back</a>
-        <strong>Laporan PO</strong>
+        <strong>Laporan PO — {{ $report['scope_label'] ?? 'Keseluruhan' }}</strong>
         <div class="spacer"></div>
         <button type="button" onclick="window.print()" class="btn-light"><i class="bi bi-printer"></i> Print</button>
-        <a href="{{ route('opportunities.purchase-orders.pdf', $opportunity) }}" class="btn-primary"><i class="bi bi-file-earmark-pdf"></i> Download PDF</a>
+        <a href="{{ route('opportunities.purchase-orders.pdf', array_filter(['opportunity' => $opportunity, 'sales_order_id' => $salesOrder->id ?? null])) }}"
+           class="btn-primary"><i class="bi bi-file-earmark-pdf"></i> Download PDF</a>
     </div>
     <div class="paper">
         @include('opportunities.purchase-orders._report', ['report' => $report])

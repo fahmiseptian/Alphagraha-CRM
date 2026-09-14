@@ -160,6 +160,23 @@ class CustomerTop
     }
 
     /**
+     * Label singkat untuk laporan (kotak TOP di report PO): CBD, COD, TOP 30, dst.
+     */
+    public static function reportLabel(?string $value): string
+    {
+        $key = self::normalize($value);
+
+        if ($key === self::CASH) {
+            return 'CBD';
+        }
+        if ($key === self::COD) {
+            return 'COD';
+        }
+
+        return 'TOP '.self::days($key);
+    }
+
+    /**
      * Minimal margin (%) berdasarkan jenis TOP customer.
      */
     public static function minMarginPercent(?string $top): float

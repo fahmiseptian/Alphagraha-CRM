@@ -17,10 +17,12 @@ class PurchaseOrder extends Model
 
     protected $fillable = [
         'opportunity_id',
+        'sales_order_id',
         'number',
         'vendor_id',
         'vendor_name',
         'payment_term',
+        'report_top',
         'total',
         'currency',
         'created_by',
@@ -28,11 +30,17 @@ class PurchaseOrder extends Model
 
     protected $casts = [
         'total' => 'decimal:2',
+        'sales_order_id' => 'integer',
     ];
 
     public function opportunity(): BelongsTo
     {
         return $this->belongsTo(Opportunity::class, 'opportunity_id');
+    }
+
+    public function salesOrder(): BelongsTo
+    {
+        return $this->belongsTo(OpportunitySalesOrder::class, 'sales_order_id');
     }
 
     public function items(): HasMany

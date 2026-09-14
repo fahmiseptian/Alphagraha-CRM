@@ -3,61 +3,87 @@
 namespace App\Services;
 
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Support\OpportunityProductPricing;
 use Illuminate\Support\Collection;
 
 /**
- * Laporan rekap PO per opportunity (1 opp = 1 laporan), format mirip Excel finance.
+ * Laporan rekap PO:
+ * - keseluruhan opportunity, atau
+ * - per Sales Order (nilai jual dari item SO, modal dari PO terkait SO).
  */
 class PurchaseOrderReportService
 {
     /**
      * @return array<string, mixed>
      */
-    public function build(Opportunity $opportunity): array
+    public function build(Opportunity $opportunity, ?OpportunitySalesOrder $salesOrder = null): array
     {
-        $opportunity->loadMissing(['account', 'assignedUser', 'purchaseOrders.vendor', 'purchaseOrders.items', 'salesOrders']);
+        $opportunity->loadMissing([
+            'account',
+            'assignedUser',
+            'purchaseOrders.vendor',
+            'purchaseOrders.items',
+            'purchaseOrders.salesOrder',
+            'salesOrders',
+        ]);
+
+        if ($salesOrder && $salesOrder->opportunity_id !== $opportunity->id) {
+            abort(404);
+        }
 
         $currency = $opportunity->amount_currency ?: 'IDR';
-        $products = $opportunity->products;
+        $isPerSo = $salesOrder !== null;
 
-        $nilaiJualExcl = round($products->sum(
-            fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude'] ?? 0)
-        ), 2);
-        $nilaiJualIncl = round($products->sum(
-            fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_include'] ?? $p['sell_include'] ?? 0)
-        ), 2);
-        // PPh 23 = Σ (qty × PPH per item). Barang Non Wapu = 0; barang/jasa Wapu/Inaproc & jasa Non Wapu ikut tarif setting.
-        $pph23 = round($products->sum(
-            fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['pph'] ?? 0)
-        ), 2);
+        if ($isPerSo) {
+            [$nilaiJualExcl, $nilaiJualIncl, $pph23] = $this->sumSalesFromSalesOrder($opportunity, $salesOrder);
+            $purchaseOrders = $opportunity->purchaseOrders
+                ->where('sales_order_id', $salesOrder->id)
+                ->values();
+            // Ongkir/diskon bersifat opportunity-level — tidak dialokasikan ke laporan per SO.
+            $modalOngkirExcl = null;
+            $modalOngkirIncl = null;
+            $jualOngkirExcl = null;
+            $jualOngkirIncl = null;
+            $diskonAmount = 0.0;
+        } else {
+            $products = $opportunity->products;
+            $nilaiJualExcl = round($products->sum(
+                fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude'] ?? 0)
+            ), 2);
+            $nilaiJualIncl = round($products->sum(
+                fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_include'] ?? $p['sell_include'] ?? 0)
+            ), 2);
+            $pph23 = round($products->sum(
+                fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['pph'] ?? 0)
+            ), 2);
+            $purchaseOrders = $opportunity->purchaseOrders;
+            $modalOngkirExcl = $opportunity->crm_shipping_cost !== null
+                ? round((float) $opportunity->crm_shipping_cost, 2)
+                : null;
+            $modalOngkirIncl = $modalOngkirExcl !== null
+                ? OpportunityProductPricing::includeFromExclude($modalOngkirExcl)
+                : null;
+            $diskonAmount = $opportunity->hasActiveDiscount()
+                ? round((float) $opportunity->crm_discount_amount, 2)
+                : 0.0;
+            $jualOngkirExcl = null;
+            $jualOngkirIncl = null;
+            if ($opportunity->crm_has_shipping_charge && (float) ($opportunity->crm_shipping_sell ?? 0) > 0) {
+                $jualOngkirExcl = round((float) $opportunity->crm_shipping_sell, 2);
+                $jualOngkirIncl = OpportunityProductPricing::includeFromExclude($jualOngkirExcl);
+            }
+        }
+
         $terimaUang = round($nilaiJualIncl - $pph23, 2);
 
-        $poRows = $this->buildPoRows($opportunity->purchaseOrders);
+        $poRows = $this->buildPoRows($purchaseOrders);
         $hasSurcharge = $poRows->contains(fn (array $row) => ($row['surcharge_percent'] ?? 0) > 0);
         $hasCash = $poRows->contains(fn (array $row) => $row['is_cash']);
 
         $modalExcl = round((float) $poRows->sum('jumlah_exclude'), 2);
         $modalIncl = round((float) $poRows->sum('jumlah_include'), 2);
-
-        $modalOngkirExcl = $opportunity->crm_shipping_cost !== null
-            ? round((float) $opportunity->crm_shipping_cost, 2)
-            : null;
-        $modalOngkirIncl = $modalOngkirExcl !== null
-            ? OpportunityProductPricing::includeFromExclude($modalOngkirExcl)
-            : null;
-
-        $diskonAmount = $opportunity->hasActiveDiscount()
-            ? round((float) $opportunity->crm_discount_amount, 2)
-            : 0.0;
-
-        $jualOngkirExcl = null;
-        $jualOngkirIncl = null;
-        if ($opportunity->crm_has_shipping_charge && (float) ($opportunity->crm_shipping_sell ?? 0) > 0) {
-            $jualOngkirExcl = round((float) $opportunity->crm_shipping_sell, 2);
-            $jualOngkirIncl = OpportunityProductPricing::includeFromExclude($jualOngkirExcl);
-        }
 
         $netJualExclBeforeDiskon = round($nilaiJualExcl - $pph23, 2);
         $grossMarginBase = round($nilaiJualExcl - $modalExcl - $pph23, 2);
@@ -84,10 +110,15 @@ class PurchaseOrderReportService
 
         return [
             'opportunity' => $opportunity,
+            'sales_order' => $salesOrder,
+            'scope' => $isPerSo ? 'sales_order' : 'overall',
+            'scope_label' => $isPerSo
+                ? ('Per SO · '.$salesOrder->displayNumber())
+                : 'Keseluruhan',
             'currency' => $currency,
             'invoice_date' => null,
             'invoice_number' => null,
-            'payment_term_label' => $this->resolveSoPaymentLabel($opportunity),
+            'payment_term_label' => $this->resolvePaymentTermLabel($opportunity, $salesOrder),
             'settled_at' => null,
             'sales_name' => optional($opportunity->assignedUser)->display_name
                 ?: optional($opportunity->assignedUser)->user_name
@@ -123,6 +154,93 @@ class PurchaseOrderReportService
             'po_total_exclude' => $modalExcl,
             'po_total_include' => $modalIncl,
         ];
+    }
+
+    /**
+     * Nilai jual & PPh dari item Sales Order (bukan seluruh produk opportunity).
+     *
+     * @return array{0:float,1:float,2:float}
+     */
+    protected function sumSalesFromSalesOrder(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): array
+    {
+        $oppProducts = $opportunity->products->values();
+        $items = is_array($salesOrder->items) ? $salesOrder->items : [];
+        $payloadItems = data_get($salesOrder->agc_payload, 'items');
+        if ((! is_array($items) || $items === []) && is_array($payloadItems)) {
+            $items = $payloadItems;
+        }
+
+        $nilaiJualExcl = 0.0;
+        $nilaiJualIncl = 0.0;
+        $pph23 = 0.0;
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $qty = (float) ($item['qty'] ?? $item['quantity'] ?? 1);
+            if ($qty <= 0) {
+                continue;
+            }
+
+            $product = $this->matchOpportunityProduct($oppProducts, $item);
+            $unitExcl = (float) (
+                $item['price']
+                ?? $item['sell_exclude']
+                ?? $item['price_display']
+                ?? ($product['effective_sell_exclude'] ?? $product['sell_exclude'] ?? 0)
+            );
+            $unitIncl = isset($product['effective_sell_include'])
+                ? (float) $product['effective_sell_include']
+                : (isset($product['sell_include'])
+                    ? (float) $product['sell_include']
+                    : OpportunityProductPricing::includeFromExclude($unitExcl));
+            // Jika harga SO beda dari snapshot produk opp, include dihitung dari unit excl SO.
+            if ($product && abs($unitExcl - (float) ($product['effective_sell_exclude'] ?? $product['sell_exclude'] ?? 0)) > 0.009) {
+                $unitIncl = OpportunityProductPricing::includeFromExclude($unitExcl);
+            } elseif (! $product) {
+                $unitIncl = OpportunityProductPricing::includeFromExclude($unitExcl);
+            }
+
+            $pphUnit = (float) ($product['pph'] ?? 0);
+
+            $nilaiJualExcl += $qty * $unitExcl;
+            $nilaiJualIncl += $qty * $unitIncl;
+            $pph23 += $qty * $pphUnit;
+        }
+
+        return [
+            round($nilaiJualExcl, 2),
+            round($nilaiJualIncl, 2),
+            round($pph23, 2),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $oppProducts
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>|null
+     */
+    protected function matchOpportunityProduct(Collection $oppProducts, array $item): ?array
+    {
+        if (array_key_exists('index', $item) && $item['index'] !== null && $item['index'] !== '') {
+            $byIndex = $oppProducts->get((int) $item['index']);
+            if (is_array($byIndex)) {
+                return $byIndex;
+            }
+        }
+
+        $name = mb_strtolower(trim((string) ($item['name'] ?? '')));
+        if ($name === '') {
+            return null;
+        }
+
+        $matched = $oppProducts->first(
+            fn ($p) => is_array($p) && mb_strtolower(trim((string) ($p['name'] ?? ''))) === $name
+        );
+
+        return is_array($matched) ? $matched : null;
     }
 
     /**
@@ -169,14 +287,44 @@ class PurchaseOrderReportService
         });
     }
 
-    protected function resolveSoPaymentLabel(Opportunity $opportunity): string
-    {
-        $salesOrder = $opportunity->salesOrders->first();
-        if (! $salesOrder) {
+    protected function resolvePaymentTermLabel(
+        Opportunity $opportunity,
+        ?OpportunitySalesOrder $salesOrder = null
+    ): string {
+        $purchaseOrders = $salesOrder
+            ? $opportunity->purchaseOrders->where('sales_order_id', $salesOrder->id)
+            : $opportunity->purchaseOrders;
+
+        foreach ($purchaseOrders as $po) {
+            $fromPo = trim((string) ($po->report_top ?? ''));
+            if ($fromPo !== '') {
+                return $fromPo;
+            }
+        }
+
+        if ($salesOrder) {
+            $label = trim($salesOrder->paymentLabel());
+
+            return $label !== '' && $label !== '—' ? $label : '—';
+        }
+
+        foreach ($opportunity->purchaseOrders as $po) {
+            $linked = $po->salesOrder;
+            if (! $linked) {
+                continue;
+            }
+            $label = trim($linked->paymentLabel());
+            if ($label !== '' && $label !== '—') {
+                return $label;
+            }
+        }
+
+        $firstSo = $opportunity->salesOrders->first();
+        if (! $firstSo) {
             return '—';
         }
 
-        $label = trim($salesOrder->paymentLabel());
+        $label = trim($firstSo->paymentLabel());
 
         return $label !== '' && $label !== '—' ? $label : '—';
     }

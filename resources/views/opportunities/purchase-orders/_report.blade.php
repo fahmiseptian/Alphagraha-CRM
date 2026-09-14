@@ -40,6 +40,11 @@
                         <td class="sep">:</td>
                         <td class="val">{{ $report['customer_name'] }}</td>
                     </tr>
+                    <tr>
+                        <td class="lbl">Laporan</td>
+                        <td class="sep">:</td>
+                        <td class="val">{{ $report['scope_label'] ?? 'Keseluruhan' }}</td>
+                    </tr>
                 </table>
             </td>
             <td class="po-meta-right">

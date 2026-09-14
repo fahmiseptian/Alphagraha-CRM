@@ -254,7 +254,7 @@ class OpportunityController extends Controller
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'purchaseOrders.creator', 'purchaseOrders.vendor', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'purchaseOrders.creator', 'purchaseOrders.vendor', 'purchaseOrders.salesOrder', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator']);
 
         // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
         if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {

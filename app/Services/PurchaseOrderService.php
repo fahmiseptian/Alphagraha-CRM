@@ -21,7 +21,7 @@ class PurchaseOrderService
     ) {}
 
     /**
-     * Buat PO baru (1 PO = 1 vendor) beserta item & referensi harga; total dihitung server-side.
+     * Buat PO baru (1 PO = 1 vendor = 1 Sales Order) beserta item & referensi harga; total dihitung server-side.
      *
      * @param  list<array<string, mixed>>  $items
      */
@@ -32,17 +32,22 @@ class PurchaseOrderService
         string $paymentTerm = PurchaseOrder::PAYMENT_TOP,
         ?string $createdBy = null,
         ?int $vendorId = null,
-        ?string $vendorName = null
+        ?string $vendorName = null,
+        ?int $salesOrderId = null,
+        ?string $reportTop = null
     ): PurchaseOrder {
-        return DB::transaction(function () use ($opportunity, $number, $items, $paymentTerm, $createdBy, $vendorId, $vendorName) {
+        return DB::transaction(function () use ($opportunity, $number, $items, $paymentTerm, $createdBy, $vendorId, $vendorName, $salesOrderId, $reportTop) {
             [$vendorId, $vendorName] = $this->resolveVendor($vendorId, $vendorName);
+            $salesOrderId = $this->resolveSalesOrderId($opportunity, $salesOrderId);
 
             $po = PurchaseOrder::query()->create([
                 'opportunity_id' => $opportunity->id,
+                'sales_order_id' => $salesOrderId,
                 'number' => $number,
                 'vendor_id' => $vendorId,
                 'vendor_name' => $vendorName,
                 'payment_term' => $this->normalizePaymentTerm($paymentTerm),
+                'report_top' => $this->normalizeReportTop($reportTop),
                 'currency' => $opportunity->amount_currency ?: 'IDR',
                 'total' => 0,
                 'created_by' => $createdBy,
@@ -55,14 +60,15 @@ class PurchaseOrderService
                 ['opportunity_id' => $opportunity->id]
             );
 
-            return $po->fresh(['items.vendorQuotes', 'vendor']);
+            return $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
         });
     }
 
     /**
-     * Buat banyak PO sekaligus dari rencana pembelian.
+     * Buat banyak PO sekaligus dari rencana pembelian untuk satu Sales Order.
      * Satu vendor = satu PO; item dari produk berbeda digabung ke PO vendor yang sama.
      * Kondisi TOP/Cash mengikuti per PO (default dari master vendor).
+     * report_top sama untuk seluruh batch (isi kotak TOP di laporan PO).
      *
      * @param  list<array{number:string,vendor_id:int,vendor_name?:?string,payment_term?:string,items:list<array<string,mixed>>}>  $pos
      * @return list<PurchaseOrder>
@@ -70,10 +76,14 @@ class PurchaseOrderService
     public function createMany(
         Opportunity $opportunity,
         array $pos,
-        ?string $createdBy = null
+        ?string $createdBy = null,
+        ?int $salesOrderId = null,
+        ?string $reportTop = null
     ): array {
-        return DB::transaction(function () use ($opportunity, $pos, $createdBy) {
+        return DB::transaction(function () use ($opportunity, $pos, $createdBy, $salesOrderId, $reportTop) {
             $created = [];
+            $salesOrderId = $this->resolveSalesOrderId($opportunity, $salesOrderId);
+            $reportTop = $this->normalizeReportTop($reportTop);
 
             foreach (array_values($pos) as $poData) {
                 [$vendorId, $vendorName] = $this->resolveVendor(
@@ -87,17 +97,19 @@ class PurchaseOrderService
 
                 $po = PurchaseOrder::query()->create([
                     'opportunity_id' => $opportunity->id,
+                    'sales_order_id' => $salesOrderId,
                     'number' => trim((string) ($poData['number'] ?? '')),
                     'vendor_id' => $vendorId,
                     'vendor_name' => $vendorName,
                     'payment_term' => $term,
+                    'report_top' => $reportTop,
                     'currency' => $opportunity->amount_currency ?: 'IDR',
                     'total' => 0,
                     'created_by' => $createdBy,
                 ]);
 
                 $this->syncItems($po, $poData['items'] ?? [], $createdBy);
-                $created[] = $po->fresh(['items.vendorQuotes', 'vendor']);
+                $created[] = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
             }
 
             $this->syncOpportunityCostsFromPo($opportunity);
@@ -171,17 +183,32 @@ class PurchaseOrderService
         string $paymentTerm = PurchaseOrder::PAYMENT_TOP,
         ?string $updatedBy = null,
         ?int $vendorId = null,
-        ?string $vendorName = null
+        ?string $vendorName = null,
+        ?int $salesOrderId = null,
+        ?string $reportTop = null
     ): PurchaseOrder {
-        return DB::transaction(function () use ($purchaseOrder, $number, $items, $paymentTerm, $updatedBy, $vendorId, $vendorName) {
+        return DB::transaction(function () use ($purchaseOrder, $number, $items, $paymentTerm, $updatedBy, $vendorId, $vendorName, $salesOrderId, $reportTop) {
             [$vendorId, $vendorName] = $this->resolveVendor($vendorId, $vendorName);
 
-            $purchaseOrder->update([
+            $payload = [
                 'number' => $number,
                 'vendor_id' => $vendorId,
                 'vendor_name' => $vendorName,
                 'payment_term' => $this->normalizePaymentTerm($paymentTerm),
-            ]);
+            ];
+
+            if ($salesOrderId !== null) {
+                $opportunity = $purchaseOrder->opportunity()->first();
+                if ($opportunity) {
+                    $payload['sales_order_id'] = $this->resolveSalesOrderId($opportunity, $salesOrderId);
+                }
+            }
+
+            if ($reportTop !== null) {
+                $payload['report_top'] = $this->normalizeReportTop($reportTop);
+            }
+
+            $purchaseOrder->update($payload);
             $this->syncItems($purchaseOrder, $items, $updatedBy);
 
             $opportunity = $purchaseOrder->opportunity()->first();
@@ -193,8 +220,53 @@ class PurchaseOrderService
                 );
             }
 
-            return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor']);
+            return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
         });
+    }
+
+    /**
+     * Isi / ganti Sales Order terkait untuk PO yang sudah ada (backfill Purchasing).
+     */
+    public function attachSalesOrder(
+        Opportunity $opportunity,
+        PurchaseOrder $purchaseOrder,
+        int $salesOrderId
+    ): PurchaseOrder {
+        $salesOrderId = $this->resolveSalesOrderId($opportunity, $salesOrderId);
+        $purchaseOrder->update(['sales_order_id' => $salesOrderId]);
+
+        return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
+    }
+
+    /**
+     * Pastikan SO milik opportunity yang sama.
+     */
+    public function resolveSalesOrderId(Opportunity $opportunity, ?int $salesOrderId): int
+    {
+        if (! $salesOrderId) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'sales_order_id' => 'Pilih Sales Order terkait untuk Purchase Order ini.',
+            ]);
+        }
+
+        $exists = $opportunity->salesOrders()->whereKey($salesOrderId)->exists();
+        if (! $exists) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'sales_order_id' => 'Sales Order tidak ditemukan di opportunity ini.',
+            ]);
+        }
+
+        return $salesOrderId;
+    }
+
+    /**
+     * Label TOP untuk kotak laporan PO (contoh: TOP 30).
+     */
+    public function normalizeReportTop(?string $reportTop): ?string
+    {
+        $label = trim((string) $reportTop);
+
+        return $label !== '' ? mb_substr($label, 0, 50) : null;
     }
 
     /**

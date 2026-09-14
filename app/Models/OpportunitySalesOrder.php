@@ -67,6 +67,11 @@ class OpportunitySalesOrder extends Model
         return $this->hasMany(SalesOrderLog::class, 'sales_order_id')->orderByDesc('id');
     }
 
+    public function purchaseOrders(): HasMany
+    {
+        return $this->hasMany(PurchaseOrder::class, 'sales_order_id')->latest();
+    }
+
     /**
      * SO tidak boleh dihapus permanen — tetap ada di log Superadmin.
      */
@@ -161,11 +166,22 @@ class OpportunitySalesOrder extends Model
             $payload = is_array($this->agc_payload) ? $this->agc_payload : [];
             $payment = trim((string) ($payload['payment_method'] ?? $payload['payment'] ?? ''));
         }
+        if ($payment === '') {
+            return '—';
+        }
+
+        $lower = mb_strtolower($payment);
+        if (in_array($lower, ['cash', 'cbd'], true) || preg_match('/^top0$/i', $payment)) {
+            return 'CBD';
+        }
+        if ($lower === 'cod') {
+            return 'COD';
+        }
         if (preg_match('/^top(\d+)$/i', $payment, $m)) {
             return 'TOP '.$m[1];
         }
 
-        return $payment !== '' ? strtoupper($payment) : '—';
+        return strtoupper($payment);
     }
 
     public function statusSnapshot(): array
