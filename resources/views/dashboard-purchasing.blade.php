@@ -43,7 +43,7 @@
             <i class="bi bi-boxes text-lg"></i>
         </span>
         <span>
-            <span class="block text-sm font-semibold text-slate-800">Ketersediaan Vendor</span>
+            <span class="block text-sm font-semibold text-slate-800">Product</span>
             <span class="block text-xs text-slate-500">Cek stok & harga vendor</span>
         </span>
     </a>

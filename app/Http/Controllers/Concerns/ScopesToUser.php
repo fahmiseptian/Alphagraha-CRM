@@ -32,7 +32,7 @@ trait ScopesToUser
         }
 
         if ($user->canViewAllOpportunities()) {
-            if ($user->isPurchasing() || $user->isFinance()) {
+            if ($user->isPurchasing() || $user->isFinance() || $user->isInvoice()) {
                 $query->where($query->getModel()->getTable().'.stage', \App\Models\Espo\Opportunity::WON_STAGE);
             }
 

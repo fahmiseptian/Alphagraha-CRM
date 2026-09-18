@@ -2,6 +2,8 @@
 @php
     $canManagePo = auth()->user()->canManagePurchaseOrders()
         && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE;
+    $canApprovePo = auth()->user()->canApprovePurchaseOrder()
+        && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE;
     $canViewPo = auth()->user()->canViewPurchaseOrders()
         && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE;
     $poCurrency = $opportunity->amount_currency ?: 'IDR';
@@ -2589,6 +2591,7 @@
                                                     {{ $poIsCash ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600' }}">
                                                     {{ $po->paymentTermLabel() }}
                                                 </span>
+                                                <x-badge :color="$po->approvalBadgeColor()">{{ $po->approvalLabel() }}</x-badge>
                                                 <span class="text-sm text-slate-500">{{ money($poNode['modal_total'], $poCurrencyCode) }}</span>
                                                 <span class="text-xs text-slate-400">{{ $poItems->count() }} item</span>
                                             </div>
@@ -2596,7 +2599,41 @@
                                                 {{ optional($po->creator)->display_name ?: '—' }}
                                                 &middot;
                                                 {{ $po->created_at?->translatedFormat('d M Y H:i') }}
+                                                @if ($po->isApproved() && $po->approver)
+                                                    &middot; Approved {{ $po->approver->display_name }}
+                                                    @if ($po->approved_at)
+                                                        · {{ $po->approved_at->translatedFormat('d M Y H:i') }}
+                                                    @endif
+                                                @elseif ($po->isApprovalRejected() && $po->approver)
+                                                    &middot; Ditolak {{ $po->approver->display_name }}
+                                                @endif
                                             </p>
+                                            @if ($canApprovePo && $po->isApprovalPending())
+                                                <div class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
+                                                    <form method="POST" action="{{ route('opportunities.purchase-orders.approve', [$opportunity, $po]) }}"
+                                                          class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                                                        @csrf
+                                                        <div class="min-w-[10rem] flex-1">
+                                                            <label class="crm-label text-[10px] text-amber-800">Catatan approve (opsional)</label>
+                                                            <input type="text" name="note" class="crm-field text-sm" placeholder="Catatan…">
+                                                        </div>
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">
+                                                            <i class="bi bi-check-lg"></i> Approve
+                                                        </button>
+                                                    </form>
+                                                    <form method="POST" action="{{ route('opportunities.purchase-orders.reject', [$opportunity, $po]) }}"
+                                                          class="flex items-end gap-2"
+                                                          onsubmit="return confirm(@js('Tolak Purchase Order '.$po->number.'?'))">
+                                                        @csrf
+                                                        <input type="text" name="note" class="crm-field w-36 text-sm" placeholder="Alasan…">
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                                                            <i class="bi bi-x-lg"></i> Tolak
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            @endif
                                             @if ($canManagePo && ! $po->sales_order_id)
                                                 <form method="POST"
                                                       action="{{ route('opportunities.purchase-orders.attach-sales-order', [$opportunity, $po]) }}"
@@ -2784,6 +2821,7 @@
                                                     'bg-amber-50 text-amber-700' => $poFlatIsCash,
                                                     'bg-slate-100 text-slate-600' => ! $poFlatIsCash,
                                                 ])>{{ $po->paymentTermLabel() }}</span>
+                                                <x-badge :color="$po->approvalBadgeColor()">{{ $po->approvalLabel() }}</x-badge>
                                                 <span class="text-sm font-semibold tabular-nums text-slate-800">{{ money($po->totalInclude(), $poFlatCurrency) }}</span>
                                                 <span class="text-xs text-slate-400">{{ $poFlatItemCount }} item</span>
                                             </div>
@@ -2791,7 +2829,41 @@
                                                 {{ optional($po->creator)->display_name ?: '—' }}
                                                 &middot;
                                                 {{ $po->created_at?->translatedFormat('d M Y H:i') }}
+                                                @if ($po->isApproved() && $po->approver)
+                                                    &middot; Approved {{ $po->approver->display_name }}
+                                                    @if ($po->approved_at)
+                                                        · {{ $po->approved_at->translatedFormat('d M Y H:i') }}
+                                                    @endif
+                                                @elseif ($po->isApprovalRejected() && $po->approver)
+                                                    &middot; Ditolak {{ $po->approver->display_name }}
+                                                @endif
                                             </p>
+                                            @if ($canApprovePo && $po->isApprovalPending())
+                                                <div class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
+                                                    <form method="POST" action="{{ route('opportunities.purchase-orders.approve', [$opportunity, $po]) }}"
+                                                          class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                                                        @csrf
+                                                        <div class="min-w-[10rem] flex-1">
+                                                            <label class="crm-label text-[10px] text-amber-800">Catatan approve (opsional)</label>
+                                                            <input type="text" name="note" class="crm-field text-sm" placeholder="Catatan…">
+                                                        </div>
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">
+                                                            <i class="bi bi-check-lg"></i> Approve
+                                                        </button>
+                                                    </form>
+                                                    <form method="POST" action="{{ route('opportunities.purchase-orders.reject', [$opportunity, $po]) }}"
+                                                          class="flex items-end gap-2"
+                                                          onsubmit="return confirm(@js('Tolak Purchase Order '.$po->number.'?'))">
+                                                        @csrf
+                                                        <input type="text" name="note" class="crm-field w-36 text-sm" placeholder="Alasan…">
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                                                            <i class="bi bi-x-lg"></i> Tolak
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            @endif
                                             @if ($canManagePo && ! $po->sales_order_id)
                                                 <form method="POST"
                                                       action="{{ route('opportunities.purchase-orders.attach-sales-order', [$opportunity, $po]) }}"

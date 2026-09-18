@@ -129,14 +129,16 @@
                                 : '—';
                         @endphp
                         <tr>
-                            <td>
-                                <a href="{{ $poUrl }}" class="font-medium text-brand-600 hover:text-brand-700">
+                            <td class="max-w-[18rem]">
+                                <a href="{{ $poUrl }}"
+                                   class="block truncate font-medium text-brand-600 hover:text-brand-700"
+                                   title="{{ $opp->name ?: '—' }}">
                                     {{ $opp->name ?: '—' }}
                                 </a>
                                 @if ($opp->account?->name)
-                                    <div class="text-xs text-slate-400">{{ $opp->account->name }}</div>
+                                    <div class="truncate text-xs text-slate-400" title="{{ $opp->account->name }}">{{ $opp->account->name }}</div>
                                 @elseif ($opp->company)
-                                    <div class="text-xs text-slate-400">{{ $opp->company }}</div>
+                                    <div class="truncate text-xs text-slate-400" title="{{ $opp->company }}">{{ $opp->company }}</div>
                                 @endif
                             </td>
                             <td class="text-slate-600">

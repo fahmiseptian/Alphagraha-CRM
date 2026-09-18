@@ -103,32 +103,19 @@
                 if ($user->canViewCustomers()) {
                     $nav[] = ['customers.index', 'Customers', 'bi-people'];
                 }
-                if ($user->canCreateOpportunity() || ($user->canViewOpportunities() && ! $user->isPurchasing() && ! $user->isFinance())) {
+                if ($user->canCreateOpportunity() || ($user->canViewOpportunities() && ! $user->isPurchasing() && ! $user->isFinance() && ! $user->isInvoice())) {
                     $nav[] = ['leads.index', 'Leads', 'bi-funnel'];
                 }
-                if ($user->canViewOpportunities() && ! $user->isFinance()) {
+                if ($user->canViewOpportunities() && ! $user->isFinance() && ! $user->isInvoice()) {
                     $nav[] = $user->isPurchasing()
                         ? ['opportunities.index', 'Closed Won', 'bi-trophy']
                         : ['opportunities.index', 'Opportunities', 'bi-briefcase'];
                 }
                 if ($user->canViewSalesOrders()) {
-                    $nav[] = ['sales-orders.index', 'SO', 'bi-receipt'];
+                    $nav[] = ['sales-orders.index', 'Sales Order', 'bi-receipt'];
                 }
                 if ($user->canViewPurchaseOrders()) {
-                    $nav[] = ['purchase-orders.index', 'PO', 'bi-cart-check'];
-                }
-                $catalogNav = [];
-                if ($user->canManageBrands() && ! $user->canAccessAdministration()) {
-                    $catalogNav[] = ['brands.index', 'Brands', 'bi-tags'];
-                }
-                if ($user->canManageCategories() && ! $user->canAccessAdministration()) {
-                    $catalogNav[] = ['categories.index', 'Categories', 'bi-folder'];
-                }
-                if ($user->canManageVendors() && ! $user->canAccessAdministration()) {
-                    $catalogNav[] = ['vendors.index', 'Vendors', 'bi-truck'];
-                }
-                if ($user->canManageVendorStocks()) {
-                    $nav[] = ['vendor-stocks.index', 'Ketersediaan Vendor', 'bi-boxes'];
+                    $nav[] = ['purchase-orders.index', 'Purchase Order', 'bi-cart-check'];
                 }
                 if ($user->canCreateOpportunity() || $user->isAdmin()) {
                     $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
@@ -136,6 +123,26 @@
                 if ($user->canCreateQuotation()) {
                     $nav[] = ['quotations.index', 'Quotations', 'bi-file-earmark-text'];
                 }
+
+                $masterDataNav = [];
+                if ($user->canManageBrands()) {
+                    $masterDataNav[] = ['brands.index', 'Brands', 'bi-tags'];
+                }
+                if ($user->canManageCategories()) {
+                    $masterDataNav[] = ['categories.index', 'Categories', 'bi-folder'];
+                }
+                if ($user->canManageVendorStocks()) {
+                    $masterDataNav[] = ['vendor-stocks.index', 'Product', 'bi-boxes'];
+                }
+                if ($user->canManageVendors()) {
+                    $masterDataNav[] = ['vendors.index', 'Vendors', 'bi-truck'];
+                }
+                if ($user->canManageIndustries()) {
+                    $masterDataNav[] = ['industries.index', 'Industries', 'bi-buildings'];
+                }
+                $masterDataOpen = collect($masterDataNav)->contains(
+                    fn (array $item) => request()->routeIs(Str::before($item[0], '.').'.*') || request()->routeIs($item[0])
+                );
             @endphp
             @foreach ($nav as [$route, $label, $icon])
                 @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
@@ -147,19 +154,33 @@
                 </a>
             @endforeach
 
-            @if (! empty($catalogNav))
-                <div class="crm-sidebar-label px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    Master Data
+            @if (! empty($masterDataNav))
+                @php $masterDataFirstRoute = $masterDataNav[0][0]; @endphp
+                <a href="{{ route($masterDataFirstRoute) }}" title="Master Data"
+                   class="crm-sidebar-collapsed-only crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ $masterDataOpen ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-database shrink-0 text-base"></i>
+                </a>
+                <div x-data="{ open: {{ $masterDataOpen ? 'true' : 'false' }} }" class="crm-sidebar-expanded-only space-y-0.5">
+                    <button type="button" @click="open = !open"
+                            class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
+                                   {{ $masterDataOpen ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                        <i class="bi bi-database shrink-0 text-base"></i>
+                        <span class="flex-1 text-left">Master Data</span>
+                        <i class="bi text-xs transition-transform" :class="open ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
+                    </button>
+                    <div x-show="open" x-cloak class="ml-3 space-y-0.5 border-l border-white/10 pl-3">
+                        @foreach ($masterDataNav as [$route, $label, $icon])
+                            @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
+                            <a href="{{ route($route) }}" title="{{ $label }}"
+                               class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                      {{ $active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                                <i class="bi {{ $icon }} text-xs"></i>
+                                <span>{{ $label }}</span>
+                            </a>
+                        @endforeach
+                    </div>
                 </div>
-                @foreach ($catalogNav as [$route, $label, $icon])
-                    @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
-                    <a href="{{ route($route) }}" title="{{ $label }}"
-                       class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
-                              {{ $active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
-                        <i class="bi {{ $icon }} shrink-0 text-base"></i>
-                        <span class="crm-sidebar-label truncate">{{ $label }}</span>
-                    </a>
-                @endforeach
             @endif
 
             @if (auth()->user()->canAccessAdministration())
@@ -180,35 +201,11 @@
                     <i class="bi bi-person-lines-fill shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Contacts</span>
                 </a>
-                <a href="{{ route('brands.index') }}" title="Brands"
-                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
-                          {{ request()->routeIs('brands.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-tags shrink-0 text-base"></i>
-                    <span class="crm-sidebar-label truncate">Brands</span>
-                </a>
-                <a href="{{ route('categories.index') }}" title="Categories"
-                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
-                          {{ request()->routeIs('categories.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-folder shrink-0 text-base"></i>
-                    <span class="crm-sidebar-label truncate">Categories</span>
-                </a>
-                <a href="{{ route('industries.index') }}" title="Industries"
-                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
-                          {{ request()->routeIs('industries.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-buildings shrink-0 text-base"></i>
-                    <span class="crm-sidebar-label truncate">Industries</span>
-                </a>
-                <a href="{{ route('vendors.index') }}" title="Vendors"
-                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
-                          {{ request()->routeIs('vendors.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
-                    <i class="bi bi-truck shrink-0 text-base"></i>
-                    <span class="crm-sidebar-label truncate">Vendors</span>
-                </a>
-                <a href="{{ route('sales-order-logs.index') }}" title="Log SO"
+                <a href="{{ route('sales-order-logs.index') }}" title="Log Sales Order"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
                           {{ request()->routeIs('sales-order-logs.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
                     <i class="bi bi-journal-text shrink-0 text-base"></i>
-                    <span class="crm-sidebar-label truncate">Log SO</span>
+                    <span class="crm-sidebar-label truncate">Log Sales Order</span>
                 </a>
                 <a href="{{ route('opportunity-logs.index') }}" title="Log Opportunity"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
@@ -281,13 +278,13 @@
                            class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
                                   {{ request()->routeIs('settings.po.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
                             <i class="bi bi-cart-check text-xs"></i>
-                            <span>PO</span>
+                            <span>Purchase Order</span>
                         </a>
                         <a href="{{ route('settings.terms.edit') }}"
                            class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
                                   {{ request()->routeIs('settings.terms.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
                             <i class="bi bi-file-text text-xs"></i>
-                            <span>Terms QO</span>
+                            <span>Terms Quotation</span>
                         </a>
                         <a href="{{ route('settings.shipping.edit') }}"
                            class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition

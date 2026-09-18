@@ -14,7 +14,7 @@
     <x-page-header title="Sales Orders" :description="$salesOrders->total().' SO · '.($periodLabel ?? 'tahun ini')">
         <x-slot:actions>
             @if (auth()->user()?->canViewSalesOrderLogs())
-                <x-btn href="{{ route('sales-order-logs.index') }}" variant="secondary" icon="bi-journal-text">Log SO</x-btn>
+                <x-btn href="{{ route('sales-order-logs.index') }}" variant="secondary" icon="bi-journal-text">Log Sales Order</x-btn>
             @endif
             <x-btn href="{{ route('opportunities.index') }}" icon="bi bi-briefcase">Lihat Opportunity</x-btn>
         </x-slot:actions>
@@ -103,7 +103,7 @@
                 <thead>
                     <tr>
                         <th>No. SO / PSO</th>
-                        <th>Opportunity</th>
+                        <th>Customer</th>
                         @if ($canFilterSales ?? false)
                             <th>Sales</th>
                         @endif
@@ -135,16 +135,10 @@
                                         &middot;
                                     @endif
                                     {{ $so->paymentLabel() }}
-                                    @if ($so->po_number)
-                                        &middot; PO {{ $so->po_number }}
-                                    @endif
                                 </div>
                             </td>
                             <td>
-                                <span class="font-medium text-slate-800">{{ $so->opportunity?->name ?? '—' }}</span>
-                                @if ($so->opportunity?->account?->name)
-                                    <div class="text-xs text-slate-400">{{ $so->opportunity->account->name }}</div>
-                                @endif
+                                <span class="font-medium text-slate-800">{{ $so->opportunity?->account?->name ?: '—' }}</span>
                             </td>
                             @if ($canFilterSales ?? false)
                                 <td class="text-slate-600">

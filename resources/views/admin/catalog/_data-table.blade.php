@@ -6,16 +6,16 @@
     $confirmMessage = $confirmMessage ?? 'Hapus data ini?';
 @endphp
 
-<div class="crm-bstable">
+<div class="crm-bstable crm-bstable--catalog">
     <table id="{{ $tableId }}"
            class="crm-table"
            data-search-placeholder="{{ $searchPlaceholder }}">
         <thead>
             <tr>
                 <th data-field="name" data-sortable="true">Nama</th>
-                <th data-field="sort_order" data-sortable="true" data-align="right" data-width="100">Urutan</th>
-                <th data-field="status" data-sortable="true" data-width="120">Status</th>
-                <th data-field="actions" data-searchable="false" data-sortable="false" data-align="right" data-width="110"></th>
+                <th data-field="sort_order" data-sortable="true" data-align="center" data-halign="center" data-width="140">Urutan</th>
+                <th data-field="status" data-sortable="true" data-align="center" data-halign="center" data-width="160">Status</th>
+                <th data-field="actions" data-searchable="false" data-sortable="false" data-align="right" data-halign="right" data-width="120"></th>
             </tr>
         </thead>
         <tbody>
@@ -30,7 +30,7 @@
                             <x-badge color="slate">Nonaktif</x-badge>
                         @endif
                     </td>
-                    <td class="text-right">
+                    <td>
                         <a href="{{ route($editRoute, $item) }}" class="crm-icon-btn" title="Edit"><i class="bi bi-pencil"></i></a>
                         <form method="POST" action="{{ route($destroyRoute, $item) }}" class="inline" onsubmit="return confirm(@json($confirmMessage))">
                             @csrf @method('DELETE')
@@ -46,6 +46,22 @@
 @once
     @push('styles')
         @include('partials.bootstrap-table-assets')
+        <style>
+            /* Paksa rata tengah — override default .crm-table th { text-align:left } */
+            .crm-bstable--catalog th[data-field="sort_order"],
+            .crm-bstable--catalog th[data-field="sort_order"] .th-inner,
+            .crm-bstable--catalog td[data-field="sort_order"],
+            .crm-bstable--catalog th[data-field="status"],
+            .crm-bstable--catalog th[data-field="status"] .th-inner,
+            .crm-bstable--catalog td[data-field="status"] {
+                text-align: center !important;
+            }
+            .crm-bstable--catalog th[data-field="actions"],
+            .crm-bstable--catalog th[data-field="actions"] .th-inner,
+            .crm-bstable--catalog td[data-field="actions"] {
+                text-align: right !important;
+            }
+        </style>
     @endpush
     @push('scripts')
         <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.6/dist/bootstrap-table.min.js"></script>
@@ -71,6 +87,30 @@
                             paginationHAlign: 'right',
                             paginationDetailHAlign: 'left',
                             formatSearch: function () { return placeholder; },
+                            onPostHeader: function () {
+                                $table.find('th[data-field="sort_order"], th[data-field="status"]').each(function () {
+                                    this.style.setProperty('text-align', 'center', 'important');
+                                    var inner = this.querySelector('.th-inner');
+                                    if (inner) inner.style.setProperty('text-align', 'center', 'important');
+                                });
+                                $table.find('th[data-field="actions"]').each(function () {
+                                    this.style.setProperty('text-align', 'right', 'important');
+                                    var inner = this.querySelector('.th-inner');
+                                    if (inner) inner.style.setProperty('text-align', 'right', 'important');
+                                });
+                            },
+                            onPostBody: function () {
+                                $table.find('td').each(function () {
+                                    var field = $(this).attr('data-field')
+                                        || $(this).closest('table').find('thead th').eq($(this).index()).data('field');
+                                    if (field === 'sort_order' || field === 'status') {
+                                        this.style.setProperty('text-align', 'center', 'important');
+                                    }
+                                    if (field === 'actions') {
+                                        this.style.setProperty('text-align', 'right', 'important');
+                                    }
+                                });
+                            },
                         });
                     });
 

@@ -192,8 +192,10 @@
                         @foreach ($opportunities as $opp)
                             @php $hasDuplicates = ! empty($duplicateMap[$opp->id] ?? []); @endphp
                             <tr @class(['bg-amber-50/40' => $hasDuplicates])>
-                                <td>
-                                    <a href="{{ route('opportunities.show', $opp) }}" class="font-medium text-slate-800 hover:text-brand-600">
+                                <td class="max-w-[18rem]">
+                                    <a href="{{ route('opportunities.show', $opp) }}"
+                                       class="block truncate font-medium text-slate-800 hover:text-brand-600"
+                                       title="{{ $opp->name ?: '—' }}">
                                         {{ $opp->name ?: '—' }}
                                     </a>
                                     @if ($hasDuplicates)

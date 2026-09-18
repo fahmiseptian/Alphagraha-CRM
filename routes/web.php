@@ -123,6 +123,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'store'])->name('opportunities.purchase-orders.store');
     Route::put('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'update'])->name('opportunities.purchase-orders.update');
     Route::put('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}/sales-order', [OpportunityPurchaseOrderController::class, 'attachSalesOrder'])->name('opportunities.purchase-orders.attach-sales-order');
+    Route::post('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}/approve', [OpportunityPurchaseOrderController::class, 'approve'])->name('opportunities.purchase-orders.approve');
+    Route::post('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}/reject', [OpportunityPurchaseOrderController::class, 'reject'])->name('opportunities.purchase-orders.reject');
     Route::delete('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'destroy'])->name('opportunities.purchase-orders.destroy');
     Route::put('/opportunities/{opportunity}/shipping-cost', [OpportunityPurchaseOrderController::class, 'updateShipping'])->name('opportunities.shipping-cost.update');
 

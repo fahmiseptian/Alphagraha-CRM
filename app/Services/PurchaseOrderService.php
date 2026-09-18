@@ -6,6 +6,7 @@ use App\Models\Espo\Opportunity;
 use App\Models\OpportunityLog;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorStock;
 use App\Support\CustomerTop;
@@ -51,16 +52,23 @@ class PurchaseOrderService
                 'currency' => $opportunity->amount_currency ?: 'IDR',
                 'total' => 0,
                 'created_by' => $createdBy,
+                'approval_status' => $this->initialApprovalStatus($createdBy),
+                'approved_by' => $this->initialApproverId($createdBy),
+                'approved_at' => $this->initialApprovedAt($createdBy),
             ]);
 
             $this->syncItems($po, $items, $createdBy);
             $this->syncOpportunityCostsFromPo($opportunity);
-            app(NotificationService::class)->markActioned(
+            $notifications = app(NotificationService::class);
+            $notifications->markActioned(
                 \App\Models\CrmNotification::TYPE_SALES_ORDER_CREATED,
                 ['opportunity_id' => $opportunity->id]
             );
 
-            return $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
+            $po = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'creator']);
+            $this->dispatchApprovalNotifications($po, $opportunity);
+
+            return $po;
         });
     }
 
@@ -106,17 +114,25 @@ class PurchaseOrderService
                     'currency' => $opportunity->amount_currency ?: 'IDR',
                     'total' => 0,
                     'created_by' => $createdBy,
+                    'approval_status' => $this->initialApprovalStatus($createdBy),
+                    'approved_by' => $this->initialApproverId($createdBy),
+                    'approved_at' => $this->initialApprovedAt($createdBy),
                 ]);
 
                 $this->syncItems($po, $poData['items'] ?? [], $createdBy);
-                $created[] = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
+                $created[] = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'creator']);
             }
 
             $this->syncOpportunityCostsFromPo($opportunity);
-            app(NotificationService::class)->markActioned(
+            $notifications = app(NotificationService::class);
+            $notifications->markActioned(
                 \App\Models\CrmNotification::TYPE_SALES_ORDER_CREATED,
                 ['opportunity_id' => $opportunity->id]
             );
+
+            foreach ($created as $po) {
+                $this->dispatchApprovalNotifications($po, $opportunity);
+            }
 
             return $created;
         });
@@ -635,5 +651,88 @@ class PurchaseOrderService
         return $paymentTerm === PurchaseOrder::PAYMENT_CASH
             ? PurchaseOrder::PAYMENT_CASH
             : PurchaseOrder::PAYMENT_TOP;
+    }
+
+    public function approve(PurchaseOrder $purchaseOrder, Opportunity $opportunity, string $approvedBy, ?string $note = null): PurchaseOrder
+    {
+        if (! $purchaseOrder->isApprovalPending()) {
+            abort(422, 'Purchase Order tidak dalam status menunggu approval.');
+        }
+
+        $purchaseOrder->forceFill([
+            'approval_status' => PurchaseOrder::APPROVAL_APPROVED,
+            'approved_by' => $approvedBy,
+            'approved_at' => now(),
+            'approval_note' => filled($note) ? trim($note) : null,
+        ])->save();
+
+        $notifications = app(NotificationService::class);
+        $notifications->markPurchaseOrderApprovalActioned($purchaseOrder->id);
+        $notifications->notifyPurchaseOrderApproved($purchaseOrder->fresh(['salesOrder', 'vendor']), $opportunity, $note);
+
+        return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'approver']);
+    }
+
+    public function reject(PurchaseOrder $purchaseOrder, Opportunity $opportunity, string $rejectedBy, ?string $note = null): PurchaseOrder
+    {
+        if (! $purchaseOrder->isApprovalPending()) {
+            abort(422, 'Purchase Order tidak dalam status menunggu approval.');
+        }
+
+        $purchaseOrder->forceFill([
+            'approval_status' => PurchaseOrder::APPROVAL_REJECTED,
+            'approved_by' => $rejectedBy,
+            'approved_at' => now(),
+            'approval_note' => filled($note) ? trim($note) : null,
+        ])->save();
+
+        $notifications = app(NotificationService::class);
+        $notifications->markPurchaseOrderApprovalActioned($purchaseOrder->id);
+        $notifications->notifyPurchaseOrderRejected($purchaseOrder->fresh(['salesOrder', 'vendor', 'creator']), $opportunity, $note);
+
+        return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'approver']);
+    }
+
+    protected function creatorIsSuperAdmin(?string $createdBy): bool
+    {
+        if (! filled($createdBy)) {
+            return false;
+        }
+
+        $creator = User::query()->whereKey($createdBy)->first();
+
+        return (bool) $creator?->isSuperAdmin();
+    }
+
+    protected function initialApprovalStatus(?string $createdBy): string
+    {
+        return $this->creatorIsSuperAdmin($createdBy)
+            ? PurchaseOrder::APPROVAL_APPROVED
+            : PurchaseOrder::APPROVAL_PENDING;
+    }
+
+    protected function initialApproverId(?string $createdBy): ?string
+    {
+        return $this->creatorIsSuperAdmin($createdBy) ? $createdBy : null;
+    }
+
+    protected function initialApprovedAt(?string $createdBy): ?Carbon
+    {
+        return $this->creatorIsSuperAdmin($createdBy) ? now() : null;
+    }
+
+    protected function dispatchApprovalNotifications(PurchaseOrder $purchaseOrder, Opportunity $opportunity): void
+    {
+        $notifications = app(NotificationService::class);
+
+        if ($purchaseOrder->isApprovalPending()) {
+            $notifications->notifyPurchaseOrderApprovalRequested($purchaseOrder, $opportunity);
+
+            return;
+        }
+
+        if ($purchaseOrder->isApproved()) {
+            $notifications->notifyPurchaseOrderApproved($purchaseOrder, $opportunity);
+        }
     }
 }

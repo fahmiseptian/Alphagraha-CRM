@@ -32,6 +32,7 @@ class OpportunityPurchaseOrderController extends Controller
         $opportunity->load([
             'account',
             'purchaseOrders.creator',
+            'purchaseOrders.approver',
             'purchaseOrders.vendor',
             'purchaseOrders.salesOrder',
             'purchaseOrders.items.vendorQuotes.vendor',
@@ -118,7 +119,7 @@ class OpportunityPurchaseOrderController extends Controller
 
             return back()->with(
                 'success',
-                "Berhasil membuat {$count} PO per vendor ({$numbers}). Total modal per produk di-mirror ke opportunity."
+                "Berhasil membuat {$count} PO per vendor ({$numbers}). Menunggu approval Superadmin. Total modal per produk di-mirror ke opportunity."
             );
         }
 
@@ -136,7 +137,11 @@ class OpportunityPurchaseOrderController extends Controller
             $data['report_top'] ?? null
         );
 
-        return back()->with('success', 'Purchase Order berhasil ditambahkan. Total per produk di-mirror ke modal opportunity & ketersediaan vendor diperbarui.');
+        $message = auth()->user()?->isSuperAdmin()
+            ? 'Purchase Order berhasil ditambahkan dan otomatis approved.'
+            : 'Purchase Order berhasil ditambahkan dan menunggu approval Superadmin.';
+
+        return back()->with('success', $message.' Total per produk di-mirror ke modal opportunity & ketersediaan vendor diperbarui.');
     }
 
     public function update(Request $request, Opportunity $opportunity, PurchaseOrder $purchaseOrder)
@@ -189,6 +194,44 @@ class OpportunityPurchaseOrderController extends Controller
         );
 
         return back()->with('success', 'Sales Order terkait berhasil disimpan untuk PO '.$purchaseOrder->number.'.');
+    }
+
+    public function approve(Request $request, Opportunity $opportunity, PurchaseOrder $purchaseOrder)
+    {
+        $this->authorizeApprove($opportunity);
+        $this->ensureBelongsToOpportunity($opportunity, $purchaseOrder);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $this->purchaseOrders->approve(
+            $purchaseOrder,
+            $opportunity,
+            (string) auth()->id(),
+            $data['note'] ?? null
+        );
+
+        return back()->with('success', 'Purchase Order '.$purchaseOrder->number.' disetujui. Sales terkait telah dinotifikasi.');
+    }
+
+    public function reject(Request $request, Opportunity $opportunity, PurchaseOrder $purchaseOrder)
+    {
+        $this->authorizeApprove($opportunity);
+        $this->ensureBelongsToOpportunity($opportunity, $purchaseOrder);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $this->purchaseOrders->reject(
+            $purchaseOrder,
+            $opportunity,
+            (string) auth()->id(),
+            $data['note'] ?? null
+        );
+
+        return back()->with('success', 'Purchase Order '.$purchaseOrder->number.' ditolak.');
     }
 
     public function destroy(Opportunity $opportunity, PurchaseOrder $purchaseOrder)
@@ -617,6 +660,21 @@ class OpportunityPurchaseOrderController extends Controller
 
         if (! $user || ! $user->canManagePurchaseOrders()) {
             abort(403, 'Hanya Purchasing / Superadmin yang dapat mengelola Purchase Order.');
+        }
+
+        if ($opportunity->stage !== Opportunity::WON_STAGE) {
+            abort(403, 'Purchase Order hanya untuk opportunity Closed Won.');
+        }
+
+        $this->authorizeAccess($opportunity);
+    }
+
+    protected function authorizeApprove(Opportunity $opportunity): void
+    {
+        $user = auth()->user();
+
+        if (! $user || ! $user->canApprovePurchaseOrder()) {
+            abort(403, 'Hanya Superadmin yang dapat menyetujui Purchase Order.');
         }
 
         if ($opportunity->stage !== Opportunity::WON_STAGE) {

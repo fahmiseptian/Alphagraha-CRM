@@ -1,8 +1,8 @@
 @extends('layouts.app')
-@section('title', 'Ketersediaan Vendor')
+@section('title', 'Product')
 
 @section('content')
-<x-page-header title="Ketersediaan Vendor" :description="$stocks->total().' data harga & status barang dari vendor'">
+<x-page-header title="Product" :description="$stocks->total().' data harga & status barang dari vendor'">
     <x-slot:actions>
         <x-btn href="{{ route('vendor-stocks.create') }}" icon="bi-plus-lg">Tambah ketersediaan</x-btn>
     </x-slot:actions>

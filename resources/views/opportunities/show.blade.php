@@ -37,6 +37,47 @@
         @if (auth()->user()->canEditOpportunityFully() || (auth()->user()->isPurchasing() && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE))
             <x-btn href="{{ route('opportunities.edit', $opportunity) }}" variant="secondary" icon="bi-pencil">Edit</x-btn>
         @endif
+        @if (auth()->user()?->canViewPurchaseOrders() && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE)
+            <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+                <button type="button" @click="open = !open"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    <i class="bi bi-file-earmark-pdf"></i> Laporan
+                    <i class="bi bi-chevron-down text-xs"></i>
+                </button>
+                <div x-show="open" x-cloak
+                     class="absolute right-0 z-30 mt-1 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                    <p class="border-b border-slate-100 px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                        Preview / PDF
+                    </p>
+                    <div class="flex items-center gap-1 px-2 py-1.5 hover:bg-slate-50">
+                        <a href="{{ route('opportunities.purchase-orders.preview', $opportunity) }}" target="_blank"
+                           class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700">
+                            <i class="bi bi-collection text-slate-400"></i>
+                            <span class="truncate">Keseluruhan</span>
+                        </a>
+                        <a href="{{ route('opportunities.purchase-orders.pdf', $opportunity) }}"
+                           class="rounded p-1.5 text-red-500 hover:bg-red-50" title="PDF keseluruhan">
+                            <i class="bi bi-file-earmark-pdf"></i>
+                        </a>
+                    </div>
+                    @foreach (($opportunity->salesOrders ?? collect()) as $soOpt)
+                        <div class="flex items-center gap-1 border-t border-slate-50 px-2 py-1.5 hover:bg-slate-50">
+                            <a href="{{ route('opportunities.purchase-orders.preview', ['opportunity' => $opportunity, 'sales_order_id' => $soOpt->id]) }}"
+                               target="_blank"
+                               class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-700">
+                                <i class="bi bi-receipt text-slate-400"></i>
+                                <span class="truncate">Per SO · {{ $soOpt->displayNumber() }}</span>
+                            </a>
+                            <a href="{{ route('opportunities.purchase-orders.pdf', ['opportunity' => $opportunity, 'sales_order_id' => $soOpt->id]) }}"
+                               class="rounded p-1.5 text-red-500 hover:bg-red-50"
+                               title="PDF {{ $soOpt->displayNumber() }}">
+                                <i class="bi bi-file-earmark-pdf"></i>
+                            </a>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
         @if (auth()->user()?->canViewOpportunityLogs())
             <x-btn href="#activity-log" variant="secondary" icon="bi-clock-history">Riwayat</x-btn>
         @endif

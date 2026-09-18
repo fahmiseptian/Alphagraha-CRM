@@ -10,9 +10,12 @@ use App\Models\Espo\Account;
 use App\Models\Espo\EspoUser;
 use App\Models\Espo\Lead;
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunityEntertainment;
+use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Models\UserProfile;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -34,6 +37,14 @@ class DashboardController extends Controller
 
         if ($user->isPurchasing()) {
             return $this->purchasingDashboard($period, $periodRange, $periodLabel);
+        }
+
+        if ($user->isFinance()) {
+            return $this->financeDashboard($period, $periodRange, $periodLabel);
+        }
+
+        if ($user->isInvoice()) {
+            return $this->invoiceDashboard($period, $periodRange, $periodLabel);
         }
 
         $leaderboardPeriod = $request->get('leaderboard_period', $period);
@@ -243,6 +254,177 @@ class DashboardController extends Controller
             'poPeriodCount',
             'recentPos'
         ));
+    }
+
+    /**
+     * Dashboard Finance: fokus invoice, pembayaran, DO, dan entertainment.
+     */
+    protected function financeDashboard(string $period, ?array $periodRange, string $periodLabel)
+    {
+        $soBase = $this->closedWonSalesOrdersQuery($periodRange);
+
+        $needsInvoiceQuery = $this->scopeSalesOrdersMissingInvoice(clone $soBase);
+        $needsInvoiceCount = (clone $needsInvoiceQuery)->count();
+        $needsInvoice = $needsInvoiceQuery
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->orderByDesc('created_at')
+            ->limit(30)
+            ->get();
+
+        $unpaidQuery = $this->scopeSalesOrdersUnpaid(clone $soBase);
+        $unpaidCount = (clone $unpaidQuery)->count();
+        $unpaidOrders = $unpaidQuery
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        $deliveryPendingQuery = $this->scopeSalesOrdersDeliveryPending(clone $soBase);
+        $deliveryPendingCount = (clone $deliveryPendingQuery)->count();
+
+        $paidCount = $this->scopeSalesOrdersPaid(clone $soBase)->count();
+        $soPeriodCount = (clone $soBase)->count();
+
+        $entertainmentQuery = OpportunityEntertainment::query()
+            ->where('status', OpportunityEntertainment::STATUS_PENDING)
+            ->whereHas('opportunity', fn (Builder $q) => $q->where('stage', Opportunity::WON_STAGE));
+        $this->applyPeriodToDateColumn($entertainmentQuery, 'created_at', $periodRange);
+        $entertainmentPendingCount = (clone $entertainmentQuery)->count();
+        $entertainmentPendingAmount = (float) (clone $entertainmentQuery)->sum('amount');
+        $entertainmentPending = (clone $entertainmentQuery)
+            ->with(['opportunity.account', 'creator'])
+            ->orderByDesc('created_at')
+            ->limit(8)
+            ->get();
+
+        return view('dashboard-finance', compact(
+            'period',
+            'periodLabel',
+            'needsInvoice',
+            'needsInvoiceCount',
+            'unpaidOrders',
+            'unpaidCount',
+            'deliveryPendingCount',
+            'paidCount',
+            'soPeriodCount',
+            'entertainmentPending',
+            'entertainmentPendingCount',
+            'entertainmentPendingAmount',
+        ));
+    }
+
+    /**
+     * Dashboard Invoice: fokus isi invoice, follow-up unpaid, dan DO.
+     */
+    protected function invoiceDashboard(string $period, ?array $periodRange, string $periodLabel)
+    {
+        $soBase = $this->closedWonSalesOrdersQuery($periodRange);
+
+        $needsInvoiceQuery = $this->scopeSalesOrdersMissingInvoice(clone $soBase);
+        $needsInvoiceCount = (clone $needsInvoiceQuery)->count();
+        $needsInvoice = $needsInvoiceQuery
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->orderByDesc('created_at')
+            ->limit(40)
+            ->get();
+
+        $unpaidInvoicedQuery = $this->scopeSalesOrdersUnpaid(clone $soBase)
+            ->whereNotNull('agc_payload->invoice_no')
+            ->where('agc_payload->invoice_no', '!=', '');
+        $unpaidInvoicedCount = (clone $unpaidInvoicedQuery)->count();
+        $unpaidInvoiced = $unpaidInvoicedQuery
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        $deliveryPendingQuery = $this->scopeSalesOrdersDeliveryPending(clone $soBase);
+        $deliveryPendingCount = (clone $deliveryPendingQuery)->count();
+        $deliveryPending = $deliveryPendingQuery
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->orderByDesc('created_at')
+            ->limit(15)
+            ->get();
+
+        $paidCount = $this->scopeSalesOrdersPaid(clone $soBase)->count();
+        $soPeriodCount = (clone $soBase)->count();
+        $invoicedCount = (clone $soBase)
+            ->whereNotNull('agc_payload->invoice_no')
+            ->where('agc_payload->invoice_no', '!=', '')
+            ->count();
+
+        return view('dashboard-invoice', compact(
+            'period',
+            'periodLabel',
+            'needsInvoice',
+            'needsInvoiceCount',
+            'unpaidInvoiced',
+            'unpaidInvoicedCount',
+            'deliveryPending',
+            'deliveryPendingCount',
+            'paidCount',
+            'soPeriodCount',
+            'invoicedCount',
+        ));
+    }
+
+    protected function closedWonSalesOrdersQuery(?array $periodRange): Builder
+    {
+        $query = OpportunitySalesOrder::query()
+            ->whereHas('opportunity', fn (Builder $q) => $q->where('stage', Opportunity::WON_STAGE));
+
+        $this->applyPeriodToDateColumn($query, 'created_at', $periodRange);
+        $this->scopeSalesOrdersActive($query);
+
+        return $query;
+    }
+
+    protected function scopeSalesOrdersActive(Builder $query): Builder
+    {
+        return $query
+            ->where(function (Builder $q) {
+                $q->whereNull('agc_payload->so_status')
+                    ->orWhere('agc_payload->so_status', '!=', 'cancelled');
+            })
+            ->where(function (Builder $q) {
+                $q->whereNull('agc_payload->cancel_status')
+                    ->orWhere('agc_payload->cancel_status', '!=', OpportunitySalesOrder::CANCEL_APPROVED);
+            });
+    }
+
+    protected function scopeSalesOrdersMissingInvoice(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q) {
+            $q->whereNull('agc_payload->invoice_no')
+                ->orWhere('agc_payload->invoice_no', '');
+        });
+    }
+
+    protected function scopeSalesOrdersUnpaid(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q) {
+            $q->whereNull('agc_payload->payment_status')
+                ->orWhere('agc_payload->payment_status', '')
+                ->orWhere('agc_payload->payment_status', 'unpaid')
+                ->orWhere('agc_payload->payment_status', 'pending');
+        });
+    }
+
+    protected function scopeSalesOrdersPaid(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q) {
+            $q->where('agc_payload->payment_status', 'paid')
+                ->orWhere('agc_payload->payment_status', 'settlement');
+        });
+    }
+
+    protected function scopeSalesOrdersDeliveryPending(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q) {
+            $q->whereNull('agc_payload->delivery_status')
+                ->orWhere('agc_payload->delivery_status', '')
+                ->orWhere('agc_payload->delivery_status', 'pending');
+        });
     }
 
     /**

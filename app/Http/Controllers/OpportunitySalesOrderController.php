@@ -93,6 +93,7 @@ class OpportunitySalesOrderController extends Controller
                     || $user->isEkspedisi()) {
                     if ($user->isPurchasing()
                         || $user->isFinance()
+                        || $user->isInvoice()
                         || $user->isProduct()
                         || $user->isEkspedisi()) {
                         $q->where('stage', Opportunity::WON_STAGE);
@@ -969,6 +970,7 @@ class OpportunitySalesOrderController extends Controller
 
         if ($user->isPurchasing()
             || $user->isFinance()
+            || $user->isInvoice()
             || $user->isProduct()
             || $user->isEkspedisi()) {
             if ($opportunity->stage !== Opportunity::WON_STAGE) {

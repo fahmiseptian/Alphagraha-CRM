@@ -6,6 +6,7 @@ use App\Models\Activity;
 use App\Models\CrmNotification;
 use App\Models\Espo\Opportunity;
 use App\Models\OpportunitySalesOrder;
+use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Models\User;
 use Carbon\Carbon;
@@ -803,6 +804,7 @@ class NotificationService
                 CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
                 CrmNotification::TYPE_SALES_ORDER_CREATED,
                 CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
+                CrmNotification::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
                 CrmNotification::TYPE_CUSTOMER_INDUSTRY_UPDATE,
             ])
             ->update([
@@ -1118,6 +1120,174 @@ class NotificationService
     {
         $this->markActioned(CrmNotification::TYPE_SALES_ORDER_CREATED, [
             'sales_order_id' => $salesOrderId,
+        ]);
+    }
+
+    /**
+     * Popup + lonceng ke Superadmin saat Purchasing membuat PO (menunggu approval).
+     */
+    public function notifyPurchaseOrderApprovalRequested(PurchaseOrder $purchaseOrder, Opportunity $opportunity): void
+    {
+        $purchaseOrder->loadMissing(['creator', 'salesOrder', 'vendor']);
+
+        $creatorName = $purchaseOrder->creator?->display_name ?: 'Purchasing';
+        $poNumber = $purchaseOrder->number ?: ('#'.$purchaseOrder->id);
+        $vendorName = $purchaseOrder->displayVendorName();
+        $oppName = $opportunity->name ?: $opportunity->id;
+        $soNumber = $purchaseOrder->salesOrder?->displayNumber();
+
+        $title = 'Request approval Purchase Order';
+        $body = $creatorName.' membuat PO '.$poNumber.' ('.$vendorName.')'
+            .($soNumber ? ' untuk SO '.$soNumber : '')
+            .' pada Opportunity "'.$oppName.'". Menunggu approval.';
+        $link = route('opportunities.purchase-orders.index', $opportunity);
+        $uniqueKey = 'po_approval_request:'.$purchaseOrder->id;
+
+        $recipientIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SUPERADMIN))
+            ->pluck('id')
+            ->filter(fn ($id) => (string) $id !== (string) $purchaseOrder->created_by)
+            ->values();
+
+        foreach ($recipientIds as $userId) {
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
+                $uniqueKey,
+                opportunityId: $opportunity->id,
+            );
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey.':'.$userId,
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'purchase_order_id' => $purchaseOrder->id,
+                    'purchase_order_number' => $poNumber,
+                    'sales_order_id' => $purchaseOrder->sales_order_id,
+                    'sales_order_number' => $soNumber,
+                    'created_by' => $purchaseOrder->created_by,
+                    'created_by_name' => $creatorName,
+                    'sales_user_id' => $opportunity->assigned_user_id,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Notifikasi ke Sales terkait SO saat Superadmin approve PO.
+     */
+    public function notifyPurchaseOrderApproved(PurchaseOrder $purchaseOrder, Opportunity $opportunity, ?string $note = null): void
+    {
+        $purchaseOrder->loadMissing(['salesOrder', 'vendor']);
+        $poNumber = $purchaseOrder->number ?: ('#'.$purchaseOrder->id);
+        $vendorName = $purchaseOrder->displayVendorName();
+        $so = $purchaseOrder->salesOrder;
+        $soNumber = $so?->displayNumber();
+        $actor = $this->actorName($purchaseOrder->approved_by ?: auth()->id());
+
+        $title = 'Purchase Order disetujui';
+        $body = $actor.' menyetujui PO '.$poNumber.' ('.$vendorName.')'
+            .($soNumber ? ' untuk SO '.$soNumber : '')
+            .' pada Opportunity "'.($opportunity->name ?: $opportunity->id).'".';
+        if (filled($note)) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $userIds = collect([
+            $opportunity->assigned_user_id,
+            $so?->created_by,
+        ])->filter()->unique()->values();
+
+        $link = $so
+            ? route('opportunities.sales-orders.show', [$opportunity, $so])
+            : route('opportunities.purchase-orders.index', $opportunity);
+
+        foreach ($userIds as $userId) {
+            if ((string) $userId === (string) auth()->id()) {
+                continue;
+            }
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_PURCHASE_ORDER_APPROVED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'po_approved:'.$purchaseOrder->id.':'.$userId.':'.uniqid('', true),
+                data: array_merge([
+                    'opportunity_id' => $opportunity->id,
+                    'purchase_order_id' => $purchaseOrder->id,
+                    'purchase_order_number' => $poNumber,
+                    'sales_order_id' => $purchaseOrder->sales_order_id,
+                    'sales_order_number' => $soNumber,
+                    'sales_user_id' => $opportunity->assigned_user_id,
+                ], $this->actorPayload()),
+            );
+        }
+    }
+
+    /**
+     * Notifikasi ke pembuat PO (Purchasing) saat Superadmin menolak PO.
+     */
+    public function notifyPurchaseOrderRejected(PurchaseOrder $purchaseOrder, Opportunity $opportunity, ?string $note = null): void
+    {
+        $purchaseOrder->loadMissing(['creator', 'salesOrder', 'vendor']);
+        $poNumber = $purchaseOrder->number ?: ('#'.$purchaseOrder->id);
+        $vendorName = $purchaseOrder->displayVendorName();
+        $actor = $this->actorName($purchaseOrder->approved_by ?: auth()->id());
+
+        $title = 'Purchase Order ditolak';
+        $body = $actor.' menolak PO '.$poNumber.' ('.$vendorName.')'
+            .' pada Opportunity "'.($opportunity->name ?: $opportunity->id).'".';
+        if (filled($note)) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $userIds = collect([
+            $purchaseOrder->created_by,
+            $opportunity->assigned_user_id,
+            $purchaseOrder->salesOrder?->created_by,
+        ])->filter()->unique()->values();
+
+        $link = route('opportunities.purchase-orders.index', $opportunity);
+
+        foreach ($userIds as $userId) {
+            if ((string) $userId === (string) auth()->id()) {
+                continue;
+            }
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_PURCHASE_ORDER_REJECTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'po_rejected:'.$purchaseOrder->id.':'.$userId.':'.uniqid('', true),
+                data: array_merge([
+                    'opportunity_id' => $opportunity->id,
+                    'purchase_order_id' => $purchaseOrder->id,
+                    'purchase_order_number' => $poNumber,
+                    'sales_order_id' => $purchaseOrder->sales_order_id,
+                    'sales_user_id' => $opportunity->assigned_user_id,
+                ], $this->actorPayload()),
+            );
+        }
+    }
+
+    public function markPurchaseOrderApprovalActioned(int|string $purchaseOrderId): void
+    {
+        $this->markActioned(CrmNotification::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED, [
+            'purchase_order_id' => $purchaseOrderId,
         ]);
     }
 

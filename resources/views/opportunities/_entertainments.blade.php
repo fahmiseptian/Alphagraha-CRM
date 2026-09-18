@@ -9,7 +9,7 @@
     $canCompleteEntertainment = (bool) auth()->user()?->canCompleteEntertainment();
 @endphp
 
-<x-card :padding="false" x-data="{ adding: {{ $entertainmentErrors ? 'true' : 'false' }} }"
+<x-card id="entertainments" :padding="false" x-data="{ adding: {{ $entertainmentErrors ? 'true' : 'false' }} }"
         x-init="$watch('adding', value => { if (value && window.CrmNumber) window.CrmNumber.enhance($el) })">
     <div class="flex items-center justify-between px-5 pt-4">
         <h3 class="text-sm font-semibold text-slate-800">Entertainment</h3>

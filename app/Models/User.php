@@ -33,6 +33,8 @@ class User extends Authenticatable
 
     public const ROLE_EKSPEDISI = 'ekspedisi';
 
+    public const ROLE_INVOICE = 'invoice';
+
     public const ROLES = [
         self::ROLE_SUPERADMIN => 'Superadmin',
         self::ROLE_ADMIN => 'Admin',
@@ -41,6 +43,7 @@ class User extends Authenticatable
         self::ROLE_PURCHASING => 'Purchasing',
         self::ROLE_FINANCE => 'Finance',
         self::ROLE_EKSPEDISI => 'Ekspedisi',
+        self::ROLE_INVOICE => 'Invoice',
     ];
 
     protected $table = 'user';
@@ -128,6 +131,11 @@ class User extends Authenticatable
         return $this->role === self::ROLE_EKSPEDISI;
     }
 
+    public function isInvoice(): bool
+    {
+        return $this->role === self::ROLE_INVOICE;
+    }
+
     public function canAccessAdministration(): bool
     {
         return $this->isSuperAdmin();
@@ -162,7 +170,7 @@ class User extends Authenticatable
         return $this->canManageBrands() || $this->canManageCategories() || $this->canManageVendors();
     }
 
-    /** Customer: Sales/Admin/Superadmin + Purchasing + Finance */
+    /** Customer: Sales/Admin/Superadmin + Purchasing + Finance + Invoice */
     public function canViewCustomers(): bool
     {
         return in_array($this->role, [
@@ -171,12 +179,13 @@ class User extends Authenticatable
             self::ROLE_SALES,
             self::ROLE_PURCHASING,
             self::ROLE_FINANCE,
+            self::ROLE_INVOICE,
         ], true);
     }
 
     public function canViewOpportunities(): bool
     {
-        return ! $this->isProduct() && ! $this->isEkspedisi();
+        return ! $this->isProduct() && ! $this->isEkspedisi() && ! $this->isInvoice();
     }
 
     public function canCreateOpportunity(): bool
@@ -200,6 +209,7 @@ class User extends Authenticatable
             self::ROLE_ADMIN,
             self::ROLE_PURCHASING,
             self::ROLE_FINANCE,
+            self::ROLE_INVOICE,
         ], true);
     }
 
@@ -223,19 +233,20 @@ class User extends Authenticatable
             self::ROLE_PURCHASING,
             self::ROLE_FINANCE,
             self::ROLE_EKSPEDISI,
+            self::ROLE_INVOICE,
         ], true);
     }
 
-    /** Invoice di SO: Finance + Superadmin */
+    /** Invoice di SO: Finance + Invoice + Superadmin */
     public function canEditSalesOrderInvoice(): bool
     {
-        return $this->isFinance() || $this->isSuperAdmin();
+        return $this->isFinance() || $this->isInvoice() || $this->isSuperAdmin();
     }
 
-    /** DO / resi / file DO: Finance + Ekspedisi + Superadmin */
+    /** DO / resi / file DO: Finance + Ekspedisi + Invoice + Superadmin */
     public function canEditSalesOrderDelivery(): bool
     {
-        return $this->isFinance() || $this->isEkspedisi() || $this->isSuperAdmin();
+        return $this->isFinance() || $this->isEkspedisi() || $this->isInvoice() || $this->isSuperAdmin();
     }
 
     /** Boleh update field SO (invoice/DO/dll) tanpa harus bisa create SO */
@@ -306,6 +317,12 @@ class User extends Authenticatable
         return $this->isPurchasing() || $this->isSuperAdmin();
     }
 
+    /** Approval PO: Superadmin saja */
+    public function canApprovePurchaseOrder(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     /** Lihat PO (read-only): sales, admin, finance, purchasing, superadmin — Closed Won. */
     public function canViewPurchaseOrders(): bool
     {
@@ -336,6 +353,7 @@ class User extends Authenticatable
             self::ROLE_SALES,
             self::ROLE_PURCHASING,
             self::ROLE_FINANCE,
+            self::ROLE_INVOICE,
         ], true);
     }
 
@@ -357,6 +375,7 @@ class User extends Authenticatable
             self::ROLE_SALES,
             self::ROLE_PURCHASING,
             self::ROLE_FINANCE,
+            self::ROLE_INVOICE,
         ], true);
     }
 

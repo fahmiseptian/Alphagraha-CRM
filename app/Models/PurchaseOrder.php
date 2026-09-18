@@ -13,6 +13,12 @@ class PurchaseOrder extends Model
 
     public const PAYMENT_CASH = 'cash';
 
+    public const APPROVAL_PENDING = 'pending';
+
+    public const APPROVAL_APPROVED = 'approved';
+
+    public const APPROVAL_REJECTED = 'rejected';
+
     protected $table = 'crm_purchase_orders';
 
     protected $fillable = [
@@ -26,11 +32,16 @@ class PurchaseOrder extends Model
         'total',
         'currency',
         'created_by',
+        'approval_status',
+        'approved_by',
+        'approved_at',
+        'approval_note',
     ];
 
     protected $casts = [
         'total' => 'decimal:2',
         'sales_order_id' => 'integer',
+        'approved_at' => 'datetime',
     ];
 
     public function opportunity(): BelongsTo
@@ -58,9 +69,47 @@ class PurchaseOrder extends Model
         return $this->belongsTo(Vendor::class);
     }
 
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
     public function displayVendorName(): string
     {
         return $this->vendor?->name ?: ($this->vendor_name ?: '—');
+    }
+
+    public function isApprovalPending(): bool
+    {
+        return ($this->approval_status ?: self::APPROVAL_PENDING) === self::APPROVAL_PENDING;
+    }
+
+    public function isApproved(): bool
+    {
+        return $this->approval_status === self::APPROVAL_APPROVED;
+    }
+
+    public function isApprovalRejected(): bool
+    {
+        return $this->approval_status === self::APPROVAL_REJECTED;
+    }
+
+    public function approvalLabel(): string
+    {
+        return match ($this->approval_status) {
+            self::APPROVAL_APPROVED => 'Approved',
+            self::APPROVAL_REJECTED => 'Rejected',
+            default => 'Menunggu approval',
+        };
+    }
+
+    public function approvalBadgeColor(): string
+    {
+        return match ($this->approval_status) {
+            self::APPROVAL_APPROVED => 'green',
+            self::APPROVAL_REJECTED => 'red',
+            default => 'amber',
+        };
     }
 
     public function isCash(): bool

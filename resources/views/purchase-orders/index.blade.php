@@ -121,7 +121,7 @@
                     <tr>
                         <th>No. PO</th>
                         <th>Vendor</th>
-                        <th>Opportunity</th>
+                        <th>Customer</th>
                         @if ($canFilterSales ?? false)
                             <th>Sales</th>
                         @endif
@@ -159,10 +159,7 @@
                                 <span class="font-medium text-slate-800">{{ $po->displayVendorName() }}</span>
                             </td>
                             <td>
-                                <span class="font-medium text-slate-800">{{ $opp?->name ?? '—' }}</span>
-                                @if ($opp?->account?->name)
-                                    <div class="text-xs text-slate-400">{{ $opp->account->name }}</div>
-                                @endif
+                                <span class="font-medium text-slate-800">{{ $opp?->account?->name ?: '—' }}</span>
                             </td>
                             @if ($canFilterSales ?? false)
                                 <td class="text-slate-600">

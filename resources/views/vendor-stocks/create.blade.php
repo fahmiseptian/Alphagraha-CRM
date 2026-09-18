@@ -1,8 +1,8 @@
 @extends('layouts.app')
-@section('title', 'Ketersediaan Vendor')
+@section('title', 'Product')
 
 @section('content')
-<x-page-header title="Tambah Ketersediaan Vendor" description="Catat harga dan status ready/indent per produk per vendor. Data ini dipakai sebagai perbandingan di Purchase Order.">
+<x-page-header title="Tambah Product" description="Catat harga dan status ready/indent per produk per vendor. Data ini dipakai sebagai perbandingan di Purchase Order.">
     <x-slot:actions>
         <x-btn href="{{ route('vendor-stocks.index') }}" variant="secondary">Batal</x-btn>
     </x-slot:actions>

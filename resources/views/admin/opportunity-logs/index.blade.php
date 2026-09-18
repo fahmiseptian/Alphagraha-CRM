@@ -79,9 +79,10 @@
                         <td>
                             <x-badge :color="$log->actionBadgeColor()">{{ $log->actionLabel() }}</x-badge>
                         </td>
-                        <td>
-                            <span class="font-medium text-slate-800">{{ $log->snapshotValue('name') ?: ($log->opportunity?->name ?: '—') }}</span>
-                            <div class="text-xs text-slate-400">{{ $log->snapshotValue('account_name') ?: '—' }}</div>
+                        <td class="max-w-[18rem]">
+                            @php $oppName = $log->snapshotValue('name') ?: ($log->opportunity?->name ?: '—'); @endphp
+                            <span class="block truncate font-medium text-slate-800" title="{{ $oppName }}">{{ $oppName }}</span>
+                            <div class="truncate text-xs text-slate-400" title="{{ $log->snapshotValue('account_name') ?: '—' }}">{{ $log->snapshotValue('account_name') ?: '—' }}</div>
                         </td>
                         <td class="max-w-md text-sm text-slate-600">
                             <span class="line-clamp-2">{{ $log->summary ?: '—' }}</span>

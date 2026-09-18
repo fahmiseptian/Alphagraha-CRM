@@ -4,7 +4,7 @@
 @section('content')
 <x-page-header title="Vendors" description="Master vendor untuk item opportunity. Dikelola superadmin, tim Product, dan Purchasing.">
     <x-slot:actions>
-        <x-btn href="{{ route('vendor-stocks.index') }}" variant="secondary" icon="bi-boxes">Ketersediaan</x-btn>
+        <x-btn href="{{ route('vendor-stocks.index') }}" variant="secondary" icon="bi-boxes">Product</x-btn>
         <x-btn href="{{ route('vendors.create') }}" icon="bi-plus-lg">New Vendor</x-btn>
     </x-slot:actions>
 </x-page-header>
@@ -30,15 +30,15 @@
                         <th data-field="vendor_id" data-visible="false" data-searchable="false">ID</th>
                         <th data-field="pic_count" data-visible="false" data-searchable="false">Jumlah PIC</th>
                         <th data-field="pic_search" data-visible="false">PIC</th>
+                        <th data-field="brand_search" data-visible="false">Brand</th>
                         <th data-field="name" data-sortable="true">Nama Perusahaan</th>
                         <th data-field="company_status" data-sortable="true" data-width="160">Status Perusahaan</th>
-                        <th data-field="brands" data-sortable="false">Brand</th>
                         <th data-field="top" data-sortable="true" data-width="140">TOP</th>
                         <th data-field="pkp" data-sortable="true" data-width="90">PKP</th>
                         <th data-field="pic_label" data-sortable="false" data-width="110">PIC</th>
                         <th data-field="sort_order" data-sortable="true" data-align="right" data-width="90">Urutan</th>
                         <th data-field="status" data-sortable="true" data-width="110">Status</th>
-                        <th data-field="actions" data-searchable="false" data-sortable="false" data-align="right" data-width="110"></th>
+                        <th data-field="actions" data-searchable="false" data-sortable="false" data-align="right" data-width="140"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -51,15 +51,9 @@
                                     {{ $pic->name }} {{ $pic->job_role }} {{ $pic->phone }} {{ $pic->email }}
                                 @endforeach
                             </td>
+                            <td>{{ $item->brands->pluck('name')->join(' ') }}</td>
                             <td class="font-medium text-slate-800">{{ $item->name }}</td>
                             <td class="text-slate-600">{{ $item->company_status ?: '—' }}</td>
-                            <td class="text-slate-600">
-                                @if ($item->brands->isEmpty())
-                                    <span class="text-slate-400">—</span>
-                                @else
-                                    {{ $item->brands->pluck('name')->join(', ') }}
-                                @endif
-                            </td>
                             <td class="text-slate-600">{{ $item->topLabel() }}</td>
                             <td>
                                 @if ($item->is_pkp)
@@ -95,43 +89,60 @@
             </table>
             @foreach ($vendors as $item)
                 <template id="vendor-pics-{{ $item->id }}">
-                    <div class="vendor-pic-detail">
-                        @if ($item->pics->isEmpty())
-                            <p class="vendor-pic-empty">Belum ada PIC. Edit vendor ini atau import Excel yang berisi kolom Nama PIC.</p>
-                        @else
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Nama PIC</th>
-                                        <th>Job Role</th>
-                                        <th>No Telp</th>
-                                        <th>Email</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach ($item->pics as $pic)
-                                        <tr>
-                                            <td class="font-medium text-slate-800">{{ $pic->name }}</td>
-                                            <td>{{ $pic->job_role ?: '—' }}</td>
-                                            <td>
-                                                @if ($pic->phone)
-                                                    <a href="tel:{{ preg_replace('/\s+/', '', $pic->phone) }}">{{ $pic->phone }}</a>
-                                                @else
-                                                    —
-                                                @endif
-                                            </td>
-                                            <td>
-                                                @if ($pic->email)
-                                                    <a href="mailto:{{ $pic->email }}">{{ $pic->email }}</a>
-                                                @else
-                                                    —
-                                                @endif
-                                            </td>
-                                        </tr>
+                    <div class="vendor-pic-detail space-y-4">
+                        <div>
+                            <p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Brand</p>
+                            @if ($item->brands->isEmpty())
+                                <p class="vendor-pic-empty">Belum ada brand terkait.</p>
+                            @else
+                                <div class="flex flex-wrap gap-1.5">
+                                    @foreach ($item->brands as $brand)
+                                        <span class="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                                            {{ $brand->name }}
+                                        </span>
                                     @endforeach
-                                </tbody>
-                            </table>
-                        @endif
+                                </div>
+                            @endif
+                        </div>
+                        <div>
+                            <p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">PIC</p>
+                            @if ($item->pics->isEmpty())
+                                <p class="vendor-pic-empty">Belum ada PIC. Edit vendor ini atau import Excel yang berisi kolom Nama PIC.</p>
+                            @else
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Nama PIC</th>
+                                            <th>Job Role</th>
+                                            <th>No Telp</th>
+                                            <th>Email</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($item->pics as $pic)
+                                            <tr>
+                                                <td class="font-medium text-slate-800">{{ $pic->name }}</td>
+                                                <td>{{ $pic->job_role ?: '—' }}</td>
+                                                <td>
+                                                    @if ($pic->phone)
+                                                        <a href="tel:{{ preg_replace('/\s+/', '', $pic->phone) }}">{{ $pic->phone }}</a>
+                                                    @else
+                                                        —
+                                                    @endif
+                                                </td>
+                                                <td>
+                                                    @if ($pic->email)
+                                                        <a href="mailto:{{ $pic->email }}">{{ $pic->email }}</a>
+                                                    @else
+                                                        —
+                                                    @endif
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            @endif
+                        </div>
                     </div>
                 </template>
             @endforeach

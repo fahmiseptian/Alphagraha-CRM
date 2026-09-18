@@ -43,6 +43,12 @@ class CrmNotification extends Model
 
     public const TYPE_SALES_ORDER_CANCEL_REJECTED = 'sales_order_cancel_rejected';
 
+    public const TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED = 'purchase_order_approval_requested';
+
+    public const TYPE_PURCHASE_ORDER_APPROVED = 'purchase_order_approved';
+
+    public const TYPE_PURCHASE_ORDER_REJECTED = 'purchase_order_rejected';
+
     public const TYPE_OPPORTUNITY_ASSIGNED = 'opportunity_assigned';
 
     public const TYPE_CUSTOMER_INDUSTRY_UPDATE = 'customer_industry_update';
@@ -83,6 +89,7 @@ class CrmNotification extends Model
             self::TYPE_OPPORTUNITY_DEADLINE,
             self::TYPE_SALES_ORDER_CREATED,
             self::TYPE_SALES_ORDER_CANCEL_REQUESTED,
+            self::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
             self::TYPE_CUSTOMER_INDUSTRY_UPDATE,
         ], true);
     }
@@ -108,6 +115,7 @@ class CrmNotification extends Model
             self::TYPE_OPPORTUNITY_DEADLINE => 'bi-briefcase',
             self::TYPE_SALES_ORDER_CREATED => 'bi-receipt',
             self::TYPE_SALES_ORDER_CANCEL_REQUESTED, self::TYPE_SALES_ORDER_CANCEL_APPROVED, self::TYPE_SALES_ORDER_CANCEL_REJECTED => 'bi-x-octagon',
+            self::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED, self::TYPE_PURCHASE_ORDER_APPROVED, self::TYPE_PURCHASE_ORDER_REJECTED => 'bi-cart-check',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bi-person-check',
             self::TYPE_CUSTOMER_INDUSTRY_UPDATE => 'bi-buildings',
             default => 'bi-bell',
@@ -134,6 +142,9 @@ class CrmNotification extends Model
             self::TYPE_SALES_ORDER_CANCEL_REQUESTED => 'bg-rose-50 text-rose-600',
             self::TYPE_SALES_ORDER_CANCEL_APPROVED => 'bg-red-50 text-red-600',
             self::TYPE_SALES_ORDER_CANCEL_REJECTED => 'bg-amber-50 text-amber-600',
+            self::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED => 'bg-amber-50 text-amber-600',
+            self::TYPE_PURCHASE_ORDER_APPROVED => 'bg-green-50 text-green-600',
+            self::TYPE_PURCHASE_ORDER_REJECTED => 'bg-red-50 text-red-600',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bg-brand-50 text-brand-600',
             self::TYPE_CUSTOMER_INDUSTRY_UPDATE => 'bg-amber-50 text-amber-600',
             default => 'bg-slate-100 text-slate-600',

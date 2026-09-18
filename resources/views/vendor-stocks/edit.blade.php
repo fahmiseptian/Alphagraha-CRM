@@ -1,8 +1,8 @@
 @extends('layouts.app')
-@section('title', 'Edit Ketersediaan Vendor')
+@section('title', 'Edit Product')
 
 @section('content')
-<x-page-header title="Edit Ketersediaan" :description="$stock->product_name" :back="route('vendor-stocks.index')" backLabel="Ketersediaan Vendor">
+<x-page-header title="Edit Product" :description="$stock->product_name" :back="route('vendor-stocks.index')" backLabel="Product">
 </x-page-header>
 
 <div class="max-w-3xl">
