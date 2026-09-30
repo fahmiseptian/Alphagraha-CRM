@@ -3,6 +3,8 @@
 
 @php
     $isList = ($view ?? 'kanban') === 'list';
+    $currentSort = $sort ?? 'created_at';
+    $currentSortDir = $sortDir ?? 'desc';
     $baseQuery = array_filter([
         'period' => ($period ?? 'year') !== 'year' ? $period : null,
         'assigned_user_id' => $selectedUserId ?: null,
@@ -10,9 +12,30 @@
         'stage' => ($stageFilter ?? '') !== '' ? $stageFilter : null,
         'company' => ($companyFilter ?? '') !== '' ? $companyFilter : null,
         'account_id' => ($accountId ?? '') !== '' ? $accountId : null,
+        'sort' => ($currentSort !== 'created_at') ? $currentSort : null,
+        'dir' => ($currentSort !== 'created_at' || $currentSortDir !== 'desc') ? $currentSortDir : null,
     ], fn ($v) => $v !== null && $v !== '');
     $hasExtraFilters = ($search ?? '') !== '' || ($stageFilter ?? '') !== '' || ($companyFilter ?? '') !== '' || ($accountId ?? '') !== '';
     $hasFilters = $selectedUserId || ($period ?? 'year') !== 'year' || $hasExtraFilters;
+    $sortUrl = function (string $column) use ($baseQuery, $currentSort, $currentSortDir): string {
+        $numericPreferredDesc = in_array($column, ['amount', 'close_date'], true);
+        $nextDir = ($currentSort === $column)
+            ? ($currentSortDir === 'asc' ? 'desc' : 'asc')
+            : ($numericPreferredDesc ? 'desc' : 'asc');
+
+        return route('opportunities.index', array_merge($baseQuery, [
+            'view' => 'list',
+            'sort' => $column,
+            'dir' => $nextDir,
+        ]));
+    };
+    $sortIcon = function (string $column) use ($currentSort, $currentSortDir): string {
+        if ($currentSort !== $column) {
+            return 'bi-arrow-down-up text-slate-300';
+        }
+
+        return $currentSortDir === 'asc' ? 'bi-sort-up-alt text-brand-600' : 'bi-sort-down text-brand-600';
+    };
 @endphp
 
 @section('content')
@@ -47,6 +70,12 @@
     <form method="GET" action="{{ route('opportunities.index') }}" class="crm-opp-filters">
         @if ($isList)
             <input type="hidden" name="view" value="list">
+            @if (($sort ?? 'created_at') !== 'created_at')
+                <input type="hidden" name="sort" value="{{ $sort }}">
+            @endif
+            @if (($sort ?? 'created_at') !== 'created_at' || ($sortDir ?? 'desc') !== 'desc')
+                <input type="hidden" name="dir" value="{{ $sortDir ?? 'desc' }}">
+            @endif
         @endif
 
         <div @class([
@@ -176,14 +205,42 @@
                 <table class="crm-table">
                     <thead>
                         <tr>
-                            <th>Opportunity</th>
-                            <th>Customer</th>
-                            <th>Perusahaan</th>
-                            <th>Stage</th>
-                            <th class="text-right">Nominal</th>
-                            <th>Close date</th>
+                            <th>
+                                <a href="{{ $sortUrl('name') }}" class="inline-flex items-center gap-1 hover:text-brand-600">
+                                    Opportunity <i class="bi {{ $sortIcon('name') }} text-[11px]"></i>
+                                </a>
+                            </th>
+                            <th>
+                                <a href="{{ $sortUrl('customer') }}" class="inline-flex items-center gap-1 hover:text-brand-600">
+                                    Customer <i class="bi {{ $sortIcon('customer') }} text-[11px]"></i>
+                                </a>
+                            </th>
+                            <th>
+                                <a href="{{ $sortUrl('company') }}" class="inline-flex items-center gap-1 hover:text-brand-600">
+                                    Perusahaan <i class="bi {{ $sortIcon('company') }} text-[11px]"></i>
+                                </a>
+                            </th>
+                            <th>
+                                <a href="{{ $sortUrl('stage') }}" class="inline-flex items-center gap-1 hover:text-brand-600">
+                                    Stage <i class="bi {{ $sortIcon('stage') }} text-[11px]"></i>
+                                </a>
+                            </th>
+                            <th class="text-right">
+                                <a href="{{ $sortUrl('amount') }}" class="inline-flex items-center justify-end gap-1 hover:text-brand-600">
+                                    Nominal <i class="bi {{ $sortIcon('amount') }} text-[11px]"></i>
+                                </a>
+                            </th>
+                            <th>
+                                <a href="{{ $sortUrl('close_date') }}" class="inline-flex items-center gap-1 hover:text-brand-600">
+                                    Close date <i class="bi {{ $sortIcon('close_date') }} text-[11px]"></i>
+                                </a>
+                            </th>
                             @if (auth()->user()->isAdmin())
-                                <th>Sales</th>
+                                <th>
+                                    <a href="{{ $sortUrl('sales') }}" class="inline-flex items-center gap-1 hover:text-brand-600">
+                                        Sales <i class="bi {{ $sortIcon('sales') }} text-[11px]"></i>
+                                    </a>
+                                </th>
                             @endif
                             <th></th>
                         </tr>

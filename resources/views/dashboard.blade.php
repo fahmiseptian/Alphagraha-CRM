@@ -214,7 +214,9 @@
                                 class="crm-leaderboard-widget__select crm-leaderboard-widget__select--sort">
                             <option value="total" @selected($leaderboardSort === 'total')>Sort: Total</option>
                             <option value="margin" @selected($leaderboardSort === 'margin')>Sort: Margin</option>
-                            <option value="percent" @selected($leaderboardSort === 'percent')>Sort: % Target</option>
+                            @if (auth()->user()->isSuperAdmin())
+                                <option value="percent" @selected($leaderboardSort === 'percent')>Sort: % Target</option>
+                            @endif
                         </select>
                     @endif
                     <select name="leaderboard_period" onchange="this.form.submit()"
@@ -230,13 +232,20 @@
         </div>
 
         @if ($salesLeaderboard->isNotEmpty())
-            <div @class(['crm-leaderboard-table', 'crm-leaderboard-table--sales' => auth()->user()->isSales()])>
+            <div @class([
+                'crm-leaderboard-table',
+                'crm-leaderboard-table--sales' => auth()->user()->isSales(),
+                'crm-leaderboard-table--superadmin' => auth()->user()->isSuperAdmin(),
+            ])>
                 <div class="crm-leaderboard-table__head">
                     <span></span>
                     <span>Sales</span>
                     @if (auth()->user()->isAdmin())
                         <span>Total</span>
                         <span>Margin</span>
+                        @if (auth()->user()->isSuperAdmin())
+                            <span>% Target</span>
+                        @endif
                     @else
                         <span>Percentage</span>
                     @endif
@@ -315,6 +324,15 @@
                                 ]) title="{{ money($entry['won_margin']) }}">
                                     {{ money_compact($entry['won_margin']) }}
                                 </span>
+                                @if (auth()->user()->isSuperAdmin())
+                                    <span @class([
+                                        'crm-leaderboard-table__value',
+                                        'text-green-700' => ! empty($entry['target_met']),
+                                        'text-brand-700' => empty($entry['target_met']),
+                                    ]) title="{{ money($entry['target_won_total'] ?? $entry['won_margin']) }} / {{ money($entry['sales_target']) }} ({{ $entry['target_period_label'] ?? '' }})">
+                                        {{ number_format($entry['target_progress'], 1, ',', '.') }}%
+                                    </span>
+                                @endif
                             @else
                                 <span @class([
                                     'crm-leaderboard-table__value',

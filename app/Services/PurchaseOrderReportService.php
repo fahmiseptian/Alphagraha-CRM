@@ -42,12 +42,13 @@ class PurchaseOrderReportService
             $purchaseOrders = $opportunity->purchaseOrders
                 ->where('sales_order_id', $salesOrder->id)
                 ->values();
-            // Ongkir/diskon bersifat opportunity-level — tidak dialokasikan ke laporan per SO.
+            // Ongkir tetap opportunity-level (hanya di laporan keseluruhan).
+            // Diskon tambahan dialokasikan proporsional ke tiap SO agar muncul di dokumen.
             $modalOngkirExcl = null;
             $modalOngkirIncl = null;
             $jualOngkirExcl = null;
             $jualOngkirIncl = null;
-            $diskonAmount = 0.0;
+            $diskonAmount = $this->allocateDiscountToSalesOrder($opportunity, $salesOrder);
         } else {
             $products = $opportunity->products;
             $nilaiJualExcl = round($products->sum(
@@ -66,9 +67,7 @@ class PurchaseOrderReportService
             $modalOngkirIncl = $modalOngkirExcl !== null
                 ? OpportunityProductPricing::includeFromExclude($modalOngkirExcl)
                 : null;
-            $diskonAmount = $opportunity->hasActiveDiscount()
-                ? round((float) $opportunity->crm_discount_amount, 2)
-                : 0.0;
+            $diskonAmount = $this->opportunityDiscountAmount($opportunity);
             $jualOngkirExcl = null;
             $jualOngkirIncl = null;
             if ($opportunity->crm_has_shipping_charge && (float) ($opportunity->crm_shipping_sell ?? 0) > 0) {
@@ -189,6 +188,71 @@ class PurchaseOrderReportService
 
         // Semua produk Wapu, atau mayoritas Wapu.
         return $wapuCount >= (int) ceil($products->count() / 2);
+    }
+
+    /**
+     * Nominal diskon tambahan aktif di opportunity (dibaca live — ikut perubahan setelah PO dibuat).
+     */
+    protected function opportunityDiscountAmount(Opportunity $opportunity): float
+    {
+        if (! $opportunity->hasActiveDiscount()) {
+            return 0.0;
+        }
+
+        return round((float) $opportunity->crm_discount_amount, 2);
+    }
+
+    /**
+     * Alokasi diskon tambahan opportunity ke satu Sales Order.
+     * Proporsional terhadap nilai jual exclude tiap SO; sisa pembulatan ke SO terakhir
+     * agar jumlah alokasi = total diskon (tidak menumpuk di SO pertama).
+     */
+    protected function allocateDiscountToSalesOrder(
+        Opportunity $opportunity,
+        OpportunitySalesOrder $salesOrder
+    ): float {
+        $totalDiscount = $this->opportunityDiscountAmount($opportunity);
+        if ($totalDiscount <= 0) {
+            return 0.0;
+        }
+
+        $salesOrders = $opportunity->salesOrders->values();
+        if ($salesOrders->isEmpty()) {
+            return $totalDiscount;
+        }
+        if ($salesOrders->count() === 1) {
+            return $totalDiscount;
+        }
+
+        $weights = [];
+        $totalWeight = 0.0;
+        foreach ($salesOrders as $so) {
+            [$excl] = $this->sumSalesFromSalesOrder($opportunity, $so);
+            $weight = max(0.0, (float) $excl);
+            $weights[(string) $so->id] = $weight;
+            $totalWeight += $weight;
+        }
+
+        $shares = [];
+        $allocated = 0.0;
+        $lastIndex = $salesOrders->count() - 1;
+
+        foreach ($salesOrders as $index => $so) {
+            $id = (string) $so->id;
+            if ($index === $lastIndex) {
+                $share = round($totalDiscount - $allocated, 2);
+            } elseif ($totalWeight > 0) {
+                $share = round($totalDiscount * ($weights[$id] / $totalWeight), 2);
+                $allocated += $share;
+            } else {
+                // Semua SO tanpa nilai jual — bagi rata; sisa ke SO terakhir.
+                $share = round($totalDiscount / $salesOrders->count(), 2);
+                $allocated += $share;
+            }
+            $shares[$id] = max(0.0, $share);
+        }
+
+        return $shares[(string) $salesOrder->id] ?? 0.0;
     }
 
     /**

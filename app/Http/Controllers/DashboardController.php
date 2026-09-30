@@ -56,6 +56,9 @@ class DashboardController extends Controller
         if (! in_array($leaderboardSort, ['total', 'margin', 'percent'], true)) {
             $leaderboardSort = 'total';
         }
+        if ($leaderboardSort === 'percent' && ! $user->isSuperAdmin() && ! $user->isSales()) {
+            $leaderboardSort = 'total';
+        }
 
         $catalogSort = $request->get('catalog_sort', 'total');
         if (! in_array($catalogSort, ['total', 'count'], true)) {

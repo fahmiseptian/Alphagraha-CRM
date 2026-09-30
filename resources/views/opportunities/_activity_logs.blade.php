@@ -39,7 +39,7 @@
                                 <x-badge :color="$log->actionBadgeColor()">{{ $log->actionLabel() }}</x-badge>
                                 <span class="text-xs text-slate-400">{{ $log->created_at?->translatedFormat('d M Y H:i:s') }}</span>
                             </div>
-                            <p class="mt-1 text-sm font-medium text-slate-800">{{ $log->summary ?: $log->actionLabel() }}</p>
+                            <p class="mt-1 text-sm font-medium text-slate-800">{{ $log->displaySummary() }}</p>
                             <p class="mt-0.5 text-xs text-slate-500">
                                 oleh <span class="font-medium text-slate-700">{{ $log->actor?->display_name ?: ($log->actor_name ?: 'Sistem') }}</span>
                             </p>

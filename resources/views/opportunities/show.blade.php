@@ -646,8 +646,21 @@
                 </div>
                 <div>
                     <dt class="text-slate-400">TOP</dt>
-                    <dd class="mt-0.5 font-medium text-slate-700">
-                        {{ $opportunity->topLabel() }}
+                    <dd class="mt-0.5">
+                        @php
+                            $oppTop = $opportunity->top();
+                            $oppTopIsCash = in_array($oppTop, [
+                                \App\Support\CustomerTop::CASH,
+                                \App\Support\CustomerTop::COD,
+                            ], true);
+                        @endphp
+                        <span @class([
+                            'text-base font-bold',
+                            'text-amber-600' => $oppTopIsCash,
+                            'text-indigo-700' => ! $oppTopIsCash,
+                        ])>
+                            {{ $opportunity->topLabel() }}
+                        </span>
                         @if ($opportunity->account && $opportunity->top() !== $opportunity->account->top())
                             <span class="text-xs font-normal text-slate-400">(customer: {{ $opportunity->account->topLabel() }})</span>
                         @endif

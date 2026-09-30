@@ -82,6 +82,8 @@ class OpportunityController extends Controller
         $this->applyPeriodToOpportunityQuery($query, $periodRange);
         $this->applyOpportunityIndexFilters($query, $search, $stageFilter, $companyFilter, $accountId);
 
+        [$sort, $sortDir] = $this->resolveOpportunityListSort($request);
+
         $salesUsers = $this->isAdmin()
             ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
             : collect();
@@ -104,11 +106,14 @@ class OpportunityController extends Controller
             'stages' => Opportunity::STAGES,
             'companies' => Opportunity::COMPANIES,
             'kanbanStages' => $kanbanStages,
+            'sort' => $sort,
+            'sortDir' => $sortDir,
         ];
 
         if ($view === 'list') {
-            $opportunities = (clone $query)
-                ->orderByDesc('created_at')
+            $listQuery = clone $query;
+            $this->applyOpportunityListSort($listQuery, $sort, $sortDir);
+            $opportunities = $listQuery
                 ->paginate(25)
                 ->withQueryString();
 
@@ -249,6 +254,70 @@ class OpportunityController extends Controller
         if ($accountId !== '') {
             $query->where($table.'.account_id', $accountId);
         }
+    }
+
+    /**
+     * @return array{0:string,1:string} [sort column, dir asc|desc]
+     */
+    protected function resolveOpportunityListSort(Request $request): array
+    {
+        $allowed = ['name', 'customer', 'company', 'stage', 'amount', 'close_date', 'sales'];
+        $sort = (string) $request->get('sort', '');
+        if (! in_array($sort, $allowed, true)) {
+            $sort = 'created_at';
+        }
+
+        $dir = strtolower((string) $request->get('dir', ''));
+        if (! in_array($dir, ['asc', 'desc'], true)) {
+            $dir = in_array($sort, ['amount', 'close_date', 'created_at'], true) ? 'desc' : 'asc';
+        }
+
+        return [$sort, $dir];
+    }
+
+    protected function applyOpportunityListSort($query, string $sort, string $dir): void
+    {
+        $table = $query->getModel()->getTable();
+        $direction = $dir === 'asc' ? 'asc' : 'desc';
+
+        match ($sort) {
+            'name' => $query->orderBy($table.'.name', $direction),
+            'company' => $query->orderBy($table.'.company', $direction),
+            'amount' => $query->orderBy($table.'.amount', $direction),
+            'close_date' => $query->orderBy($table.'.close_date', $direction),
+            'customer' => $query->orderBy(
+                Account::query()
+                    ->select('name')
+                    ->whereColumn('account.id', $table.'.account_id')
+                    ->where('account.deleted', 0)
+                    ->limit(1),
+                $direction
+            ),
+            'sales' => $query->orderByRaw(
+                'COALESCE('
+                .'(SELECT NULLIF(u.name, \'\') FROM `user` u WHERE u.id = '.$table.'.assigned_user_id LIMIT 1),'
+                .'(SELECT TRIM(CONCAT(COALESCE(u.first_name, \'\'), \' \', COALESCE(u.last_name, \'\'))) FROM `user` u WHERE u.id = '.$table.'.assigned_user_id LIMIT 1),'
+                .'(SELECT u.user_name FROM `user` u WHERE u.id = '.$table.'.assigned_user_id LIMIT 1)'
+                .') '.$direction
+            ),
+            'stage' => $this->orderOpportunityByStagePipeline($query, $direction),
+            default => $query->orderBy($table.'.created_at', $direction),
+        };
+
+        $query->orderByDesc($table.'.id');
+    }
+
+    protected function orderOpportunityByStagePipeline($query, string $direction): void
+    {
+        $table = $query->getModel()->getTable();
+        $cases = [];
+        $bindings = [];
+        foreach (array_values(Opportunity::STAGES) as $index => $stage) {
+            $cases[] = 'WHEN ? THEN '.$index;
+            $bindings[] = $stage;
+        }
+        $sql = 'CASE '.$table.'.stage '.implode(' ', $cases).' ELSE 99 END '.$direction;
+        $query->orderByRaw($sql, $bindings);
     }
 
     public function show(Opportunity $opportunity)
@@ -987,7 +1056,7 @@ class OpportunityController extends Controller
     protected function rememberOpportunitiesIndexQuery(Request $request): void
     {
         $query = array_filter(
-            $request->only(['view', 'q', 'stage', 'company', 'account_id', 'assigned_user_id', 'period', 'page']),
+            $request->only(['view', 'q', 'stage', 'company', 'account_id', 'assigned_user_id', 'period', 'page', 'sort', 'dir']),
             fn ($value) => $value !== null && $value !== ''
         );
 

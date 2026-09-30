@@ -1402,8 +1402,11 @@
             },
             onRoyaltyChange(p) {
                 p.has_royalty = !!p.royalty_type;
-                p._lockMarginPercent = false;
-                p.margin_percent = this.calcMarginPercent(p);
+                if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0 && (Number(p.cost_exclude) || 0) > 0) {
+                    this.applyMarginPercentToPrice(p);
+                } else {
+                    p.margin_percent = this.calcMarginPercent(p);
+                }
                 this.refreshDiscountFromMargin();
             },
             onProductImageChange(p, event) {
@@ -1511,14 +1514,17 @@
                 return (hasItemDiscount ? 'Diskon − Modal' : 'Jual Exclude − Beli Exclude') + royaltyBit + shippingBit;
             },
             /**
-             * Dari % margin target (net) + modal → hitung harga basis.
-             * Wapu: base = costInclude / ((1-rPph) * (1 - pct/100))
-             * Inaproc: % vs (jual−PPH); iterasi karena PNBP berjenjang + modal include.
+             * Dari % margin target (net) + modal (+ pajak/biaya) → hitung harga basis.
+             * Basis biaya: modal (include utk wapu/inaproc) + royalti + ongkir + komponen pajak
+             * yang masuk rumus margin, agar input % tidak menghasilkan margin minus.
+             * Wapu: base = (costInclude + royalti + ongkir) / ((1-rPph) * (1 - pct/100))
+             * Inaproc: % vs (jual−PPH); iterasi karena PNBP berjenjang + modal include + royalti.
              */
             sellFromMarginPercent(p) {
                 const pct = Number(p.margin_percent) || 0;
                 const cost = Number(p.cost_exclude) || 0;
                 const shipping = Math.max(0, Number(p.shipping_exclude) || 0);
+                const royalty = this.royaltyAmount(p);
                 if (cost <= 0 || pct <= 0) {
                     return this.effectiveSellExclude(p);
                 }
@@ -1533,19 +1539,20 @@
                     if (denom <= 0) {
                         return this.effectiveSellExclude(p);
                     }
-                    return this.round((costInclude + shipping) / denom);
+                    return this.round((costInclude + royalty + shipping) / denom);
                 }
 
                 if (!this.appliesPph29(p)) {
-                    const denom = 1 - pctDec;
+                    // % terhadap jual excl; margin = jual − PPH − modal − royalti − ongkir
+                    const denom = 1 - rPph - pctDec;
                     if (denom <= 0) return this.effectiveSellExclude(p);
-                    return this.round((cost + shipping) / denom);
+                    return this.round((cost + royalty + shipping) / denom);
                 }
 
                 const r29 = (Number(this.pph29Percent) || 0) / 100;
                 let base = this.effectiveSellExclude(p) || cost;
 
-                // net = (base−PPH−modalIncl) − PNBP − r29*(base−modalExcl) − ongkir
+                // net = (base−PPH−modalIncl) − PNBP − r29*(base−modalExcl) − royalti − ongkir
                 // % terhadap (base − PPH); PNBP berjenjang → iterasi.
                 for (let i = 0; i < 10; i++) {
                     const pnbp = calcPnbpFromInclude(this.round(base * TAX_MULTIPLIER));
@@ -1553,7 +1560,7 @@
                     if (coeff <= 0) {
                         return this.effectiveSellExclude(p);
                     }
-                    const next = this.round((costInclude - r29 * cost + pnbp + shipping) / coeff);
+                    const next = this.round((costInclude - r29 * cost + pnbp + royalty + shipping) / coeff);
                     if (Math.abs(next - base) < 0.5) {
                         return next;
                     }
@@ -1613,12 +1620,14 @@
                 const isWapu = (p.tax_category || 'non_wapu') === 'wapu';
                 const rPph = this.pphPercentFor(p) / 100;
                 const r29 = this.appliesPph29(p) ? (Number(this.pph29Percent) || 0) / 100 : 0;
-                // Wapu: % vs (jual−PPH). Inaproc: coeff (1−rPph)*(1−pct) − r29 > 0.
+                // Wapu/Inaproc: % vs (jual−PPH). Non-wapu: coeff 1−rPph−pct > 0.
                 let maxPct = Math.max(100 - 0.01, 0);
                 if (this.appliesPph29(p) && (1 - rPph) > 0) {
                     maxPct = Math.max((1 - r29 / (1 - rPph)) * 100 - 0.01, 0);
                 } else if (isWapu) {
                     maxPct = Math.max(100 - 0.01, 0);
+                } else if (rPph > 0) {
+                    maxPct = Math.max((1 - rPph) * 100 - 0.01, 0);
                 }
                 if (pct < 0) pct = 0;
                 if (pct > maxPct) pct = maxPct;

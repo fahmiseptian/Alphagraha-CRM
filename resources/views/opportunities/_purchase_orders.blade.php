@@ -267,6 +267,26 @@
 
         return strcasecmp((string) $na, (string) $nb);
     });
+
+    // Margin (dari laporan PO per SO) untuk ditampilkan di header grup PO.
+    $poReportService = app(\App\Services\PurchaseOrderReportService::class);
+    $salesOrdersById = ($opportunity->salesOrders ?? collect())->keyBy('id');
+    foreach ($poTreeBySalesOrder as $soKey => &$soNode) {
+        $soNode['margin'] = null;
+        $soNode['margin_percent'] = null;
+        $soId = $soNode['sales_order_id'] ?? null;
+        if (! $soId) {
+            continue;
+        }
+        $soModel = $salesOrdersById->get($soId);
+        if (! $soModel) {
+            continue;
+        }
+        $summary = $poReportService->build($opportunity, $soModel)['summary'] ?? [];
+        $soNode['margin'] = isset($summary['total_profit']) ? (float) $summary['total_profit'] : null;
+        $soNode['margin_percent'] = isset($summary['margin_percent']) ? (float) $summary['margin_percent'] : null;
+    }
+    unset($soNode);
 @endphp
 
 @if ($canViewPo)
@@ -2560,6 +2580,19 @@
                                     {{ (int) $soNode['item_count'] }} item
                                     &middot;
                                     Modal {{ money($soNode['total_modal'], $poCurrency) }}
+                                    @if ($soNode['margin'] !== null)
+                                        &middot;
+                                        <span @class([
+                                            'font-medium',
+                                            'text-green-700' => $soNode['margin'] >= 0,
+                                            'text-red-600' => $soNode['margin'] < 0,
+                                        ])>
+                                            Margin {{ money($soNode['margin'], $poCurrency) }}
+                                            @if ($soNode['margin_percent'] !== null)
+                                                ({{ number_format($soNode['margin_percent'], 2, ',', '.') }}%)
+                                            @endif
+                                        </span>
+                                    @endif
                                 </p>
                             </div>
                         </button>
@@ -2797,7 +2830,20 @@
                                     @endif
                                 </p>
                                 <p class="text-xs text-slate-400">
-                                    {{ (int) $soNode['po_count'] }} PO · {{ money($soNode['total_modal'], $poCurrency) }}
+                                    {{ (int) $soNode['po_count'] }} PO · Modal {{ money($soNode['total_modal'], $poCurrency) }}
+                                    @if ($soNode['margin'] !== null)
+                                        ·
+                                        <span @class([
+                                            'font-medium',
+                                            'text-green-700' => $soNode['margin'] >= 0,
+                                            'text-red-600' => $soNode['margin'] < 0,
+                                        ])>
+                                            Margin {{ money($soNode['margin'], $poCurrency) }}
+                                            @if ($soNode['margin_percent'] !== null)
+                                                ({{ number_format($soNode['margin_percent'], 2, ',', '.') }}%)
+                                            @endif
+                                        </span>
+                                    @endif
                                 </p>
                             </div>
                             <div class="divide-y divide-slate-100">

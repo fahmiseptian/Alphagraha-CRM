@@ -85,7 +85,7 @@
                             <div class="truncate text-xs text-slate-400" title="{{ $log->snapshotValue('account_name') ?: '—' }}">{{ $log->snapshotValue('account_name') ?: '—' }}</div>
                         </td>
                         <td class="max-w-md text-sm text-slate-600">
-                            <span class="line-clamp-2">{{ $log->summary ?: '—' }}</span>
+                            <span class="line-clamp-2">{{ $log->displaySummary() }}</span>
                         </td>
                         <td class="text-slate-600">
                             {{ $log->actor?->display_name ?: ($log->actor_name ?: '—') }}

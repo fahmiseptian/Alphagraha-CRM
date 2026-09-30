@@ -396,8 +396,8 @@ class OpportunityLogService
             OpportunityLog::ACTION_DELETED => 'Opportunity dihapus',
             OpportunityLog::ACTION_STAGE_CHANGED => $fieldText !== '' ? $fieldText : 'Stage diubah',
             OpportunityLog::ACTION_PRODUCTS_UPDATED => $productText !== '' ? ucfirst($productText) : 'Daftar produk / harga diubah',
-            OpportunityLog::ACTION_DISCOUNT_APPROVED => 'Menyetujui diskon tambahan',
-            OpportunityLog::ACTION_DISCOUNT_REJECTED => 'Menolak diskon tambahan',
+            OpportunityLog::ACTION_DISCOUNT_APPROVED => $this->discountDecisionSummary(true, $changes, $snapshot),
+            OpportunityLog::ACTION_DISCOUNT_REJECTED => $this->discountDecisionSummary(false, $changes, $snapshot),
             OpportunityLog::ACTION_DISCOUNT_REVERTED => 'Mengembalikan diskon ke menunggu approval',
             OpportunityLog::ACTION_MARGIN_APPROVED => 'Menyetujui margin',
             OpportunityLog::ACTION_MARGIN_REJECTED => 'Menolak margin',
@@ -418,6 +418,57 @@ class OpportunityLogService
         $parts = array_values(array_filter(array_map('trim', $parts)));
 
         return implode(' · ', $parts);
+    }
+
+    /**
+     * Ringkasan approve/tolak diskon dengan nominal.
+     *
+     * @param  array{fields?: list<array<string, mixed>>}  $changes
+     * @param  array<string, mixed>  $snapshot
+     */
+    protected function discountDecisionSummary(bool $approved, array $changes, array $snapshot): string
+    {
+        $currency = (string) ($snapshot['amount_currency'] ?? 'IDR');
+        $from = null;
+        $to = null;
+        foreach ($changes['fields'] ?? [] as $field) {
+            if (($field['field'] ?? '') !== 'crm_discount_amount') {
+                continue;
+            }
+            $from = $field['from'] ?? null;
+            $to = $field['to'] ?? null;
+            break;
+        }
+
+        $requested = $from !== null && $from !== ''
+            ? (float) $from
+            : (float) ($snapshot['crm_discount_amount'] ?? 0);
+        $final = $to !== null && $to !== ''
+            ? (float) $to
+            : (float) ($snapshot['crm_discount_amount'] ?? 0);
+
+        if ($approved) {
+            $amount = $final > 0 ? $final : $requested;
+            $summary = 'Menyetujui diskon tambahan';
+            if ($amount > 0) {
+                $summary .= ' '.$this->displayValue('crm_discount_amount', $amount, $currency);
+            }
+            if ($requested > 0 && $amount > 0 && abs($requested - $amount) > 0.009) {
+                $summary .= ' (diajukan '.$this->displayValue('crm_discount_amount', $requested, $currency).')';
+            }
+
+            return $summary;
+        }
+
+        $summary = 'Menolak diskon tambahan';
+        if ($requested > 0) {
+            $summary .= ' '.$this->displayValue('crm_discount_amount', $requested, $currency);
+        }
+        if ($final > 0 && abs($final - $requested) > 0.009) {
+            $summary .= ' · nominal diperbolehkan '.$this->displayValue('crm_discount_amount', $final, $currency);
+        }
+
+        return $summary;
     }
 
     protected function valuesEqual(string $key, mixed $from, mixed $to): bool

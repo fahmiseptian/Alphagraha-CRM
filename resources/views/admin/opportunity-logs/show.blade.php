@@ -20,7 +20,7 @@
 <div class="grid gap-4 lg:grid-cols-3">
     <x-card class="lg:col-span-2">
         <h3 class="mb-3 text-sm font-semibold text-slate-800">Snapshot Opportunity</h3>
-        <p class="mb-4 text-sm text-slate-600">{{ $log->summary }}</p>
+        <p class="mb-4 text-sm text-slate-600">{{ $log->displaySummary() }}</p>
         <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
             <div>
                 <dt class="text-xs text-slate-400">Nama</dt>

@@ -76,16 +76,17 @@
                     </p>
                 </div>
                 <div>
-                    <label class="crm-label">No. PO customer</label>
-                    <input type="text" x-model="poNumber" class="crm-field" maxlength="100">
+                    <label class="crm-label">No. PO customer <span class="text-red-500">*</span></label>
+                    <input type="text" x-model="poNumber" class="crm-field" maxlength="100" required>
                 </div>
                 <div>
-                    <label class="crm-label">File PO</label>
+                    <label class="crm-label">File PO <span class="text-red-500">*</span></label>
                     <input type="file"
                            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
                            class="crm-field file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700"
-                           @change="onPoFile($event)">
-                    <p class="mt-1 text-xs text-slate-400">Opsional. PDF, JPG, JPEG, atau PNG. Maks. 5MB.</p>
+                           @change="onPoFile($event)"
+                           required>
+                    <p class="mt-1 text-xs text-slate-400">Wajib. PDF, JPG, JPEG, atau PNG. Maks. 5MB.</p>
                     <p class="mt-1 text-xs text-slate-600" x-show="poFileName" x-cloak x-text="'Dipilih: ' + poFileName"></p>
                     <p class="mt-1 text-xs text-red-600" x-show="poFileError" x-cloak x-text="poFileError"></p>
                 </div>
@@ -361,6 +362,14 @@ function salesOrderForm(cfg) {
                 alert('Setiap produk Sales Order wajib punya Brand dan Category. Lengkapi di opportunity.');
                 return;
             }
+            if (!String(this.poNumber || '').trim()) {
+                alert('No. PO customer wajib diisi.');
+                return;
+            }
+            if (!this.poFile) {
+                alert('File PO wajib diunggah.');
+                return;
+            }
             if (this.poFileError) {
                 alert(this.poFileError);
                 return;
@@ -382,7 +391,7 @@ function salesOrderForm(cfg) {
                 fd.append('same_as_billing', this.sameAsBilling ? '1' : '0');
                 fd.append('shipping_address_id', this.sameAsBilling ? (this.billingAddressId || '') : (this.shippingAddressId || ''));
                 if (this.shippingMethod) fd.append('shipping_method', this.shippingMethod);
-                if (this.poNumber) fd.append('po_number', this.poNumber);
+                fd.append('po_number', String(this.poNumber || '').trim());
                 if (this.requiredDelivery) fd.append('required_delivery', this.requiredDelivery);
                 if (this.note) fd.append('note', this.note);
                 this.items.forEach((it, i) => {
@@ -390,7 +399,7 @@ function salesOrderForm(cfg) {
                     fd.append('items[' + i + '][sku]', it.sku || '');
                     fd.append('items[' + i + '][qty]', it.qty);
                 });
-                if (this.poFile) fd.append('po_file', this.poFile);
+                fd.append('po_file', this.poFile);
                 const res = await fetch(this.cfg.storeUrl, {
                     method: 'POST',
                     headers: {

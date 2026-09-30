@@ -967,6 +967,11 @@ a.crm-leaderboard-table__row:hover .crm-leaderboard-table__sales p:first-child {
     grid-template-columns: 1.375rem minmax(0, 1fr) 4rem;
 }
 
+.crm-leaderboard-table--superadmin .crm-leaderboard-table__head,
+.crm-leaderboard-table--superadmin .crm-leaderboard-table__row {
+    grid-template-columns: 1.375rem minmax(0, 1fr) 4.25rem 4.25rem 3.75rem;
+}
+
 .crm-leaderboard-table--catalog .crm-leaderboard-table__head,
 .crm-leaderboard-table--catalog .crm-leaderboard-table__row {
     grid-template-columns: 1.375rem minmax(0, 1fr) 5.25rem 4.5rem;

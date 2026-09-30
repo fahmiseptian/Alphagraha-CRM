@@ -126,6 +126,62 @@ class OpportunityLog extends Model
         return self::ACTIONS[$this->action] ?? ucfirst(str_replace('_', ' ', (string) $this->action));
     }
 
+    /**
+     * Ringkasan tampilan: lengkapi nominal diskon untuk log approve/tolak lama.
+     */
+    public function displaySummary(): string
+    {
+        $summary = trim((string) ($this->summary ?: $this->actionLabel()));
+        $legacy = [
+            'Menyetujui diskon tambahan',
+            'Menolak diskon tambahan',
+        ];
+        if (! in_array($this->action, [self::ACTION_DISCOUNT_APPROVED, self::ACTION_DISCOUNT_REJECTED], true)
+            || ! in_array($summary, $legacy, true)) {
+            return $summary !== '' ? $summary : $this->actionLabel();
+        }
+
+        $currency = (string) ($this->snapshotValue('amount_currency') ?: 'IDR');
+        $from = null;
+        $to = null;
+        foreach ($this->fieldChanges() as $field) {
+            if (($field['field'] ?? '') !== 'crm_discount_amount') {
+                continue;
+            }
+            $from = $field['from'] ?? null;
+            $to = $field['to'] ?? null;
+            break;
+        }
+
+        $requested = $from !== null && $from !== ''
+            ? (float) $from
+            : (float) ($this->snapshotValue('crm_discount_amount') ?? 0);
+        $final = $to !== null && $to !== ''
+            ? (float) $to
+            : (float) ($this->snapshotValue('crm_discount_amount') ?? 0);
+
+        if ($this->action === self::ACTION_DISCOUNT_APPROVED) {
+            $amount = $final > 0 ? $final : $requested;
+            if ($amount > 0) {
+                $summary .= ' '.money($amount, $currency);
+            }
+            if ($requested > 0 && $amount > 0 && abs($requested - $amount) > 0.009) {
+                $summary .= ' (diajukan '.money($requested, $currency).')';
+            }
+
+            return $summary;
+        }
+
+        if ($requested > 0) {
+            $summary .= ' '.money($requested, $currency);
+        }
+        if ($final > 0 && abs($final - $requested) > 0.009) {
+            $summary .= ' · nominal diperbolehkan '.money($final, $currency);
+        }
+
+        return $summary;
+    }
+
     public function actionBadgeColor(): string
     {
         return match ($this->action) {
