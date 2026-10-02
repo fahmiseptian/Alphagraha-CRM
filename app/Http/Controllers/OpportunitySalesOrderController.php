@@ -434,6 +434,149 @@ class OpportunitySalesOrderController extends Controller
         return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
     }
 
+    public function edit(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): View
+    {
+        $this->authorizeCoreEdit($opportunity, $salesOrder);
+
+        $opportunity->load([
+            'account.emailAddresses',
+            'account.phoneNumbers',
+            'account.contacts.emailAddresses',
+            'account.contacts.phoneNumbers',
+            'account.addresses',
+            'contact.emailAddresses',
+            'contact.phoneNumbers',
+            'quotation',
+        ]);
+        $this->customerAddresses->ensurePrimaryFromAccount($opportunity->account);
+
+        return view('opportunities.sales-orders.create', [
+            'opportunity' => $opportunity,
+            'salesOrder' => $salesOrder,
+            'isEdit' => true,
+            'form' => $this->formPayload($opportunity, $salesOrder),
+        ]);
+    }
+
+    public function updateCore(Request $request, Opportunity $opportunity, OpportunitySalesOrder $salesOrder): RedirectResponse|JsonResponse
+    {
+        $this->authorizeCoreEdit($opportunity, $salesOrder);
+
+        $opportunity->load([
+            'account.emailAddresses',
+            'account.phoneNumbers',
+            'account.contacts.emailAddresses',
+            'account.contacts.phoneNumbers',
+            'contact.emailAddresses',
+            'contact.phoneNumbers',
+            'account.addresses',
+        ]);
+        $this->customerAddresses->ensurePrimaryFromAccount($opportunity->account);
+
+        $customerTop = $opportunity->account?->top() ?? CustomerTop::DEFAULT;
+        $allowedTop = array_keys(CustomerTop::optionsAllowedFor($customerTop));
+        $accountId = (string) ($opportunity->account_id ?? '');
+        $addressRule = Rule::exists('crm_customer_addresses', 'id')->where('account_id', $accountId);
+        $hasExistingPoFile = filled(data_get($salesOrder->agc_payload, 'po_file'));
+
+        $request->merge([
+            'payment' => CustomerTop::canonicalize($request->input('payment')),
+        ]);
+
+        $data = $request->validate([
+            'email' => ['nullable', 'email', 'max:255'],
+            'payment' => ['required', 'string', Rule::in($allowedTop)],
+            'po_number' => ['required', 'string', 'max:100'],
+            'required_delivery' => ['nullable', 'date'],
+            'note' => ['nullable', 'string', 'max:2000'],
+            'billing_address_id' => ['required', 'integer', $addressRule],
+            'shipping_address_id' => ['nullable', 'integer', $addressRule],
+            'same_as_billing' => ['nullable', 'boolean'],
+            'shipping_method' => ['nullable', 'string', 'max:150'],
+            'po_file' => [$hasExistingPoFile ? 'nullable' : 'required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.index' => ['required', 'integer', 'min:0'],
+            'items.*.sku' => ['nullable', 'string', 'max:100'],
+            'items.*.qty' => ['required', 'numeric', 'min:1'],
+        ], [
+            'payment.in' => 'TOP melebihi batas yang diizinkan untuk customer ini.',
+            'po_number.required' => 'No. PO customer wajib diisi.',
+            'billing_address_id.required' => 'Pilih alamat billing. Tambah alamat di data customer jika belum ada.',
+            'billing_address_id.exists' => 'Alamat billing tidak valid untuk customer ini.',
+            'shipping_address_id.exists' => 'Alamat shipping tidak valid untuk customer ini.',
+            'po_file.required' => 'File PO wajib diunggah.',
+            'po_file.mimes' => 'File PO harus PDF, JPG, JPEG, atau PNG.',
+            'po_file.max' => 'Ukuran file PO maksimal 5MB.',
+        ]);
+
+        $products = $opportunity->products->values();
+        $itemsSnapshot = collect($data['items'])->map(function ($item) use ($products) {
+            $product = $products->get((int) $item['index']) ?? [];
+
+            return [
+                'index' => (int) $item['index'],
+                'sku' => trim((string) ($item['sku'] ?? ($product['sku'] ?? ''))),
+                'qty' => (float) $item['qty'],
+                'name' => $product['name'] ?? null,
+                'brand' => $product['brand'] ?? '',
+                'category' => $product['category'] ?? '',
+                'sell_exclude' => $this->soUnitExclude($product),
+                'discount_exclude' => (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0),
+            ];
+        })->values()->all();
+
+        try {
+            $record = DB::transaction(function () use ($request, $opportunity, $salesOrder, $data, $itemsSnapshot) {
+                $data['same_as_billing'] = $request->boolean('same_as_billing');
+                if ($data['same_as_billing'] || empty($data['shipping_address_id'])) {
+                    $data['shipping_address_id'] = $data['billing_address_id'];
+                }
+                $data['email'] = $data['email'] ?: $opportunity->customerEmail();
+
+                $poFile = $request->file('po_file');
+                if ($poFile instanceof UploadedFile && $poFile->isValid()) {
+                    $data['po_file'] = $this->salesOrders->storeDocument($poFile, $salesOrder, 'po');
+                }
+
+                return $this->salesOrders->applyCoreUpdate($salesOrder, $opportunity, $data, $itemsSnapshot);
+            });
+        } catch (\RuntimeException $e) {
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+            }
+
+            return back()->withInput()->with('error', $e->getMessage());
+        }
+
+        $this->salesOrders->recordLog(
+            $record,
+            SalesOrderLog::ACTION_UPDATED,
+            ['payment', 'billing_address_id', 'shipping_address_id', 'po_number', 'items', 'note', 'required_delivery']
+        );
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_UPDATED,
+            null,
+            [
+                'force' => true,
+                'summary' => 'Sales Order diubah: '.$record->displayNumber(),
+            ]
+        );
+
+        $message = 'Sales Order berhasil diperbarui ('.$record->displayNumber().').';
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'redirect' => route('opportunities.sales-orders.show', [$opportunity, $record]),
+            ]);
+        }
+
+        return redirect()
+            ->route('opportunities.sales-orders.show', [$opportunity, $record])
+            ->with('success', $message);
+    }
+
     public function show(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): View
     {
         $this->authorizeView($opportunity);
@@ -445,16 +588,24 @@ class OpportunitySalesOrderController extends Controller
 
         /** @var \App\Models\User|null $user */
         $user = auth()->user();
-        $canEdit = (bool) ($user?->canUpdateSalesOrderFields() && $opportunity->stage === Opportunity::WON_STAGE)
-            && ! $salesOrder->isCancelled();
-        $canEditInvoice = (bool) ($user?->canEditSalesOrderInvoice() && $opportunity->stage === Opportunity::WON_STAGE)
-            && ! $salesOrder->isCancelled();
-        $canEditDelivery = (bool) ($user?->canEditSalesOrderDelivery() && $opportunity->stage === Opportunity::WON_STAGE)
-            && ! $salesOrder->isCancelled();
-        $canRequestCancel = (bool) ($user?->canRequestSalesOrderCancel() && $opportunity->stage === Opportunity::WON_STAGE)
+        $isWon = $opportunity->stage === Opportunity::WON_STAGE;
+        $canEdit = (bool) ($user?->canCreateSalesOrder() && $isWon)
+            && $salesOrder->isFieldEditable();
+        $canEditInvoice = (bool) ($user?->canEditSalesOrderInvoice() && $isWon)
+            && ! $salesOrder->isCancelled()
+            && ! $salesOrder->isCancelPending();
+        $canEditDelivery = (bool) ($user?->canEditSalesOrderDelivery() && $isWon)
+            && ! $salesOrder->isCancelled()
+            && ! $salesOrder->isCancelPending();
+        $canCompleteSo = (bool) ($user?->canCreateSalesOrder() && $isWon)
+            && ! $salesOrder->isCancelled()
+            && ! $salesOrder->isCancelPending()
+            && ! in_array($salesOrder->soStatus(), ['completed', 'complete'], true);
+        $canRequestCancel = (bool) ($user?->canRequestSalesOrderCancel() && $isWon)
             && ! $salesOrder->isCancelled()
             && (! $salesOrder->isCancelPending() || $user->canApproveSalesOrderCancel());
         $canApproveCancel = (bool) ($user?->canApproveSalesOrderCancel() && $salesOrder->isCancelPending());
+        $showEditUi = $canEdit || $canEditInvoice || $canEditDelivery || $canCompleteSo;
 
         return view('opportunities.sales-orders.show', [
             'opportunity' => $opportunity,
@@ -463,8 +614,13 @@ class OpportunitySalesOrderController extends Controller
             'canEdit' => $canEdit,
             'canEditInvoice' => $canEditInvoice,
             'canEditDelivery' => $canEditDelivery,
+            'canCompleteSo' => $canCompleteSo,
+            'showEditUi' => $showEditUi,
             'canRequestCancel' => $canRequestCancel,
             'canApproveCancel' => $canApproveCancel,
+            'editUrl' => $canEdit
+                ? route('opportunities.sales-orders.edit', [$opportunity, $salesOrder])
+                : null,
             'editForm' => [
                 'updateUrl' => route('opportunities.sales-orders.update', [$opportunity, $salesOrder]),
                 'email' => (string) ($detail['email'] ?? ''),
@@ -570,6 +726,18 @@ class OpportunitySalesOrderController extends Controller
             && ! ($user?->canEditSalesOrderDelivery() ?? false)
             && ! ($user?->canCreateSalesOrder() ?? false)) {
             abort(403, 'Anda tidak boleh mengubah data DO / pengiriman.');
+        }
+
+        $pendingOnlyKeys = ['po_number', 'nomor_ref', 'note', 'required_delivery'];
+        $touchesPendingOnlyFields = collect($pendingOnlyKeys)->contains(fn ($key) => array_key_exists($key, $data))
+            || $request->hasFile('po_file');
+        if ($touchesPendingOnlyFields && ! $salesOrder->isFieldEditable()) {
+            $message = 'Sales Order hanya bisa diedit saat status masih pending. Status saat ini: '.$salesOrder->soStatus().'.';
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => $message], 422);
+            }
+
+            return back()->with('error', $message);
         }
 
         $snap = is_array($salesOrder->agc_payload) ? $salesOrder->agc_payload : [];
@@ -858,9 +1026,10 @@ class OpportunitySalesOrderController extends Controller
     /**
      * @return array<string, mixed>
      */
-    protected function formPayload(Opportunity $opportunity): array
+    protected function formPayload(Opportunity $opportunity, ?OpportunitySalesOrder $salesOrder = null): array
     {
-        $items = $opportunity->products->values()->map(function ($p, $i) {
+        $opportunityProducts = $opportunity->products->values();
+        $sourceItems = $opportunityProducts->map(function ($p, $i) {
             $list = (float) ($p['sell_exclude'] ?? 0);
             $discount = (float) ($p['discount_exclude'] ?? $p['item_discount'] ?? 0);
 
@@ -878,6 +1047,39 @@ class OpportunitySalesOrderController extends Controller
             ];
         })->all();
 
+        $items = $sourceItems;
+        if ($salesOrder) {
+            $soItems = is_array($salesOrder->items) ? $salesOrder->items : [];
+            if ($soItems === [] && is_array($salesOrder->agc_payload['items'] ?? null)) {
+                $soItems = $salesOrder->agc_payload['items'];
+            }
+            $items = collect($soItems)->map(function ($item) use ($opportunityProducts, $sourceItems) {
+                $index = (int) ($item['index'] ?? 0);
+                $product = $opportunityProducts->get($index) ?? [];
+                $source = $sourceItems[$index] ?? null;
+                $list = (float) ($product['sell_exclude'] ?? ($source['list_sell_exclude'] ?? 0));
+                $discount = (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0);
+
+                return [
+                    'index' => $index,
+                    'name' => (string) ($item['name'] ?? $product['name'] ?? ($source['name'] ?? '')),
+                    'sku' => (string) ($item['sku'] ?? $product['sku'] ?? ($source['sku'] ?? '')),
+                    'qty' => (float) ($item['qty'] ?? 1),
+                    'qty_origin' => (float) ($source['qty_origin'] ?? $product['quantity'] ?? ($item['qty'] ?? 1)),
+                    'brand' => (string) ($item['brand'] ?? $product['brand'] ?? ($source['brand'] ?? '')),
+                    'category' => (string) ($item['category'] ?? $product['category'] ?? ($source['category'] ?? '')),
+                    'sell_exclude' => $product !== []
+                        ? $this->soUnitExclude($product)
+                        : (float) ($item['price'] ?? $item['sell_exclude'] ?? ($source['sell_exclude'] ?? 0)),
+                    'list_sell_exclude' => $list > 0 ? $list : (float) ($source['list_sell_exclude'] ?? 0),
+                    'has_item_discount' => $discount > 0 || (bool) ($source['has_item_discount'] ?? false),
+                ];
+            })->values()->all();
+            if ($items === []) {
+                $items = $sourceItems;
+            }
+        }
+
         $account = $opportunity->account;
         $customerTop = $account?->top() ?? CustomerTop::DEFAULT;
         $addresses = $this->customerAddresses->optionsForAccount($account);
@@ -887,40 +1089,84 @@ class OpportunitySalesOrderController extends Controller
         $salesContext = $this->salesOrders->salesCodeContext($opportunity, auth()->user());
         $preview = $this->salesOrders->previewDocumentNumbers($opportunity, auth()->user());
         $salesCodeError = null;
-        if ($salesContext['code'] === '') {
+        if ($salesContext['code'] === '' && ! $salesOrder) {
             $salesCodeError = 'Sales Code untuk '.$salesContext['owner'].' belum diisi. Minta admin mengisi Sales Code di menu Users.';
         }
 
+        $detail = $salesOrder ? $this->salesOrders->present($salesOrder, $opportunity) : [];
+        $billingId = $salesOrder?->billing_address_id ?: $defaultBilling;
+        $shippingId = $salesOrder?->shipping_address_id ?: $defaultShipping;
+        $payment = $salesOrder
+            ? CustomerTop::clamp((string) ($salesOrder->payment ?: ($detail['payment'] ?? '')), $customerTop)
+            : CustomerTop::clamp($opportunity->top(), $customerTop);
+        $requiredDelivery = $salesOrder?->required_delivery
+            ? optional($salesOrder->required_delivery)->format('Y-m-d')
+            : Carbon::now()->format('Y-m-d');
+        if ($salesOrder && ! empty($detail['required_delivery']) && ! $salesOrder->required_delivery) {
+            try {
+                $requiredDelivery = Carbon::parse($detail['required_delivery'])->format('Y-m-d');
+            } catch (\Throwable $e) {
+                // keep default
+            }
+        }
+
         return [
-            'email' => old('email', $opportunity->customerEmail() ?? ''),
+            'email' => old('email', $salesOrder?->email ?: ($detail['email'] ?? $opportunity->customerEmail() ?? '')),
             'customerName' => optional($account)->name ?: $opportunity->company ?: '',
             'customerEditUrl' => $opportunity->account_id ? route('customers.edit', $opportunity->account_id) : null,
             'customerShowUrl' => $opportunity->account_id ? route('customers.show', $opportunity->account_id) : null,
-            'payment' => old('payment', CustomerTop::clamp($opportunity->top(), $customerTop)),
+            'payment' => old('payment', $payment),
             'topOptions' => CustomerTop::optionsAllowedFor($customerTop),
             'customerTop' => $customerTop,
             'customerTopLabel' => CustomerTop::label($customerTop),
-            'poNumber' => old('po_number', ''),
-            'requiredDelivery' => old('required_delivery', Carbon::now()->format('Y-m-d')),
-            'note' => old('note', (string) ($opportunity->description ?? '')),
+            'poNumber' => old('po_number', $salesOrder?->po_number ?: ($detail['po_number'] ?? '')),
+            'requiredDelivery' => old('required_delivery', $requiredDelivery),
+            'note' => old('note', $salesOrder?->note ?? ($detail['note'] ?? (string) ($opportunity->description ?? ''))),
             'addresses' => $addresses,
-            'billingAddressId' => (string) old('billing_address_id', $defaultBilling),
-            'shippingAddressId' => (string) old('shipping_address_id', $defaultShipping),
+            'billingAddressId' => (string) old('billing_address_id', $billingId),
+            'shippingAddressId' => (string) old('shipping_address_id', $shippingId),
             'sameAsBilling' => old('same_as_billing') === null
-                ? (string) $defaultBilling === (string) $defaultShipping
+                ? (string) $billingId === (string) $shippingId
                 : filter_var(old('same_as_billing'), FILTER_VALIDATE_BOOLEAN),
-            'shippingMethod' => old('shipping_method', ''),
+            'shippingMethod' => old(
+                'shipping_method',
+                (string) ($detail['courier_name'] ?? $detail['shipping_name'] ?? '')
+            ),
             'items' => old('items', $items) ?: $items,
+            'sourceItems' => $sourceItems,
             'currency' => $opportunity->amount_currency ?: 'IDR',
             'brandCategoryError' => $opportunity->brandAndCategoryBlockReason(),
             'editOpportunityUrl' => route('opportunities.edit', $opportunity),
-            'previewSoNumber' => $preview['number'] ?? null,
-            'previewPsoNumber' => $preview['pso_number'] ?? null,
-            'previewSoRef' => $preview['nomor_ref'] ?? null,
+            'previewSoNumber' => $salesOrder?->displayNumber() ?: ($preview['number'] ?? null),
+            'previewPsoNumber' => $salesOrder
+                ? ($detail['pre_code'] ?? $salesOrder->displayPsoNumber())
+                : ($preview['pso_number'] ?? null),
+            'previewSoRef' => $salesOrder?->nomor_ref ?: ($detail['nomor_ref'] ?? ($preview['nomor_ref'] ?? null)),
             'salesCode' => $salesContext['code'],
             'salesCodeOwner' => $salesContext['owner'],
             'salesCodeError' => $salesCodeError,
+            'existingPoFile' => $salesOrder ? (string) ($detail['po_file'] ?? data_get($salesOrder->agc_payload, 'po_file', '')) : '',
         ];
+    }
+
+    protected function authorizeCoreEdit(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): void
+    {
+        $this->authorizeView($opportunity);
+        abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
+
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+        if (! $user?->canCreateSalesOrder()) {
+            abort(403, 'Anda tidak dapat mengubah Sales Order.');
+        }
+
+        if ($opportunity->stage !== Opportunity::WON_STAGE) {
+            abort(403, 'Sales Order hanya untuk opportunity Closed Won.');
+        }
+
+        if (! $salesOrder->isFieldEditable()) {
+            abort(403, 'Sales Order hanya bisa diedit saat status masih pending.');
+        }
     }
 
     protected function authorizeCreate(Opportunity $opportunity): void

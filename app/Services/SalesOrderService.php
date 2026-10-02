@@ -475,6 +475,89 @@ class SalesOrderService
     }
 
     /**
+     * Update field inti SO (payment, alamat, items, dll) saat masih pending.
+     * Status proses (so/payment/delivery) dan dokumen lanjutan tetap dipertahankan.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  list<array<string, mixed>>  $items
+     */
+    public function applyCoreUpdate(
+        OpportunitySalesOrder $salesOrder,
+        Opportunity $opportunity,
+        array $data,
+        array $items
+    ): OpportunitySalesOrder {
+        if (! $salesOrder->isFieldEditable()) {
+            throw new \RuntimeException(
+                'Sales Order hanya bisa diedit saat status masih pending. Status saat ini: '.$salesOrder->soStatus().'.'
+            );
+        }
+
+        $existing = is_array($salesOrder->agc_payload) ? $salesOrder->agc_payload : [];
+        $data['number'] = $salesOrder->number ?: ($existing['code'] ?? null);
+        $data['pso_number'] = $existing['pso_number'] ?? $existing['pre_code'] ?? $this->psoNumberFromSo($data['number']);
+        $data['nomor_ref'] = $salesOrder->nomor_ref ?: ($existing['nomor_ref'] ?? null);
+        $data['pso_nomor_ref'] = $existing['pso_nomor_ref'] ?? null;
+        $data['email'] = $data['email'] ?? $salesOrder->email ?: $opportunity->customerEmail();
+
+        $fresh = $this->buildSnapshot($opportunity, $data, $items, $existing['po_file'] ?? null);
+
+        $preserveKeys = [
+            'so_status',
+            'payment_status',
+            'delivery_status',
+            'po_agc',
+            'invoice_no',
+            'invoice_dt',
+            'paid_date',
+            'no_resi',
+            'faktur_pajak',
+            'foto_serah_terima',
+            'file_do',
+            'delivery_date',
+            'completed_dt',
+            'completed_date',
+            'unique_code',
+            'cancel_status',
+            'cancel_reason',
+            'cancel_review_note',
+            'cancel_requested_by',
+            'cancel_requested_by_name',
+            'cancel_requested_at',
+            'cancel_reviewed_by',
+            'cancel_reviewed_by_name',
+            'cancel_reviewed_at',
+            'cancelled_at',
+            'so_date',
+        ];
+        foreach ($preserveKeys as $key) {
+            if (array_key_exists($key, $existing)) {
+                $fresh[$key] = $existing[$key];
+            }
+        }
+        $fresh['so_status'] = $existing['so_status'] ?? 'pending';
+
+        if (array_key_exists('po_file', $data) && filled($data['po_file'])) {
+            $fresh['po_file'] = $data['po_file'];
+        }
+
+        $salesOrder->fill([
+            'email' => $fresh['email'] ?? $salesOrder->email,
+            'payment' => $fresh['payment'] ?? $salesOrder->payment,
+            'billing_address_id' => $data['billing_address_id'] ?? $salesOrder->billing_address_id,
+            'shipping_address_id' => $data['shipping_address_id'] ?? $salesOrder->shipping_address_id,
+            'po_number' => $data['po_number'] ?? $salesOrder->po_number,
+            'required_delivery' => $data['required_delivery'] ?? null,
+            'note' => $data['note'] ?? null,
+            'items' => $items,
+            'agc_payload' => $fresh,
+        ]);
+        $salesOrder->save();
+
+        return $salesOrder->fresh();
+    }
+
+    /**
      * Catat aksi SO untuk log Superadmin.
      *
      * @param  array<string, mixed>|null  $changes

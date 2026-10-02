@@ -232,4 +232,27 @@ class OpportunitySalesOrder extends Model
 
         return $soStatus === 'cancelled' || $this->cancelStatus() === self::CANCEL_APPROVED;
     }
+
+    public function soStatus(): string
+    {
+        $status = strtolower(trim((string) ($this->statusSnapshot()['so_status'] ?? '')));
+
+        return $status !== '' ? $status : 'pending';
+    }
+
+    public function isPending(): bool
+    {
+        return $this->soStatus() === 'pending';
+    }
+
+    public function isOnProcess(): bool
+    {
+        return in_array($this->soStatus(), ['onprocess', 'on_process', 'ondelivery'], true);
+    }
+
+    /** Field inti SO (PO customer, note, dll) hanya boleh diubah saat masih pending. */
+    public function isFieldEditable(): bool
+    {
+        return $this->isPending() && ! $this->isCancelled() && ! $this->isCancelPending();
+    }
 }

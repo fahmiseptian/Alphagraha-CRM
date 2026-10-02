@@ -1,20 +1,29 @@
 @extends('layouts.app')
-@section('title', 'Create Sales Order')
+@section('title', ! empty($isEdit) ? 'Edit Sales Order' : 'Create Sales Order')
 
 @section('content')
 @php
+    $isEdit = ! empty($isEdit);
     $cfg = [
         'form' => $form,
-        'storeUrl' => route('opportunities.sales-orders.store', $opportunity),
-        'showUrl' => route('opportunities.show', $opportunity),
+        'isEdit' => $isEdit,
+        'storeUrl' => $isEdit
+            ? route('opportunities.sales-orders.update-core', [$opportunity, $salesOrder])
+            : route('opportunities.sales-orders.store', $opportunity),
+        'showUrl' => $isEdit
+            ? route('opportunities.sales-orders.show', [$opportunity, $salesOrder])
+            : route('opportunities.show', $opportunity),
         'currency' => $form['currency'] ?? 'IDR',
     ];
 @endphp
 
 <div class="mb-6">
-    <a href="{{ route('opportunities.show', $opportunity) }}" class="crm-back"><i class="bi bi-arrow-left"></i> Kembali ke opportunity</a>
-    <h2 class="crm-page-title">Create Sales Order</h2>
+    <a href="{{ $cfg['showUrl'] }}" class="crm-back"><i class="bi bi-arrow-left"></i> {{ $isEdit ? 'Kembali ke Sales Order' : 'Kembali ke opportunity' }}</a>
+    <h2 class="crm-page-title">{{ $isEdit ? 'Edit Sales Order' : 'Create Sales Order' }}</h2>
     <p class="crm-page-desc">{{ $opportunity->name }} · {{ $form['customerName'] ?: 'Customer' }}</p>
+    @if ($isEdit)
+        <p class="mt-1 text-sm text-amber-700">Hanya bisa diedit saat status SO masih <strong>pending</strong>.</p>
+    @endif
 </div>
 
 <div x-data="salesOrderForm({{ \Illuminate\Support\Js::from($cfg) }})" x-init="init()">
@@ -25,7 +34,7 @@
                     <label class="crm-label">No. SO</label>
                     <input type="text" class="crm-field bg-slate-50 font-mono" readonly
                            value="{{ $form['previewSoNumber'] ?: 'Otomatis saat disimpan' }}">
-                    <p class="mt-1 text-xs text-slate-400">SO + tahun 2 digit + bulan + tanggal + 5 digit urutan.</p>
+                    <p class="mt-1 text-xs text-slate-400">{{ $isEdit ? 'Nomor SO tidak berubah saat edit.' : 'SO + tahun 2 digit + bulan + tanggal + 5 digit urutan.' }}</p>
                 </div>
                 <div>
                     <label class="crm-label">No. PSO</label>
@@ -80,13 +89,21 @@
                     <input type="text" x-model="poNumber" class="crm-field" maxlength="100" required>
                 </div>
                 <div>
-                    <label class="crm-label">File PO <span class="text-red-500">*</span></label>
+                    <label class="crm-label">File PO @if (! $isEdit || empty($form['existingPoFile']))<span class="text-red-500">*</span>@endif</label>
                     <input type="file"
                            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
                            class="crm-field file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700"
                            @change="onPoFile($event)"
-                           required>
-                    <p class="mt-1 text-xs text-slate-400">Wajib. PDF, JPG, JPEG, atau PNG. Maks. 5MB.</p>
+                           @if (! $isEdit || empty($form['existingPoFile'])) required @endif>
+                    <p class="mt-1 text-xs text-slate-400">
+                        {{ $isEdit ? 'Opsional jika sudah ada file. ' : 'Wajib. ' }}PDF, JPG, JPEG, atau PNG. Maks. 5MB.
+                    </p>
+                    @if ($isEdit && ! empty($form['existingPoFile']))
+                        <p class="mt-1 text-xs text-slate-600">
+                            File saat ini:
+                            <a href="{{ $form['existingPoFile'] }}" target="_blank" class="font-medium text-brand-600 hover:underline">Lihat file PO</a>
+                        </p>
+                    @endif
                     <p class="mt-1 text-xs text-slate-600" x-show="poFileName" x-cloak x-text="'Dipilih: ' + poFileName"></p>
                     <p class="mt-1 text-xs text-red-600" x-show="poFileError" x-cloak x-text="poFileError"></p>
                 </div>
@@ -201,9 +218,9 @@
         </x-card>
 
         <div class="flex justify-end gap-2">
-            <x-btn href="{{ route('opportunities.show', $opportunity) }}" variant="secondary">Batal</x-btn>
+            <x-btn href="{{ $cfg['showUrl'] }}" variant="secondary">Batal</x-btn>
             <x-btn type="submit" icon="bi-check-lg" ::disabled="saving || !canSubmitItems">
-                <span x-text="saving ? 'Menyimpan…' : 'Buat Sales Order'"></span>
+                <span x-text="saving ? 'Menyimpan…' : (cfg.isEdit ? 'Simpan Perubahan' : 'Buat Sales Order')"></span>
             </x-btn>
         </div>
     </form>
@@ -235,7 +252,8 @@ function salesOrderForm(cfg) {
         poFile: null,
         poFileName: '',
         poFileError: '',
-        sourceItems: JSON.parse(JSON.stringify(cfg.form.items || [])),
+        hasExistingPoFile: !!(cfg.form.existingPoFile),
+        sourceItems: JSON.parse(JSON.stringify(cfg.form.sourceItems || cfg.form.items || [])),
         items: JSON.parse(JSON.stringify(cfg.form.items || [])),
         saving: false,
         cfg,
@@ -366,7 +384,7 @@ function salesOrderForm(cfg) {
                 alert('No. PO customer wajib diisi.');
                 return;
             }
-            if (!this.poFile) {
+            if (!this.poFile && !this.hasExistingPoFile) {
                 alert('File PO wajib diunggah.');
                 return;
             }
@@ -399,7 +417,7 @@ function salesOrderForm(cfg) {
                     fd.append('items[' + i + '][sku]', it.sku || '');
                     fd.append('items[' + i + '][qty]', it.qty);
                 });
-                fd.append('po_file', this.poFile);
+                if (this.poFile) fd.append('po_file', this.poFile);
                 const res = await fetch(this.cfg.storeUrl, {
                     method: 'POST',
                     headers: {
@@ -411,12 +429,12 @@ function salesOrderForm(cfg) {
                 const json = await res.json().catch(() => ({}));
                 if (!res.ok || !json.success) {
                     const firstErr = json.errors ? Object.values(json.errors).flat()[0] : null;
-                    alert(json.message || firstErr || 'Gagal membuat Sales Order.');
+                    alert(json.message || firstErr || (this.cfg.isEdit ? 'Gagal memperbarui Sales Order.' : 'Gagal membuat Sales Order.'));
                     return;
                 }
                 window.location.href = json.redirect || this.cfg.showUrl;
             } catch (e) {
-                alert(e?.message || 'Gagal membuat Sales Order.');
+                alert(e?.message || (this.cfg.isEdit ? 'Gagal memperbarui Sales Order.' : 'Gagal membuat Sales Order.'));
             } finally {
                 this.saving = false;
             }

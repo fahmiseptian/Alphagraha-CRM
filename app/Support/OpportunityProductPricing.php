@@ -736,8 +736,8 @@ class OpportunityProductPricing
 
     /**
      * PPH Pasal 29 — hanya Inaproc.
-     * Per unit: (harga jual exclude − modal exclude) × rate.
-     * Total baris = hasil × qty (di pemanggil).
+     * Basis: (harga jual exclude − modal exclude) × rate.
+     * Pemanggil mengirim nilai total baris (satuan × qty) agar selaras dengan PNBP berjenjang.
      */
     public static function pph29(
         float $sellExclude,
@@ -855,11 +855,18 @@ class OpportunityProductPricing
         $costInclude = self::includeFromExclude($costExclude);
         $discountInclude = self::includeFromExclude($itemDiscount);
         $effectiveInclude = self::includeFromExclude($effectiveSell);
+
+        // Pajak & margin dihitung dari basis TOTAL baris (satuan × qty),
+        // terutama penting untuk PNBP berjenjang (cap/tier pada nilai include total).
+        $sellTotal = round($effectiveSell * $qty, 2);
+        $costTotal = round($costExclude * $qty, 2);
+        $shippingTotal = round($shippingExclude * $qty, 2);
+
         $pphPercent = self::pphPercentFor($taxCategory, $itemKind);
-        $pph = self::pph($effectiveSell, $taxCategory, $itemKind);
-        $pnbp = self::pnbp($effectiveSell, $taxCategory);
+        $pph = self::pph($sellTotal, $taxCategory, $itemKind);
+        $pnbp = self::pnbp($sellTotal, $taxCategory);
         $pnbpTier = self::appliesPnbp($taxCategory)
-            ? self::matchPnbpTier($effectiveInclude)
+            ? self::matchPnbpTier(self::includeFromExclude($sellTotal))
             : null;
         $zinitFees = self::appliesZinit($taxCategory)
             ? self::zinitFeesFromSellExclude($effectiveSell, $qty)
@@ -869,11 +876,11 @@ class OpportunityProductPricing
         );
         $hasRoyalty = $royaltyType !== '';
         $royaltyPercent = self::royaltyPercentFor($royaltyType);
-        $royalty = self::royalty($costExclude, $royaltyType);
-        $grossMargin = self::grossMargin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
-        $pph29 = self::pph29($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount);
-        $margin = self::margin($sellExclude, $costExclude, $taxCategory, $itemKind, $itemDiscount, $qty, $royaltyType, $shippingExclude);
-        $marginPercent = self::marginPercent($margin, $sellExclude, $taxCategory, $itemKind, $itemDiscount, $qty);
+        $royalty = round(self::royalty($costExclude, $royaltyType) * $qty, 2);
+        $grossMargin = self::grossMargin($sellTotal, $costTotal, $taxCategory, $itemKind, 0, $qty);
+        $pph29 = self::pph29($sellTotal, $costTotal, $taxCategory, $itemKind, 0);
+        $margin = self::margin($sellTotal, $costTotal, $taxCategory, $itemKind, 0, $qty, $royaltyType, $shippingTotal);
+        $marginPercent = self::marginPercent($margin, $sellTotal, $taxCategory, $itemKind, 0, $qty);
 
         $zinitFeeTotal = (float) ($zinitFees['success_fee'] ?? 0);
         $zinitPotFee = self::appliesZinit($taxCategory)

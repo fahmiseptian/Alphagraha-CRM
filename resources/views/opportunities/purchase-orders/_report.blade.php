@@ -1,10 +1,12 @@
 {{-- Laporan rekap PO per opportunity (shared preview + PDF) --}}
 @php
     $s = $report['summary'];
+    $isInaproc = (bool) ($report['is_inaproc'] ?? false);
     $fmt = function ($amount) {
         if ($amount === null || $amount === '') {
             return '';
         }
+
         return number_format((float) $amount, 0, ',', '.');
     };
     $fmtPct = function ($pct) {
@@ -59,14 +61,14 @@
                 <th class="col-label"></th>
                 <th>Nilai Incl PPN</th>
                 <th>Nilai Excl PPN</th>
-                <th>PPh 23</th>
+                <th>PPh 22</th>
                 <th>Terima Uang</th>
                 <th>Persentase</th>
             </tr>
         </thead>
         <tbody>
             <tr>
-                <td class="col-label">Nilai Jual</td>
+                <td class="col-label">{{ $s['nilai_jual_label'] ?? 'Nilai Jual' }}</td>
                 <td class="num">{{ $fmt($s['nilai_jual_incl']) }}</td>
                 <td class="num">{{ $fmt($s['nilai_jual_excl']) }}</td>
                 <td class="{{ ($s['pph_23'] ?? null) ? 'num' : 'blank' }}">{{ $fmt($s['pph_23'] ?? null) }}</td>
@@ -127,12 +129,53 @@
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="num">{{ $fmt($s['total_profit']) }}</td>
-                <td class="num">{{ $fmtPct($s['total_profit_percent']) }}</td>
+                <td class="num">
+                    {{ $fmtPct($s['total_profit_percent']) }}
+                    @if ($isInaproc && ($s['margin_percent'] ?? null) !== null)
+                        <span class="pct-secondary">{{ $fmtPct($s['margin_percent']) }}</span>
+                    @endif
+                </td>
             </tr>
+            @if ($isInaproc)
+                <tr>
+                    <td class="col-label">PPh 29</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="num">{{ ($s['pph_29'] ?? null) !== null ? '-'.$fmt($s['pph_29']) : '' }}</td>
+                    <td class="blank">&nbsp;</td>
+                </tr>
+                <tr class="row-total">
+                    <td class="col-label">Net Profit</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="num">{{ $fmt($s['net_profit_after_pph29'] ?? null) }}</td>
+                    <td class="blank">&nbsp;</td>
+                </tr>
+                <tr>
+                    <td class="col-label">PNBP</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="num cell-pnbp">{{ $fmt($s['pnbp'] ?? null) }}</td>
+                    <td class="blank">&nbsp;</td>
+                </tr>
+                <tr class="row-total">
+                    <td class="col-label">Net Profit</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="blank">&nbsp;</td>
+                    <td class="num">{{ $fmt($s['net_profit'] ?? null) }}</td>
+                    <td class="blank">&nbsp;</td>
+                </tr>
+            @endif
         </tbody>
     </table>
 
-    <div class="margin-banner">{{ $fmtPct($s['margin_percent']) }}</div>
+    @unless ($isInaproc)
+        <div class="margin-banner">{{ $fmtPct($s['margin_percent']) }}</div>
+    @endunless
 
     <table class="po-settled">
         <tr>

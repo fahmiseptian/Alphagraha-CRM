@@ -26,6 +26,8 @@
 }
 .po-summary .col-label { width: 110px; font-weight: 600; background: #fafafa; }
 .po-summary .row-total td { font-weight: 700; background: #f9fafb; }
+.po-summary .cell-pnbp { background: #e5e7eb; font-weight: 600; }
+.po-summary .pct-secondary { display: block; font-weight: 600; margin-top: 2px; }
 
 .margin-banner {
     display: block; margin: 4px 0 10px; margin-left: auto; width: fit-content;

@@ -916,11 +916,7 @@ class QuotationService
         $discountInclude = $this->toIncludePrice((float) $quotation->discount, $multiplier);
         $totalInclude = round(max($subtotalInclude - $discountInclude, 0), 2);
 
-        $rows = '<tr>'
-            .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
-            .'<td style="'.$labelStyle.'">Subtotal</td>'
-            .'<td style="'.$valueStyle.'">'.money($subtotalInclude, $currency).'</td>'
-            .'</tr>';
+        $rows = '';
 
         if ($discountInclude > 0) {
             $rows .= '<tr>'

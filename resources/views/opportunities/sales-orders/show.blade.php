@@ -106,8 +106,25 @@
         : (string) ($detail['po_agc'] ?? '');
     $canViewPoDetail = auth()->user()?->canViewPurchaseOrders()
         && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE;
+    $canEdit = (bool) ($canEdit ?? false);
     $canEditInvoice = (bool) ($canEditInvoice ?? false);
     $canEditDelivery = (bool) ($canEditDelivery ?? false);
+    // Fallback: pastikan tombol Edit SO muncul jika status pending + role boleh create SO
+    if (! $canEdit
+        && (auth()->user()?->canCreateSalesOrder() ?? false)
+        && $opportunity->stage === \App\Models\Espo\Opportunity::WON_STAGE
+        && $salesOrder->isFieldEditable()) {
+        $canEdit = true;
+    }
+    $editUrl = $editUrl
+        ?? ($canEdit ? route('opportunities.sales-orders.edit', [$opportunity, $salesOrder]) : null);
+    if ($canEdit && blank($editUrl)) {
+        $editUrl = route('opportunities.sales-orders.edit', [$opportunity, $salesOrder]);
+    }
+    $showEditUi = (bool) ($showEditUi ?? ($canEdit || $canEditInvoice || $canEditDelivery));
+    if ($canEdit) {
+        $showEditUi = true;
+    }
     $paymentStatusKey = strtolower((string) ($detail['payment_status'] ?? ''));
     $deliveryStatusKey = strtolower((string) ($detail['delivery_status'] ?? ''));
     $cancelLocked = $salesOrder->isCancelled() || $salesOrder->isCancelPending();
@@ -120,9 +137,12 @@
         && ! in_array($deliveryStatusKey, ['completed', 'complete'], true)
         && ! $cancelLocked;
     $soStatusKey = strtolower((string) ($detail['so_status'] ?? ''));
-    $canCompleteSo = (bool) (($canEdit ?? false) && (auth()->user()?->canCreateSalesOrder() ?? false))
+    $canCompleteSo = (bool) ($canCompleteSo ?? false)
         && ! in_array($soStatusKey, ['completed', 'complete', 'cancelled'], true)
         && ! $salesOrder->isCancelPending();
+    if ($canMarkPaid || $canCompleteDelivery || $canCompleteSo) {
+        $showEditUi = true;
+    }
     $cancelRequestedAt = $fmtDate($detail['cancel_requested_at'] ?? null);
     $cancelReviewedAt = $fmtDate($detail['cancel_reviewed_at'] ?? $detail['cancelled_at'] ?? null);
     $requiredDeliveryRaw = $detail['required_delivery'] ?? $salesOrder->required_delivery;
@@ -170,7 +190,7 @@
 
 @section('content')
 <div x-data="salesOrderDetail({{ \Illuminate\Support\Js::from([
-    'canEdit' => $canEdit ?? false,
+    'canEdit' => $canEdit,
     'editForm' => $editForm ?? [],
     'redirect' => url()->current(),
 ]) }})" x-init="init()">
@@ -199,6 +219,14 @@
                title="Download PDF Sales Order">
                 <i class="bi bi-file-earmark-pdf"></i>
             </a>
+            @if ($canEdit && ! empty($editUrl))
+                <a href="{{ $editUrl }}"
+                   class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                   title="Edit Sales Order">
+                    <i class="bi bi-pencil-square"></i>
+                    <span>Edit SO</span>
+                </a>
+            @endif
             @if ($canRequestCancel)
                 <button type="button"
                         @click="$dispatch('open-cancel-so')"
@@ -354,16 +382,23 @@
         <div class="bg-white px-5 py-4">
             <div class="flex items-start justify-between gap-2">
                 <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">No. PO customer</p>
-                @if ($canEdit ?? false)
-                    <button type="button" @click="openEdit('po_number')" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Edit No. PO customer">
+                @if ($canEdit && ! empty($editUrl))
+                    <a href="{{ $editUrl }}" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Edit No. PO customer">
                         <i class="bi bi-pencil text-xs"></i>
-                    </button>
+                    </a>
                 @endif
             </div>
             <p class="mt-1 text-sm font-semibold text-slate-800">{{ $poCustomerNumber !== '' ? $poCustomerNumber : '—' }}</p>
         </div>
         <div class="bg-white px-5 py-4">
-            <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Pembayaran</p>
+            <div class="flex items-start justify-between gap-2">
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Pembayaran</p>
+                @if ($canEdit && ! empty($editUrl))
+                    <a href="{{ $editUrl }}" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Edit pembayaran / TOP">
+                        <i class="bi bi-pencil text-xs"></i>
+                    </a>
+                @endif
+            </div>
             <p class="mt-1 text-sm font-semibold text-slate-800">{{ $payLabel }}</p>
         </div>
         <div class="bg-white px-5 py-4 sm:col-span-2 lg:col-span-1">
@@ -389,6 +424,11 @@
                 <div class="flex items-center gap-2">
                     @if ($sameAddress && $block['title'] === 'Shipping Address')
                         <x-badge color="brand">Sama dengan billing</x-badge>
+                    @endif
+                    @if ($canEdit && ! empty($editUrl))
+                        <a href="{{ $editUrl }}" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Edit alamat">
+                            <i class="bi bi-pencil text-xs"></i>
+                        </a>
                     @endif
                 </div>
             </div>
@@ -435,6 +475,14 @@
 </div>
 
 <div class="mb-5 overflow-x-auto rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div class="mb-3 flex items-center justify-between gap-2">
+        <h3 class="text-sm font-semibold text-slate-800">Item</h3>
+        @if ($canEdit && ! empty($editUrl))
+            <a href="{{ $editUrl }}" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-brand-600" title="Edit item Sales Order">
+                <i class="bi bi-pencil"></i> Edit item
+            </a>
+        @endif
+    </div>
     @if ($items)
         <table class="so-items-table">
             <thead>
@@ -635,7 +683,7 @@
                     @else
                         <span>—</span>
                     @endif
-                    @if ($canEdit ?? false)
+                    @if ($canEditInvoice)
                         <button type="button" @click="openEdit('faktur_pajak')" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Upload Faktur">
                             <i class="bi bi-pencil text-xs"></i>
                         </button>
@@ -651,7 +699,7 @@
                     @else
                         <span>—</span>
                     @endif
-                    @if ($canEdit ?? false)
+                    @if ($canEditDelivery)
                         <button type="button" @click="openEdit('foto_serah_terima')" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="Upload BAST">
                             <i class="bi bi-pencil text-xs"></i>
                         </button>
@@ -774,24 +822,32 @@
     </div>
 @endif
 
-@if ($canEdit ?? false)
+@if ($showEditUi)
     <div x-show="editOpen" x-cloak x-ref="editModalRoot"
          class="fixed inset-0 z-[65] flex items-center justify-center p-4" role="dialog" aria-modal="true">
         <div class="absolute inset-0 bg-slate-900/50" @click="editOpen = false"></div>
         <div class="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl" @click.stop>
             <div class="border-b border-slate-100 px-5 py-4">
                 <h3 class="font-semibold text-slate-800">Edit Sales Order</h3>
-                <p class="mt-0.5 text-sm text-slate-500">Perubahan disimpan di CRM. Produk dan TOP tidak bisa diubah di sini.</p>
+                <p class="mt-0.5 text-sm text-slate-500">
+                    @if ($canEdit)
+                        Perubahan disimpan di CRM. Produk dan TOP tidak bisa diubah di sini.
+                    @else
+                        Field inti SO terkunci karena status sudah {{ $soStatusKey ?: 'onprocess' }}. Invoice/pengiriman tetap bisa diupdate.
+                    @endif
+                </p>
             </div>
             <form @submit.prevent="saveEdit" class="space-y-4 px-5 py-4">
                 <p x-show="editError" x-cloak class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" x-text="editError"></p>
 
+                @if ($canEdit)
                 <div x-show="focusField === 'all' || focusField === 'po_number'">
                     <label class="crm-label">No. PO customer</label>
                     <input type="text" x-model="form.po_number" maxlength="100" class="crm-field">
                 </div>
+                @endif
 
-                @if (auth()->user()?->isSuperAdmin())
+                @if (auth()->user()?->isSuperAdmin() || $canEditInvoice)
                     <div x-show="focusField === 'all' || focusField === 'invoice_no'">
                         <label class="crm-label">Invoice</label>
                         <input type="text" x-model="form.invoice_no" maxlength="100" class="crm-field">
@@ -803,6 +859,7 @@
                     </div>
                 @endif
 
+                @if ($canEdit)
                 <div x-show="focusField === 'all' || focusField === 'nomor_ref'">
                     <label class="crm-label">Nomor referensi</label>
                     <input type="text" x-model="form.nomor_ref" maxlength="100" class="crm-field">
@@ -812,6 +869,7 @@
                     <label class="crm-label">Required delivery</label>
                     <input type="date" x-model="form.required_delivery" class="crm-field">
                 </div>
+                @endif
 
                 <div x-show="focusField === 'payment_paid'">
                     <label class="crm-label">Update Pembayaran</label>
@@ -823,6 +881,7 @@
                     <p class="text-sm text-slate-600">Klik simpan untuk mengubah status SO menjadi <strong>completed</strong>. Pastikan pembayaran sudah paid dan pengiriman sudah complete.</p>
                 </div>
 
+                @if ($canEditDelivery)
                 <div x-show="focusField === 'all' || focusField === 'no_resi'">
                     <label class="crm-label">No. DO/Resi/AWB</label>
                     <input type="text" x-model="form.no_resi" maxlength="100" class="crm-field">
@@ -832,24 +891,31 @@
                     <label class="crm-label">Metode pengiriman</label>
                     <input type="text" x-model="form.shipping_method" maxlength="150" class="crm-field" placeholder="Contoh: JNE, ambil sendiri">
                 </div>
+                @endif
 
+                @if ($canEdit)
                 <div x-show="focusField === 'all' || focusField === 'po_file'">
                     <label class="crm-label">Upload file PO customer</label>
                     <input type="file" x-ref="poFileInput" @change="setFile($event, 'po_file')" accept=".pdf,.jpg,.jpeg,.png,.webp" class="crm-field">
                     <p class="mt-1 text-xs text-slate-400">Maks 5MB. PDF, JPG, JPEG, PNG, atau WEBP.</p>
                 </div>
+                @endif
 
+                @if ($canEditInvoice)
                 <div x-show="focusField === 'all' || focusField === 'faktur_pajak'">
                     <label class="crm-label">Upload Faktur</label>
                     <input type="file" x-ref="fakturFileInput" @change="setFile($event, 'faktur_pajak_file')" accept=".pdf,.jpg,.jpeg,.png,.webp" class="crm-field">
                     <p class="mt-1 text-xs text-slate-400">Maks 5MB. PDF, JPG, JPEG, PNG, atau WEBP.</p>
                 </div>
+                @endif
 
+                @if ($canEditDelivery)
                 <div x-show="focusField === 'all' || focusField === 'foto_serah_terima'">
                     <label class="crm-label">Upload BAST</label>
                     <input type="file" x-ref="bastFileInput" @change="setFile($event, 'foto_serah_terima_file')" accept=".pdf,.jpg,.jpeg,.png,.webp" class="crm-field">
                     <p class="mt-1 text-xs text-slate-400">Maks 5MB. PDF, JPG, JPEG, PNG, atau WEBP.</p>
                 </div>
+                @endif
 
                 <div x-show="focusField === 'file_do'">
                     <label class="crm-label">Upload file DO</label>
@@ -857,10 +923,12 @@
                     <p class="mt-1 text-xs text-slate-400">Wajib. Jika pembayaran sudah paid/settlement, pengiriman akan otomatis complete.</p>
                 </div>
 
+                @if ($canEdit)
                 <div x-show="focusField === 'all' || focusField === 'note'">
                     <label class="crm-label">Catatan</label>
                     <textarea x-model="form.note" rows="3" maxlength="2000" class="crm-field"></textarea>
                 </div>
+                @endif
 
                 <div class="flex justify-end gap-2 border-t border-slate-100 pt-4">
                     <button type="button" @click="editOpen = false"
@@ -879,7 +947,6 @@
 </div>
 @endsection
 
-@if ($canEdit ?? false)
 @push('scripts')
 <script>
 function salesOrderDetail(cfg) {
@@ -1002,4 +1069,3 @@ function salesOrderDetail(cfg) {
 }
 </script>
 @endpush
-@endif

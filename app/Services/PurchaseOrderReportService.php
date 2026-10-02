@@ -35,7 +35,8 @@ class PurchaseOrderReportService
 
         $currency = $opportunity->amount_currency ?: 'IDR';
         $isPerSo = $salesOrder !== null;
-        $isWapu = $this->isWapuOpportunity($opportunity);
+        $isWapu = $this->isWapuStyleOpportunity($opportunity);
+        $isInaproc = $this->isInaprocOpportunity($opportunity);
 
         if ($isPerSo) {
             [$nilaiJualExcl, $nilaiJualIncl, $pph23] = $this->sumSalesFromSalesOrder($opportunity, $salesOrder);
@@ -58,7 +59,7 @@ class PurchaseOrderReportService
                 fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['effective_sell_include'] ?? $p['sell_include'] ?? 0)
             ), 2);
             $pph23 = round($products->sum(
-                fn (array $p) => (float) ($p['quantity'] ?? 1) * (float) ($p['pph'] ?? 0)
+                fn (array $p) => (float) ($p['pph'] ?? 0)
             ), 2);
             $purchaseOrders = $opportunity->purchaseOrders;
             $modalOngkirExcl = $opportunity->crm_shipping_cost !== null
@@ -84,8 +85,8 @@ class PurchaseOrderReportService
         $modalIncl = round((float) $poRows->sum('jumlah_include'), 2);
 
         if ($isWapu) {
-            // WAPU:
-            // Terima Uang = Nilai Jual Excl PPN − PPh 23
+            // WAPU / Inaproc:
+            // Terima Uang = Nilai Jual Excl PPN − PPh 22 (barang) / PPh 23 (jasa)
             // Profit Barang = Terima Uang − Modal Incl PPN − Diskon
             $terimaUang = round($nilaiJualExcl - $pph23, 2);
             $grossMarginBase = round($terimaUang - $modalIncl, 2);
@@ -105,6 +106,22 @@ class PurchaseOrderReportService
             2
         );
         $totalProfit = round($profitBarang + $profitOngkir, 2);
+
+        // Inaproc: potongan tambahan setelah Total Profit (basis rekap PO, bukan per-item).
+        // PPh 29 = (Nilai Jual Excl − Modal Excl) × rate
+        // PNBP = MIN(Nilai Jual Incl × rate, cap) berjenjang
+        $pph29 = 0.0;
+        $pnbp = 0.0;
+        $netProfitAfterPph29 = null;
+        $netProfit = null;
+        if ($isInaproc) {
+            $pph29Rate = OpportunityProductPricing::pph29Percent() / 100;
+            $pph29Base = max(0.0, $nilaiJualExcl - $modalExcl);
+            $pph29 = $pph29Rate > 0 ? round($pph29Base * $pph29Rate, 2) : 0.0;
+            $pnbp = OpportunityProductPricing::pnbpFromInclude($nilaiJualIncl);
+            $netProfitAfterPph29 = round($totalProfit - $pph29, 2);
+            $netProfit = round($netProfitAfterPph29 - $pnbp, 2);
+        }
 
         $modalRowPercent = $netJualExclBeforeDiskon > 0
             ? round(($grossMarginBase / $netJualExclBeforeDiskon) * 100, 2)
@@ -128,6 +145,7 @@ class PurchaseOrderReportService
                 : 'Keseluruhan',
             'currency' => $currency,
             'is_wapu' => $isWapu,
+            'is_inaproc' => $isInaproc,
             'invoice_date' => null,
             'invoice_number' => null,
             'payment_term_label' => $this->resolvePaymentTermLabel($opportunity, $salesOrder),
@@ -142,6 +160,7 @@ class PurchaseOrderReportService
             'surcharge_cash_percent' => \App\Support\PurchaseOrderPricing::cashSurchargePercent(),
             'surcharge_top_percent' => \App\Support\PurchaseOrderPricing::topSurchargePercent(),
             'summary' => [
+                'nilai_jual_label' => $isInaproc ? 'Nilai PKM' : 'Nilai Jual',
                 'nilai_jual_incl' => $nilaiJualIncl,
                 'nilai_jual_excl' => $nilaiJualExcl,
                 'pph_23' => $pph23 > 0 ? $pph23 : null,
@@ -161,6 +180,10 @@ class PurchaseOrderReportService
                 'total_profit' => $totalProfit,
                 'total_profit_percent' => $totalProfitPercent,
                 'margin_percent' => $marginPercent,
+                'pph_29' => $isInaproc && $pph29 > 0 ? $pph29 : null,
+                'pnbp' => $isInaproc && $pnbp > 0 ? $pnbp : null,
+                'net_profit_after_pph29' => $netProfitAfterPph29,
+                'net_profit' => $netProfit,
             ],
             'po_rows' => $poRows->all(),
             'po_total_exclude' => $modalExcl,
@@ -169,25 +192,55 @@ class PurchaseOrderReportService
     }
 
     /**
-     * Opportunity dianggap WAPU jika kategori pajak produk dominan / pertama adalah Wapu.
+     * Opportunity memakai rumus Terima Uang ala Wapu
+     * (Nilai Jual Excl PPN − PPh) jika kategori pajak dominan adalah Wapu atau Inaproc.
      */
-    protected function isWapuOpportunity(Opportunity $opportunity): bool
+    protected function isWapuStyleOpportunity(Opportunity $opportunity): bool
+    {
+        return $this->dominantTaxCategoriesCount(
+            $opportunity,
+            [OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_INAPROC]
+        ) > 0;
+    }
+
+    /**
+     * Opportunity Inaproc (mayoritas produk) — tampilkan PPh 29 + PNBP + Net Profit.
+     */
+    protected function isInaprocOpportunity(Opportunity $opportunity): bool
+    {
+        return $this->dominantTaxCategoriesCount(
+            $opportunity,
+            [OpportunityProductPricing::TAX_INAPROC]
+        ) > 0;
+    }
+
+    /**
+     * @param  list<string>  $categories
+     */
+    protected function dominantTaxCategoriesCount(Opportunity $opportunity, array $categories): int
     {
         $products = $opportunity->products;
         if ($products->isEmpty()) {
-            return false;
+            return 0;
         }
 
-        $wapuCount = $products->filter(
-            fn (array $p) => ($p['tax_category'] ?? '') === OpportunityProductPricing::TAX_WAPU
+        $matched = $products->filter(
+            fn (array $p) => in_array($p['tax_category'] ?? '', $categories, true)
         )->count();
 
-        if ($wapuCount === 0) {
-            return false;
+        if ($matched === 0) {
+            return 0;
         }
 
-        // Semua produk Wapu, atau mayoritas Wapu.
-        return $wapuCount >= (int) ceil($products->count() / 2);
+        return $matched >= (int) ceil($products->count() / 2) ? $matched : 0;
+    }
+
+    /**
+     * @deprecated Gunakan isWapuStyleOpportunity().
+     */
+    protected function isWapuOpportunity(Opportunity $opportunity): bool
+    {
+        return $this->isWapuStyleOpportunity($opportunity);
     }
 
     /**
@@ -302,11 +355,16 @@ class PurchaseOrderReportService
                 $unitIncl = OpportunityProductPricing::includeFromExclude($unitExcl);
             }
 
-            $pphUnit = (float) ($product['pph'] ?? 0);
+            $pphTotal = (float) ($product['pph'] ?? 0);
+            $oppQty = (float) ($product['quantity'] ?? 1);
+            if ($oppQty <= 0) {
+                $oppQty = 1;
+            }
 
             $nilaiJualExcl += $qty * $unitExcl;
             $nilaiJualIncl += $qty * $unitIncl;
-            $pph23 += $qty * $pphUnit;
+            // pph di produk sudah basis total baris opportunity → prorata ke qty SO
+            $pph23 += ($pphTotal / $oppQty) * $qty;
         }
 
         return [

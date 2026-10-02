@@ -402,8 +402,8 @@
                                     $qty = (float) ($p['quantity'] ?? 1);
                                     $taxCat = (string) ($p['tax_category'] ?? \App\Support\OpportunityProductPricing::TAX_NON_WAPU);
                                     $lineBasisMargin = $taxCat === \App\Support\OpportunityProductPricing::TAX_INAPROC
-                                        ? round($qty * (float) ($p['gross_margin'] ?? $p['margin'] ?? 0), 2)
-                                        : round($qty * (float) ($p['margin'] ?? 0), 2);
+                                        ? round((float) ($p['gross_margin'] ?? $p['margin'] ?? 0), 2)
+                                        : round((float) ($p['margin'] ?? 0), 2);
                                     $lineCostExcl = round($qty * (float) ($p['cost_exclude'] ?? 0), 2);
                                     $lineCostIncl = round($qty * (float) ($p['cost_include'] ?? 0), 2);
                                     $lineSellExcl = round($qty * (float) ($p['effective_sell_exclude'] ?? $p['sell_exclude'] ?? 0), 2);

@@ -359,7 +359,7 @@
                             <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
                         </div>
                         @if (auth()->user()?->isSuperAdmin())
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude atau Include bisa diisi (saling hitung via PPN); modal ongkir per satuan mengurangi margin; % margin (putih) bisa diubah; potongan pajak &amp; nilai margin (kuning) otomatis.</p>
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude/Include = satuan; kolom Total = include × qty (pajak/margin total di kolom kanan). % margin (putih) bisa diubah.</p>
                         @endif
                     </div>
 
@@ -420,7 +420,7 @@
                                                x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(p.quantity, 2)"
                                                @focus="editingField = `qty-${i}`"
                                                @blur="editingField = null; $el.value = formatId(p.quantity, 2)"
-                                               @input="p.quantity = parseId($event.target.value); refreshDiscountFromMargin()"
+                                               @input="p.quantity = parseId($event.target.value); onQuantityChange(p)"
                                                class="crm-field w-full min-w-[4.5rem] text-right tabular-nums" :readonly="purchasingMode">
                                         <input type="hidden" :name="`products[${i}][quantity]`" :value="p.quantity">
                                     </div>
@@ -503,15 +503,17 @@
                             <div class="w-full overflow-x-auto">
                                 <table class="w-full table-fixed text-sm">
                                     <colgroup>
+                                        <col class="w-[24%]">
+                                        <col class="w-[24%]">
+                                        <col class="w-[24%]">
                                         <col class="w-[28%]">
-                                        <col class="w-[36%]">
-                                        <col class="w-[36%]">
                                     </colgroup>
                                     <thead>
                                         <tr class="text-left text-xs uppercase tracking-wider text-slate-400">
                                             <th class="pb-2 pr-3"></th>
                                             <th class="pb-2 pr-3">Exclude</th>
                                             <th class="pb-2 pr-3">Include</th>
+                                            <th class="pb-2 pr-3">Total</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-slate-100">
@@ -523,7 +525,7 @@
                                                        @focus="editingField = `sell-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(p.sell_exclude)"
                                                        @input="p.sell_exclude = parseId($event.target.value); onSellChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
+                                                       class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
                                                 <input type="hidden" :name="`products[${i}][sell_exclude]`" :value="p.sell_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
@@ -532,9 +534,15 @@
                                                        @focus="editingField = `sell-inc-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(sellInclude(p))"
                                                        @input="onSellIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
                                                        :readonly="purchasingMode"
                                                        title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(lineTotalInclude(sellInclude(p), p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                       title="Include × qty">
                                             </td>
                                         </tr>
                                         <tr>
@@ -548,7 +556,7 @@
                                                        @focus="editingField = `disc-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(p.discount_exclude)"
                                                        @input="p.discount_exclude = parseId($event.target.value); onDiscountItemChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
+                                                       class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
                                                 <input type="hidden" :name="`products[${i}][discount_exclude]`" :value="p.discount_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
@@ -557,9 +565,15 @@
                                                        @focus="editingField = `disc-inc-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(discountInclude(p))"
                                                        @input="onDiscountIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
                                                        :readonly="purchasingMode"
                                                        title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(lineTotalInclude(discountInclude(p), p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                       title="Include × qty">
                                             </td>
                                         </tr>
                                         <tr>
@@ -591,7 +605,7 @@
                                                            @focus="editingField = `cost-${i}`"
                                                            @blur="editingField = null; $el.value = formatId(p.cost_exclude)"
                                                            @input="p.cost_exclude = parseId($event.target.value); onCostChange(p)"
-                                                           class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums">
+                                                           class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums">
                                                 </div>
                                                 <div x-show="p.cost_foreign" class="space-y-1.5" x-cloak>
                                                     <div class="flex items-center gap-1.5">
@@ -644,9 +658,15 @@
                                                        @focus="editingField = `cost-inc-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(costInclude(p))"
                                                        @input="onCostIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
                                                        :readonly="p.cost_foreign"
                                                        :title="p.cost_foreign ? 'Dihitung dari modal asing × rate' : 'Isi Include → Exclude dihitung otomatis (÷ PPN)'">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(lineTotalInclude(costInclude(p), p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                       title="Include × qty">
                                             </td>
                                         </tr>
                                         <tr>
@@ -660,7 +680,7 @@
                                                        @focus="editingField = `ship-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(p.shipping_exclude)"
                                                        @input="p.shipping_exclude = parseId($event.target.value); onShippingChange(p)"
-                                                       class="crm-field w-full min-w-[8rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
+                                                       class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
                                                 <input type="hidden" :name="`products[${i}][shipping_exclude]`" :value="p.shipping_exclude">
                                             </td>
                                             <td class="py-2 pr-3">
@@ -669,62 +689,122 @@
                                                        @focus="editingField = `ship-inc-${i}`"
                                                        @blur="editingField = null; $el.value = formatId(shippingInclude(p))"
                                                        @input="onShippingIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[8rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
                                                        :readonly="purchasingMode"
                                                        title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
                                             </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(lineTotalInclude(shippingInclude(p), p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                       title="Include × qty">
+                                            </td>
                                         </tr>
                                         <tr x-show="appliesPph(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH ' + pphPercentFor(p) + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="'Basis × ' + pphPercentFor(p) + '%'"></td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                <span x-text="'PPH ' + pphPercentFor(p) + '%'"></span>
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400" x-text="'Basis × ' + pphPercentFor(p) + '%'"></span>
+                                            </td>
+                                            <td class="py-2 pr-3"></td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(pphAmount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" readonly
+                                                       :value="formatId(pphUnitAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                       title="PPH per satuan">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(pphAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                       title="PPH total (× qty)">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPnbp(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">PNBP</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">MIN(include × rate, cap)</td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                PNBP
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">MIN(include × rate, cap)</span>
+                                            </td>
+                                            <td class="py-2 pr-3"></td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(pnbpAmount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" readonly
+                                                       :value="formatId(pnbpUnitAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                       title="PNBP per satuan">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(pnbpAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                       title="PNBP total (tier dari total include)">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesPph29(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'PPH 29 ' + pph29Percent + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400">(Jual − Modal) exclude</td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                <span x-text="'PPH 29 ' + pph29Percent + '%'"></span>
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">(Jual − Modal) exclude</span>
+                                            </td>
+                                            <td class="py-2 pr-3"></td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(pph29Amount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" readonly
+                                                       :value="formatId(pph29UnitAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                       title="PPH 29 per satuan">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(pph29Amount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                       title="PPH 29 total (× qty)">
                                             </td>
                                         </tr>
                                         <tr x-show="appliesRoyalty(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600" x-text="'Royalti ' + royaltyPercentFor(p) + '%'"></td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="royaltyTypeLabel(p)"></td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                <span x-text="'Royalti ' + royaltyPercentFor(p) + '%'"></span>
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400" x-text="royaltyTypeLabel(p)"></span>
+                                            </td>
+                                            <td class="py-2 pr-3"></td>
                                             <td class="py-2 pr-3">
-                                                <input type="text" readonly :value="formatId(royaltyAmount(p))"
-                                                       class="crm-field w-full min-w-[8rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
+                                                <input type="text" readonly
+                                                       :value="formatId(royaltyUnitAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                       title="Royalti per satuan">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(royaltyAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                       title="Royalti total (× qty)">
                                             </td>
                                         </tr>
                                         <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">Margin</td>
-                                            <td class="py-2 pr-3 text-xs text-slate-400" x-text="marginLabel(p)"></td>
+                                            <td class="py-2 pr-3 font-medium text-slate-600">
+                                                Margin
+                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400" x-text="marginLabel(p)"></span>
+                                            </td>
                                             <td class="py-2 pr-3">
-                                                <div class="flex items-center gap-2">
-                                                    <input type="text" readonly :value="formatId(marginAmount(p))"
-                                                           class="crm-field min-w-[8rem] flex-1 cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700">
-                                                    <div class="flex shrink-0 items-center gap-1">
-                                                        <input type="text" inputmode="decimal"
-                                                               x-effect="if (editingField !== `mgn-${i}`) $el.value = formatId(p.margin_percent, 2)"
-                                                               @focus="editingField = `mgn-${i}`"
-                                                               @blur="editingField = null; $el.value = formatId(p.margin_percent, 2)"
-                                                               @input="p.margin_percent = parseId($event.target.value); onMarginPercentChange(p)"
-                                                               class="crm-field w-24 bg-white text-right text-sm tabular-nums"
-                                                               title="Ubah % margin untuk hitung ulang harga jual / diskon"
-                                                               :readonly="purchasingMode || appliesZinit(p)">
-                                                        <span class="text-xs font-semibold text-slate-600">%</span>
-                                                    </div>
+                                                <input type="text" readonly
+                                                       :value="formatId(marginUnitAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                       title="Margin per satuan">
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <div class="flex items-center gap-1">
+                                                    <input type="text" inputmode="decimal"
+                                                           x-effect="if (editingField !== `mgn-${i}`) $el.value = formatId(p.margin_percent, 2)"
+                                                           @focus="editingField = `mgn-${i}`"
+                                                           @blur="editingField = null; $el.value = formatId(p.margin_percent, 2)"
+                                                           @input="p.margin_percent = parseId($event.target.value); onMarginPercentChange(p)"
+                                                           class="crm-field w-full min-w-[5rem] bg-white text-right text-sm tabular-nums"
+                                                           title="Ubah % margin untuk hitung ulang harga jual / diskon"
+                                                           :readonly="purchasingMode || appliesZinit(p)">
+                                                    <span class="shrink-0 text-xs font-semibold text-slate-600">%</span>
                                                 </div>
+                                            </td>
+                                            <td class="py-2 pr-3">
+                                                <input type="text" readonly
+                                                       :value="formatId(marginAmount(p))"
+                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-semibold text-green-700"
+                                                       title="Margin total baris">
                                             </td>
                                         </tr>
                                     </tbody>
@@ -1172,13 +1252,13 @@
                         return s + qty * this.effectiveSellExclude(p);
                     }
 
-                    const effSell = this.effectiveSellExclude(p);
+                    const sellTotal = qty * this.effectiveSellExclude(p);
                     if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
-                        const pph = this.pphAmount(p);
-                        return s + qty * (effSell - pph);
+                        // pphAmount sudah basis total baris
+                        return s + (sellTotal - this.pphAmount(p));
                     }
 
-                    return s + qty * effSell;
+                    return s + sellTotal;
                 }, 0);
                 const denomAfterFee = this.products.some(p => this.appliesZinit(p))
                     ? this.round(denom - this.zinitDealFees().success_fee)
@@ -1223,7 +1303,7 @@
             },
             get productsMarginTotal() {
                 const lines = this.round(this.products.reduce(
-                    (s, p) => s + (Number(p.quantity) || 0) * this.marginAmount(p),
+                    (s, p) => s + this.marginAmount(p),
                     0
                 ));
                 // Fix GP = Total GP − Fee Zinit (fee dihitung sekali dari grand total include).
@@ -1235,11 +1315,10 @@
             /** Basis % diskon: Inaproc = margin kotor; lainnya = margin bersih. */
             get discountBasisMarginTotal() {
                 return this.round(this.products.reduce((s, p) => {
-                    const qty = Number(p.quantity) || 0;
                     const unit = (p.tax_category || 'non_wapu') === 'inaproc'
                         ? this.grossMarginAmount(p)
                         : this.marginAmount(p);
-                    return s + qty * unit;
+                    return s + unit;
                 }, 0));
             },
             get discountBasisIsGross() {
@@ -1299,6 +1378,9 @@
             },
             costInclude(p) {
                 return this.round((Number(p.cost_exclude) || 0) * TAX_MULTIPLIER);
+            },
+            lineTotalInclude(unitInclude, p) {
+                return this.round((Number(unitInclude) || 0) * this.lineQty(p));
             },
             excludeFromInclude(include) {
                 if (TAX_MULTIPLIER <= 0) return 0;
@@ -1391,9 +1473,12 @@
                 if (p.royalty_type === 'luar') return 'Luar negeri · modal excl × rate';
                 return '';
             },
-            royaltyAmount(p) {
+            royaltyUnitAmount(p) {
                 if (!this.appliesRoyalty(p)) return 0;
                 return this.round((Number(p.cost_exclude) || 0) * (this.royaltyPercentFor(p) / 100));
+            },
+            royaltyAmount(p) {
+                return this.round(this.royaltyUnitAmount(p) * this.lineQty(p));
             },
             toggleRoyaltyType(p, type) {
                 p.royalty_type = p.royalty_type === type ? '' : type;
@@ -1438,21 +1523,60 @@
             pphPercentFor(p) {
                 return pphPercentLookup(p.tax_category || 'non_wapu', p.item_kind || 'barang');
             },
-            pphAmount(p) {
+            lineQty(p) {
+                let raw = p?.quantity;
+                if (typeof raw === 'string') {
+                    const normalized = raw.includes(',')
+                        ? raw.replace(/\./g, '').replace(',', '.')
+                        : raw;
+                    raw = Number(normalized);
+                } else {
+                    raw = Number(raw);
+                }
+                return Number.isFinite(raw) && raw > 0 ? raw : 0;
+            },
+            pphUnitAmount(p) {
                 const rate = this.pphPercentFor(p) / 100;
                 if (rate <= 0) return 0;
                 return this.round(this.effectiveSellExclude(p) * rate);
             },
+            pphAmount(p) {
+                return this.round(this.pphUnitAmount(p) * this.lineQty(p));
+            },
             pnbpAmount(p) {
                 if (!this.appliesPnbp(p)) return 0;
-                return calcPnbpFromInclude(this.effectiveSellInclude(p));
+                const qty = this.lineQty(p);
+                if (qty <= 0) return 0;
+                // Tier/cap PNBP memakai total include baris, bukan satuan
+                return calcPnbpFromInclude(this.round(this.effectiveSellInclude(p) * qty));
             },
-            grossMarginAmount(p) {
+            pnbpUnitAmount(p) {
+                if (!this.appliesPnbp(p)) return 0;
+                const qty = this.lineQty(p);
+                if (qty <= 0) return 0;
+                // Turunan dari total (tier/cap berbasis total include)
+                return this.round(this.pnbpAmount(p) / qty);
+            },
+            grossMarginUnitAmount(p) {
                 if (this.appliesZinit(p)) {
-                    return this.marginAmount(p);
+                    return this.marginUnitAmount(p);
                 }
                 const base = this.effectiveSellExclude(p);
                 const costExclude = Number(p.cost_exclude) || 0;
+                const taxCategory = p.tax_category || 'non_wapu';
+                if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
+                    const costInclude = this.round(costExclude * TAX_MULTIPLIER);
+                    return this.round(base - this.pphUnitAmount(p) - costInclude);
+                }
+                return this.round(base - this.pphUnitAmount(p) - costExclude);
+            },
+            grossMarginAmount(p) {
+                const qty = this.lineQty(p);
+                if (this.appliesZinit(p)) {
+                    return this.marginAmount(p);
+                }
+                const base = this.effectiveSellExclude(p) * qty;
+                const costExclude = (Number(p.cost_exclude) || 0) * qty;
                 const taxCategory = p.tax_category || 'non_wapu';
                 if (taxCategory === 'wapu' || taxCategory === 'inaproc') {
                     const costInclude = this.round(costExclude * TAX_MULTIPLIER);
@@ -1460,27 +1584,41 @@
                 }
                 return this.round(base - this.pphAmount(p) - costExclude);
             },
-            pph29Amount(p) {
+            pph29UnitAmount(p) {
                 if (!this.appliesPph29(p)) return 0;
                 const spread = this.effectiveSellExclude(p) - (Number(p.cost_exclude) || 0);
                 if (spread <= 0) return 0;
                 return this.round(spread * (Number(this.pph29Percent) || 0) / 100);
             },
+            pph29Amount(p) {
+                return this.round(this.pph29UnitAmount(p) * this.lineQty(p));
+            },
+            marginUnitAmount(p) {
+                const qty = this.lineQty(p);
+                if (qty <= 0) return 0;
+                // Turunan dari margin total agar konsisten dengan PNBP berjenjang
+                return this.round(this.marginAmount(p) / qty);
+            },
             marginAmount(p) {
-                const shipping = Math.max(0, Number(p.shipping_exclude) || 0);
-                // Zinit: GP per baris tanpa fee; Fee Zinit dipotong sekali di Total Margin (Fix GP).
+                const qty = this.lineQty(p);
+                const shipping = Math.max(0, Number(p.shipping_exclude) || 0) * qty;
+                // Zinit: GP total baris tanpa fee; Fee Zinit dipotong sekali di Total Margin (Fix GP).
                 if (this.appliesZinit(p)) {
-                    return this.round(this.effectiveSellExclude(p) - this.pphAmount(p) - this.royaltyAmount(p) - (Number(p.cost_exclude) || 0) - shipping);
+                    const base = this.effectiveSellExclude(p) * qty;
+                    const cost = (Number(p.cost_exclude) || 0) * qty;
+                    return this.round(base - this.pphAmount(p) - this.royaltyAmount(p) - cost - shipping);
                 }
                 return this.round(this.grossMarginAmount(p) - this.pnbpAmount(p) - this.pph29Amount(p) - this.royaltyAmount(p) - shipping);
             },
             calcMarginPercent(p) {
                 const margin = this.marginAmount(p);
+                const qty = this.lineQty(p);
+                if (qty <= 0) return 0;
                 if (this.appliesZinit(p)) {
-                    const base = this.effectiveSellExclude(p);
+                    const base = this.effectiveSellExclude(p) * qty;
                     return base > 0 ? this.round((margin / base) * 100) : 0;
                 }
-                const base = this.effectiveSellExclude(p);
+                const base = this.effectiveSellExclude(p) * qty;
                 const taxCategory = p.tax_category || 'non_wapu';
                 const denom = (taxCategory === 'wapu' || taxCategory === 'inaproc')
                     ? (base - this.pphAmount(p))
@@ -1524,7 +1662,9 @@
                 const pct = Number(p.margin_percent) || 0;
                 const cost = Number(p.cost_exclude) || 0;
                 const shipping = Math.max(0, Number(p.shipping_exclude) || 0);
-                const royalty = this.royaltyAmount(p);
+                const qty = Math.max(this.lineQty(p), 0.0001);
+                // royaltyAmount sudah total → bagi qty agar rumus satuan tetap valid
+                const royalty = this.round(this.royaltyAmount(p) / qty);
                 if (cost <= 0 || pct <= 0) {
                     return this.effectiveSellExclude(p);
                 }
@@ -1552,10 +1692,10 @@
                 const r29 = (Number(this.pph29Percent) || 0) / 100;
                 let base = this.effectiveSellExclude(p) || cost;
 
-                // net = (base−PPH−modalIncl) − PNBP − r29*(base−modalExcl) − royalti − ongkir
-                // % terhadap (base − PPH); PNBP berjenjang → iterasi.
+                // PNBP dihitung dari total include, lalu dibagi qty agar setara satuan.
                 for (let i = 0; i < 10; i++) {
-                    const pnbp = calcPnbpFromInclude(this.round(base * TAX_MULTIPLIER));
+                    const pnbpTotal = calcPnbpFromInclude(this.round(base * TAX_MULTIPLIER * qty));
+                    const pnbp = this.round(pnbpTotal / qty);
                     const coeff = (1 - rPph) * (1 - pctDec) - r29;
                     if (coeff <= 0) {
                         return this.effectiveSellExclude(p);
@@ -1580,6 +1720,15 @@
             onSellChange(p) {
                 p._lockMarginPercent = false;
                 p.margin_percent = this.calcMarginPercent(p);
+                this.refreshDiscountFromMargin();
+            },
+            onQuantityChange(p) {
+                if ((Number(p.quantity) || 0) < 0) p.quantity = 0;
+                if (p._lockMarginPercent && (Number(p.margin_percent) || 0) > 0 && (Number(p.cost_exclude) || 0) > 0) {
+                    this.applyMarginPercentToPrice(p);
+                } else {
+                    p.margin_percent = this.calcMarginPercent(p);
+                }
                 this.refreshDiscountFromMargin();
             },
             onDiscountItemChange(p) {

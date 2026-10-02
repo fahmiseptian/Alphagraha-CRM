@@ -919,13 +919,13 @@ class Opportunity extends Model implements HasMedia
     }
 
     /**
-     * Total margin semua produk (per baris: margin satuan × qty).
+     * Total margin semua produk (pph/pnbp/margin sudah basis total baris).
      * Zinit: Fix GP = Total GP − Fee Zinit.
      */
     public function totalProductsMargin(): float
     {
         $sum = round(
-            $this->products->sum(fn (array $row) => (float) ($row['quantity'] ?? 1) * (float) ($row['margin'] ?? 0)),
+            $this->products->sum(fn (array $row) => (float) ($row['margin'] ?? 0)),
             2
         );
 
@@ -946,14 +946,13 @@ class Opportunity extends Model implements HasMedia
     {
         return round(
             $this->products->sum(function (array $row) {
-                $qty = (float) ($row['quantity'] ?? 1);
                 $taxCategory = (string) ($row['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU);
 
                 if ($taxCategory === OpportunityProductPricing::TAX_INAPROC) {
-                    return $qty * (float) ($row['gross_margin'] ?? $row['margin'] ?? 0);
+                    return (float) ($row['gross_margin'] ?? $row['margin'] ?? 0);
                 }
 
-                return $qty * (float) ($row['margin'] ?? 0);
+                return (float) ($row['margin'] ?? 0);
             }),
             2
         );
@@ -987,22 +986,21 @@ class Opportunity extends Model implements HasMedia
             $this->products->sum(function (array $row) {
                 $qty = (float) ($row['quantity'] ?? 1);
                 $taxCategory = (string) ($row['tax_category'] ?? OpportunityProductPricing::TAX_NON_WAPU);
+                $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
+                $sellTotal = $qty * $effectiveSell;
 
                 if ($taxCategory === OpportunityProductPricing::TAX_ZINIT) {
-                    $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
-
-                    return $qty * $effectiveSell;
+                    return $sellTotal;
                 }
-
-                $effectiveSell = (float) ($row['effective_sell_exclude'] ?? $row['sell_exclude'] ?? 0);
 
                 if (in_array($taxCategory, [OpportunityProductPricing::TAX_WAPU, OpportunityProductPricing::TAX_INAPROC], true)) {
+                    // pph sudah basis total baris
                     $pph = (float) ($row['pph'] ?? 0);
 
-                    return $qty * ($effectiveSell - $pph);
+                    return $sellTotal - $pph;
                 }
 
-                return $qty * $effectiveSell;
+                return $sellTotal;
             }),
             2
         );

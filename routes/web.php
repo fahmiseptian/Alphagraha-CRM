@@ -138,10 +138,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
     Route::get('/sales-orders', [OpportunitySalesOrderController::class, 'index'])->name('sales-orders.index');
     Route::get('/opportunities/{opportunity}/sales-orders/create', [OpportunitySalesOrderController::class, 'create'])->name('opportunities.sales-orders.create');
+    Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/edit', [OpportunitySalesOrderController::class, 'edit'])->name('opportunities.sales-orders.edit')->whereNumber('salesOrder');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'show'])->name('opportunities.sales-orders.show')->whereNumber('salesOrder');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/preview', [OpportunitySalesOrderController::class, 'preview'])->name('opportunities.sales-orders.preview')->whereNumber('salesOrder');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/pdf', [OpportunitySalesOrderController::class, 'pdf'])->name('opportunities.sales-orders.pdf')->whereNumber('salesOrder');
     Route::put('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'update'])->name('opportunities.sales-orders.update')->whereNumber('salesOrder');
+    Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/core', [OpportunitySalesOrderController::class, 'updateCore'])->name('opportunities.sales-orders.update-core')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel', [OpportunitySalesOrderController::class, 'requestCancel'])->name('opportunities.sales-orders.cancel')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel/approve', [OpportunitySalesOrderController::class, 'approveCancel'])->name('opportunities.sales-orders.cancel.approve')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel/reject', [OpportunitySalesOrderController::class, 'rejectCancel'])->name('opportunities.sales-orders.cancel.reject')->whereNumber('salesOrder');

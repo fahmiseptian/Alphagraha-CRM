@@ -77,6 +77,6 @@ class QuotationItem extends Model
             'has_royalty' => (bool) $this->has_royalty,
         ]);
 
-        return round((float) $enriched['quantity'] * (float) $enriched['margin'], 2);
+        return round((float) $enriched['margin'], 2);
     }
 }
