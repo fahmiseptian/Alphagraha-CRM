@@ -100,6 +100,81 @@
     </div>
 @endif
 
+@if ($opportunity->crm_top_status && $opportunity->topExceedsCustomer())
+    @php
+        $topPending = $opportunity->topNeedsApproval();
+        $topApproved = $opportunity->topIsApproved();
+        $customerTopLabel = \App\Support\CustomerTop::label($opportunity->crm_top_customer ?: $opportunity->customerTop());
+    @endphp
+    <div @class([
+        'mb-4 rounded-lg border px-4 py-3 text-sm',
+        'border-amber-200 bg-amber-50 text-amber-900' => $topPending,
+        'border-green-200 bg-green-50 text-green-800' => $topApproved,
+        'border-red-200 bg-red-50 text-red-800' => ! $topPending && ! $topApproved,
+    ])>
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+                <p class="font-semibold">
+                    @if ($topPending)
+                        <i class="bi bi-hourglass-split mr-1"></i> {{ $opportunity->topLabel() }} menunggu approval Superadmin/Finance
+                    @elseif ($topApproved)
+                        <i class="bi bi-check-circle mr-1"></i> {{ $opportunity->topLabel() }} disetujui — SO dapat memakai TOP ini
+                    @else
+                        <i class="bi bi-x-circle mr-1"></i> {{ $opportunity->topLabel() }} ditolak — SO mengikuti TOP customer
+                    @endif
+                </p>
+                <p class="mt-1 text-xs opacity-80">TOP customer: <strong>{{ $customerTopLabel }}</strong> · TOP diajukan: <strong>{{ $opportunity->topLabel() }}</strong></p>
+                @if ($opportunity->topRequesterName() || $opportunity->crm_top_requested_at)
+                    <p class="mt-1 text-xs opacity-80">
+                        Diajukan
+                        @if ($opportunity->topRequesterName()) oleh <strong>{{ $opportunity->topRequesterName() }}</strong> @endif
+                        @if ($opportunity->crm_top_requested_at) · {{ $opportunity->crm_top_requested_at->timezone(config('app.timezone'))->format('d M Y H:i') }} @endif
+                    </p>
+                @endif
+                @if (! $topPending && ($opportunity->topReviewerName() || $opportunity->crm_top_reviewed_at))
+                    <p class="mt-1 text-xs opacity-80">
+                        {{ $topApproved ? 'Disetujui' : 'Ditolak' }}
+                        @if ($opportunity->topReviewerName()) oleh <strong>{{ $opportunity->topReviewerName() }}</strong> @endif
+                        @if ($opportunity->crm_top_reviewed_at) · {{ $opportunity->crm_top_reviewed_at->timezone(config('app.timezone'))->format('d M Y H:i') }} @endif
+                    </p>
+                @endif
+                @if ($opportunity->crm_top_note)
+                    <p class="mt-1 text-xs opacity-80">Catatan: {{ $opportunity->crm_top_note }}</p>
+                @endif
+            </div>
+
+            @if ($topPending && auth()->user()->canApproveOpportunityTop())
+                <div class="flex w-full max-w-md shrink-0 flex-col gap-2" x-data="{ rejecting: false }">
+                    <form method="POST" action="{{ route('opportunities.top.approve', $opportunity) }}" class="space-y-2" x-show="!rejecting">
+                        @csrf
+                        <input type="text" name="note" placeholder="Catatan approve (opsional)"
+                               class="w-full rounded-lg border border-green-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <div class="flex flex-wrap gap-2">
+                            <x-btn type="submit" icon="bi-check-lg" class="!border-transparent !bg-green-600 !text-white hover:!bg-green-700">Approve TOP</x-btn>
+                            <button type="button" @click="rejecting = true"
+                                    class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50">
+                                <i class="bi bi-x-lg"></i> Tolak
+                            </button>
+                        </div>
+                    </form>
+                    <form method="POST" action="{{ route('opportunities.top.reject', $opportunity) }}" class="space-y-2" x-show="rejecting" x-cloak>
+                        @csrf
+                        <input type="text" name="note" required placeholder="Alasan penolakan"
+                               class="w-full rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                        <div class="flex flex-wrap gap-2">
+                            <x-btn type="submit" icon="bi-x-lg" class="!border-transparent !bg-red-600 !text-white hover:!bg-red-700">Tolak TOP</x-btn>
+                            <button type="button" @click="rejecting = false"
+                                    class="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                                Batal
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            @endif
+        </div>
+    </div>
+@endif
+
 @php
     $discStatus = $opportunity->crm_discount_status;
     $isRejected = ! $opportunity->skipsApproval()

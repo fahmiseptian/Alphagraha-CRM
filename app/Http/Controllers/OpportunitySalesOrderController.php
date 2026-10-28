@@ -9,9 +9,12 @@ use App\Models\Espo\Opportunity;
 use App\Models\OpportunityLog;
 use App\Models\OpportunitySalesOrder;
 use App\Models\SalesOrderLog;
+use App\Models\User;
+use App\Services\AccountReceivableService;
 use App\Services\CustomerAddressService;
 use App\Services\OpportunityLogService;
 use App\Services\SalesOrderService;
+use App\Support\AccountReceivableExcel;
 use App\Support\CustomerTop;
 use App\Support\OpportunityProductPricing;
 use Carbon\Carbon;
@@ -70,63 +73,12 @@ class OpportunitySalesOrderController extends Controller
             abort(403);
         }
 
-        $search = trim((string) $request->get('q', ''));
-        $accountId = trim((string) $request->get('account_id', ''));
-        if ($accountId !== '' && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
-            $accountId = '';
-        }
-        $companyFilter = trim((string) $request->get('company', ''));
-        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
-            $companyFilter = '';
-        }
-        $selectedUserId = $this->resolveAssignedUserFilter($request);
-        $period = $this->resolvePeriodFilter($request);
-        $periodRange = $this->periodDateRange($period);
-        $periodLabel = $this->periodLabel($period);
-
-        $query = OpportunitySalesOrder::query()
-            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+        $canSeeInvoice = $user->canEditSalesOrderInvoice();
+        $context = $this->salesOrderIndexContext($request);
+        $query = $context['query']
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator', 'assignedUser'])
             ->withCount('purchaseOrders')
-            ->whereHas('opportunity', function ($q) use ($user, $accountId, $companyFilter, $selectedUserId) {
-                if ($user->canViewAllOpportunities()
-                    || $user->isProduct()
-                    || $user->isEkspedisi()) {
-                    if ($user->isPurchasing()
-                        || $user->isFinance()
-                        || $user->isInvoice()
-                        || $user->isProduct()
-                        || $user->isEkspedisi()) {
-                        $q->where('stage', Opportunity::WON_STAGE);
-                    }
-                } else {
-                    $q->where('assigned_user_id', $user->id);
-                }
-
-                if ($accountId !== '') {
-                    $q->where('account_id', $accountId);
-                }
-
-                if ($companyFilter !== '') {
-                    $q->where('company', $companyFilter);
-                }
-
-                if ($selectedUserId !== null) {
-                    $q->where('assigned_user_id', $selectedUserId);
-                }
-            })
             ->orderByDesc('created_at');
-
-        if ($periodRange !== null) {
-            [$start, $end] = $periodRange;
-            $query->whereBetween(
-                (new OpportunitySalesOrder)->getTable().'.created_at',
-                [$start, $end]
-            );
-        }
-
-        if ($search !== '') {
-            $this->applySalesOrderSearch($query, $search);
-        }
 
         $salesOrders = $query->paginate(20)->withQueryString();
 
@@ -141,17 +93,226 @@ class OpportunitySalesOrderController extends Controller
 
         return view('sales-orders.index', [
             'salesOrders' => $salesOrders,
-            'search' => $search,
-            'accountId' => $accountId,
-            'companyFilter' => $companyFilter,
+            'search' => $context['search'],
+            'invoiceSearch' => $context['invoiceSearch'],
+            'canSeeInvoice' => $canSeeInvoice,
+            'canEditDelivery' => $user->canEditSalesOrderDelivery(),
+            'canViewAr' => $user->canViewAccountReceivable(),
+            'accountId' => $context['accountId'],
+            'companyFilter' => $context['companyFilter'],
             'filterAccounts' => $filterAccounts,
-            'selectedUserId' => $selectedUserId,
-            'period' => $period,
-            'periodLabel' => $periodLabel,
+            'selectedUserId' => $context['selectedUserId'],
+            'period' => $context['period'],
+            'periodLabel' => $context['periodLabel'],
+            'queue' => $context['queue'],
             'salesUsers' => $salesUsers,
             'canFilterSales' => $canFilterSales,
             'companies' => Opportunity::COMPANIES,
         ]);
+    }
+
+    public function accountReceivable(Request $request, AccountReceivableService $receivables)
+    {
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+        if (! $user?->canViewAccountReceivable()) {
+            abort(403, 'Anda tidak memiliki akses ke Account Receivable.');
+        }
+
+        $context = $this->salesOrderIndexContext($request);
+        $ids = (clone $context['query'])->reorder()->pluck('id');
+        $rows = $receivables->rowsBySalesOrderIds($ids);
+
+        $filterQuery = array_filter([
+            'period' => $context['period'] !== 'year' ? $context['period'] : null,
+            'assigned_user_id' => $context['selectedUserId'],
+            'q' => $context['search'] !== '' ? $context['search'] : null,
+            'invoice' => $context['invoiceSearch'] !== '' ? $context['invoiceSearch'] : null,
+            'company' => $context['companyFilter'] !== '' ? $context['companyFilter'] : null,
+            'account_id' => $context['accountId'] !== '' ? $context['accountId'] : null,
+            'queue' => $context['queue'] !== '' ? $context['queue'] : null,
+        ], fn ($v) => $v !== null && $v !== '');
+
+        if ($request->get('format') === 'xlsx') {
+            return AccountReceivableExcel::export($rows, 'account-receivable-'.now()->format('Y-m-d').'.xlsx');
+        }
+
+        $range = $this->periodDateRange($context['period']);
+
+        return view('opportunities.account-receivable', [
+            'rows' => $rows,
+            'totals' => $receivables->totals($rows),
+            'periodLabel' => $context['periodLabel'],
+            'rangeStart' => $range[0] ?? $rows->min('invoice_at'),
+            'rangeEnd' => $range ? min($range[1], now()) : now(),
+            'filterQuery' => $filterQuery,
+            'filterSummary' => $this->salesOrderArFilterSummary($context),
+            'backUrl' => route('sales-orders.index', $filterQuery),
+            'exportUrl' => route('sales-orders.account-receivable', $filterQuery + ['format' => 'xlsx']),
+        ]);
+    }
+
+    /**
+     * @return array{
+     *     query: \Illuminate\Database\Eloquent\Builder,
+     *     search: string,
+     *     invoiceSearch: string,
+     *     accountId: string,
+     *     companyFilter: string,
+     *     selectedUserId: ?string,
+     *     period: string,
+     *     periodLabel: string,
+     *     queue: string
+     * }
+     */
+    protected function salesOrderIndexContext(Request $request): array
+    {
+        /** @var \App\Models\User $user */
+        $user = auth()->user();
+
+        $search = trim((string) $request->get('q', ''));
+        $invoiceSearch = trim((string) $request->get('invoice', ''));
+        $canSeeInvoice = $user->canEditSalesOrderInvoice();
+        $accountId = trim((string) $request->get('account_id', ''));
+        if ($accountId !== '' && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
+            $accountId = '';
+        }
+        $companyFilter = trim((string) $request->get('company', ''));
+        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
+            $companyFilter = '';
+        }
+        $selectedUserId = $this->resolveAssignedUserFilter($request);
+        $period = $this->resolvePeriodFilter($request);
+        $periodRange = $this->periodDateRange($period);
+        $queue = $this->resolveSalesOrderQueueFilter($request);
+
+        $query = OpportunitySalesOrder::query()
+            ->whereHas('opportunity', function ($q) use ($user, $accountId, $companyFilter) {
+                if ($user->canViewAllOpportunities()
+                    || $user->isProduct()
+                    || $user->isEkspedisi()) {
+                    if ($user->isPurchasing()
+                        || $user->isFinance()
+                        || $user->isInvoice()
+                        || $user->isProduct()
+                        || $user->isEkspedisi()) {
+                        $q->where('stage', Opportunity::WON_STAGE);
+                    }
+                } elseif (! $user->isSales()) {
+                    $q->whereRaw('1 = 0');
+                }
+
+                if ($accountId !== '') {
+                    $q->where('account_id', $accountId);
+                }
+
+                if ($companyFilter !== '') {
+                    $q->where('company', $companyFilter);
+                }
+            });
+
+        if ($user->isSales()) {
+            $query->where(function ($q) use ($user) {
+                $q->where('assigned_user_id', $user->id)
+                    ->orWhereHas('opportunity', fn ($oq) => $oq->where('assigned_user_id', $user->id));
+            });
+        }
+
+        if ($selectedUserId !== null) {
+            $query->forCommissionOwner($selectedUserId);
+        }
+
+        if ($periodRange !== null) {
+            [$start, $end] = $periodRange;
+            $query->whereBetween(
+                (new OpportunitySalesOrder)->getTable().'.created_at',
+                [$start, $end]
+            );
+        }
+
+        $this->applySalesOrderQueueFilter($query, $queue);
+
+        if ($search !== '') {
+            $this->applySalesOrderSearch($query, $search);
+        }
+
+        if ($canSeeInvoice && $invoiceSearch !== '') {
+            $this->applySalesOrderInvoiceSearch($query, $invoiceSearch);
+        }
+
+        return [
+            'query' => $query,
+            'search' => $search,
+            'invoiceSearch' => $invoiceSearch,
+            'accountId' => $accountId,
+            'companyFilter' => $companyFilter,
+            'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $this->periodLabel($period),
+            'queue' => $queue,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @return list<string>
+     */
+    protected function salesOrderArFilterSummary(array $context): array
+    {
+        $parts = [];
+        if ($context['search'] !== '') {
+            $parts[] = 'Cari: "'.$context['search'].'"';
+        }
+        if ($context['invoiceSearch'] !== '') {
+            $parts[] = 'Invoice: "'.$context['invoiceSearch'].'"';
+        }
+        if ($context['accountId'] !== '') {
+            $parts[] = 'Customer: '.(Account::query()->whereKey($context['accountId'])->value('name') ?: '—');
+        }
+        if ($context['companyFilter'] !== '') {
+            $parts[] = 'Perusahaan: '.$context['companyFilter'];
+        }
+        if ($context['selectedUserId']) {
+            $user = EspoUser::query()->find($context['selectedUserId']);
+            $parts[] = 'Sales: '.($user?->display_name ?: '—');
+        }
+
+        return $parts;
+    }
+
+    protected function resolveSalesOrderQueueFilter(Request $request): string
+    {
+        $queue = (string) $request->get('queue', '');
+
+        return in_array($queue, ['needs_invoice', 'unpaid', 'paid', 'delivery_pending'], true)
+            ? $queue
+            : '';
+    }
+
+    protected function applySalesOrderQueueFilter($query, string $queue): void
+    {
+        match ($queue) {
+            'needs_invoice' => $query->where(function ($q) {
+                $q->whereNull('agc_payload->invoice_no')
+                    ->orWhere('agc_payload->invoice_no', '');
+            }),
+            'unpaid' => $query->where(function ($q) {
+                $q->whereNull('agc_payload->payment_status')
+                    ->orWhere('agc_payload->payment_status', '')
+                    ->orWhere('agc_payload->payment_status', 'unpaid')
+                    ->orWhere('agc_payload->payment_status', 'pending');
+            }),
+            'paid' => $query->where(function ($q) {
+                $q->where('agc_payload->payment_status', 'paid')
+                    ->orWhere('agc_payload->payment_status', 'settlement');
+            }),
+            'delivery_pending' => $query->where(function ($q) {
+                $q->whereNull('agc_payload->delivery_status')
+                    ->orWhere('agc_payload->delivery_status', '')
+                    ->orWhere('agc_payload->delivery_status', 'pending');
+            }),
+            default => null,
+        };
     }
 
     /**
@@ -232,6 +393,7 @@ class OpportunitySalesOrderController extends Controller
                 ->orWhere($table.'.nomor_ref', 'like', $like)
                 ->orWhere($table.'.po_number', 'like', $like)
                 ->orWhere($table.'.payment', 'like', $like)
+                ->orWhere($table.'.agc_payload->invoice_no', 'like', $like)
                 ->orWhere($table.'.agc_payload', 'like', $like)
                 ->orWhereHas('opportunity', function ($oq) use ($like) {
                     $oq->where('opportunity.name', 'like', $like)
@@ -243,6 +405,12 @@ class OpportunitySalesOrderController extends Controller
                                 ->orWhere('last_name', 'like', $like)
                                 ->orWhere('user_name', 'like', $like);
                         });
+                })
+                ->orWhereHas('assignedUser', function ($uq) use ($like) {
+                    $uq->where('name', 'like', $like)
+                        ->orWhere('first_name', 'like', $like)
+                        ->orWhere('last_name', 'like', $like)
+                        ->orWhere('user_name', 'like', $like);
                 });
 
             if (strcasecmp($psoAsSo, $search) !== 0) {
@@ -252,6 +420,16 @@ class OpportunitySalesOrderController extends Controller
             if (strcasecmp($soAsPso, $search) !== 0) {
                 $q->orWhere($table.'.agc_payload', 'like', '%'.$soAsPso.'%');
             }
+        });
+    }
+
+    protected function applySalesOrderInvoiceSearch($query, string $invoice): void
+    {
+        $like = '%'.$invoice.'%';
+        $table = (new OpportunitySalesOrder)->getTable();
+
+        $query->where(function ($q) use ($table, $like) {
+            $q->where($table.'.agc_payload->invoice_no', 'like', $like);
         });
     }
 
@@ -301,8 +479,7 @@ class OpportunitySalesOrderController extends Controller
                 ->route('opportunities.edit', $opportunity)
                 ->with('error', $reason);
         }
-        $customerTop = $opportunity->account?->top() ?? CustomerTop::DEFAULT;
-        $allowedTop = array_keys(CustomerTop::optionsAllowedFor($customerTop));
+        $allowedTop = array_keys(CustomerTop::optionsAllowedFor($opportunity->salesOrderMaxTop()));
         $accountId = (string) ($opportunity->account_id ?? '');
         $addressRule = Rule::exists('crm_customer_addresses', 'id')->where('account_id', $accountId);
 
@@ -324,9 +501,11 @@ class OpportunitySalesOrderController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.index' => ['required', 'integer', 'min:0'],
             'items.*.sku' => ['nullable', 'string', 'max:100'],
-            'items.*.qty' => ['required', 'numeric', 'min:1'],
+            'items.*.qty' => ['required', 'numeric', 'min:0.01'],
+            'items.*.name' => ['nullable', 'string', 'max:255'],
+            'items.*.description' => ['nullable', 'string', 'max:10000'],
         ], [
-            'payment.in' => 'TOP melebihi batas yang diizinkan untuk customer ini.',
+            'payment.in' => 'TOP melebihi batas yang diizinkan untuk customer ini. TOP di atas TOP customer harus di-approve Superadmin/Finance di Opportunity.',
             'po_number.required' => 'No. PO customer wajib diisi.',
             'billing_address_id.required' => 'Pilih alamat billing. Tambah alamat di data customer jika belum ada.',
             'billing_address_id.exists' => 'Alamat billing tidak valid untuk customer ini.',
@@ -336,21 +515,7 @@ class OpportunitySalesOrderController extends Controller
             'po_file.max' => 'Ukuran file PO maksimal 5MB.',
         ]);
 
-        $products = $opportunity->products->values();
-        $itemsSnapshot = collect($data['items'])->map(function ($item) use ($products) {
-            $product = $products->get((int) $item['index']) ?? [];
-
-            return [
-                'index' => (int) $item['index'],
-                'sku' => trim((string) ($item['sku'] ?? ($product['sku'] ?? ''))),
-                'qty' => (float) $item['qty'],
-                'name' => $product['name'] ?? null,
-                'brand' => $product['brand'] ?? '',
-                'category' => $product['category'] ?? '',
-                'sell_exclude' => $this->soUnitExclude($product),
-                'discount_exclude' => (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0),
-            ];
-        })->values()->all();
+        $itemsSnapshot = $this->mapPostedSalesOrderItems($opportunity, $data['items']);
 
         try {
             $record = DB::transaction(function () use ($request, $opportunity, $data, $itemsSnapshot) {
@@ -473,8 +638,7 @@ class OpportunitySalesOrderController extends Controller
         ]);
         $this->customerAddresses->ensurePrimaryFromAccount($opportunity->account);
 
-        $customerTop = $opportunity->account?->top() ?? CustomerTop::DEFAULT;
-        $allowedTop = array_keys(CustomerTop::optionsAllowedFor($customerTop));
+        $allowedTop = array_keys(CustomerTop::optionsAllowedFor($opportunity->salesOrderMaxTop()));
         $accountId = (string) ($opportunity->account_id ?? '');
         $addressRule = Rule::exists('crm_customer_addresses', 'id')->where('account_id', $accountId);
         $hasExistingPoFile = filled(data_get($salesOrder->agc_payload, 'po_file'));
@@ -497,9 +661,11 @@ class OpportunitySalesOrderController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.index' => ['required', 'integer', 'min:0'],
             'items.*.sku' => ['nullable', 'string', 'max:100'],
-            'items.*.qty' => ['required', 'numeric', 'min:1'],
+            'items.*.qty' => ['required', 'numeric', 'min:0.01'],
+            'items.*.name' => ['nullable', 'string', 'max:255'],
+            'items.*.description' => ['nullable', 'string', 'max:10000'],
         ], [
-            'payment.in' => 'TOP melebihi batas yang diizinkan untuk customer ini.',
+            'payment.in' => 'TOP melebihi batas yang diizinkan untuk customer ini. TOP di atas TOP customer harus di-approve Superadmin/Finance di Opportunity.',
             'po_number.required' => 'No. PO customer wajib diisi.',
             'billing_address_id.required' => 'Pilih alamat billing. Tambah alamat di data customer jika belum ada.',
             'billing_address_id.exists' => 'Alamat billing tidak valid untuk customer ini.',
@@ -509,21 +675,7 @@ class OpportunitySalesOrderController extends Controller
             'po_file.max' => 'Ukuran file PO maksimal 5MB.',
         ]);
 
-        $products = $opportunity->products->values();
-        $itemsSnapshot = collect($data['items'])->map(function ($item) use ($products) {
-            $product = $products->get((int) $item['index']) ?? [];
-
-            return [
-                'index' => (int) $item['index'],
-                'sku' => trim((string) ($item['sku'] ?? ($product['sku'] ?? ''))),
-                'qty' => (float) $item['qty'],
-                'name' => $product['name'] ?? null,
-                'brand' => $product['brand'] ?? '',
-                'category' => $product['category'] ?? '',
-                'sell_exclude' => $this->soUnitExclude($product),
-                'discount_exclude' => (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0),
-            ];
-        })->values()->all();
+        $itemsSnapshot = $this->mapPostedSalesOrderItems($opportunity, $data['items']);
 
         try {
             $record = DB::transaction(function () use ($request, $opportunity, $salesOrder, $data, $itemsSnapshot) {
@@ -579,15 +731,21 @@ class OpportunitySalesOrderController extends Controller
 
     public function show(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): View
     {
-        $this->authorizeView($opportunity);
         abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
 
-        $opportunity->loadMissing(['account', 'quotation', 'contact', 'purchaseOrders']);
-        $salesOrder->loadMissing('creator');
-        $detail = $this->salesOrders->present($salesOrder, $opportunity);
+        $opportunity->loadMissing(['account', 'quotation', 'contact', 'purchaseOrders', 'assignedUser']);
+        $salesOrder->loadMissing(['creator', 'assignedUser']);
 
         /** @var \App\Models\User|null $user */
         $user = auth()->user();
+        $ownsCommission = $user
+            && trim((string) $salesOrder->assigned_user_id) !== ''
+            && (string) $salesOrder->assigned_user_id === (string) $user->id;
+        if (! $ownsCommission) {
+            $this->authorizeView($opportunity);
+        }
+
+        $detail = $this->salesOrders->present($salesOrder, $opportunity);
         $isWon = $opportunity->stage === Opportunity::WON_STAGE;
         $canEdit = (bool) ($user?->canCreateSalesOrder() && $isWon)
             && $salesOrder->isFieldEditable();
@@ -606,6 +764,10 @@ class OpportunitySalesOrderController extends Controller
             && (! $salesOrder->isCancelPending() || $user->canApproveSalesOrderCancel());
         $canApproveCancel = (bool) ($user?->canApproveSalesOrderCancel() && $salesOrder->isCancelPending());
         $showEditUi = $canEdit || $canEditInvoice || $canEditDelivery || $canCompleteSo;
+        $canAssignOwner = (bool) $user?->canManageCommissions();
+        $commissionSalesUsers = $canAssignOwner
+            ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
+            : collect();
 
         return view('opportunities.sales-orders.show', [
             'opportunity' => $opportunity,
@@ -618,6 +780,8 @@ class OpportunitySalesOrderController extends Controller
             'showEditUi' => $showEditUi,
             'canRequestCancel' => $canRequestCancel,
             'canApproveCancel' => $canApproveCancel,
+            'canAssignOwner' => $canAssignOwner,
+            'commissionSalesUsers' => $commissionSalesUsers,
             'editUrl' => $canEdit
                 ? route('opportunities.sales-orders.edit', [$opportunity, $salesOrder])
                 : null,
@@ -641,6 +805,51 @@ class OpportunitySalesOrderController extends Controller
                 'note' => (string) ($detail['note'] ?? ''),
             ],
         ]);
+    }
+
+    public function assignOwner(Request $request, Opportunity $opportunity, OpportunitySalesOrder $salesOrder): RedirectResponse
+    {
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+        if (! $user?->canManageCommissions()) {
+            abort(403, 'Hanya Finance atau Superadmin yang boleh mengubah pemilik komisi Sales Order.');
+        }
+
+        abort_unless((string) $salesOrder->opportunity_id === (string) $opportunity->id, 404);
+
+        $data = $request->validate([
+            'assigned_user_id' => ['nullable', 'string', Rule::exists('user', 'id')->where('deleted', 0)],
+        ]);
+
+        $newId = trim((string) ($data['assigned_user_id'] ?? ''));
+        $newId = $newId !== '' ? $newId : null;
+
+        if ($newId !== null && ! EspoUser::query()->activeSales()->where('id', $newId)->exists()) {
+            return back()->with('error', 'Pemilik komisi harus sales yang masih aktif.');
+        }
+
+        $oldId = $salesOrder->assigned_user_id ?: null;
+        if ((string) $oldId === (string) $newId) {
+            return back()->with('success', 'Kepemilikan komisi tidak berubah.');
+        }
+
+        $salesOrder->assigned_user_id = $newId;
+        $salesOrder->save();
+        $salesOrder->load(['assignedUser', 'opportunity.assignedUser']);
+
+        $fromName = $oldId
+            ? (User::query()->find($oldId)?->display_name ?: $oldId)
+            : 'pemilik opportunity';
+        $toName = $newId
+            ? ($salesOrder->assignedUser?->display_name ?: $newId)
+            : 'pemilik opportunity ('.$salesOrder->opportunity?->assignedUser?->display_name.')';
+
+        $this->salesOrders->recordLog($salesOrder, SalesOrderLog::ACTION_UPDATED, [
+            'assigned_user_id' => ['from' => $oldId, 'to' => $newId],
+            'summary' => 'Kepemilikan komisi diubah dari '.$fromName.' ke '.$toName,
+        ], $user);
+
+        return back()->with('success', 'Kepemilikan komisi diperbarui. Margin SO ini masuk ke '.$salesOrder->commissionOwnerName().'.');
     }
 
     public function preview(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): View
@@ -704,10 +913,17 @@ class OpportunitySalesOrderController extends Controller
             'file_do_file' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:5120'],
             'mark_complete' => ['nullable', 'boolean'],
             'mark_paid' => ['nullable', 'boolean'],
+            'paid_date' => ['nullable', 'required_if:mark_paid,1', 'date', 'before_or_equal:today'],
+            'payment_proof_file' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:5120'],
             'mark_so_complete' => ['nullable', 'boolean'],
             'nomor_ref' => ['nullable', 'string', 'max:100'],
             'required_delivery' => ['nullable', 'date'],
             'note' => ['nullable', 'string', 'max:2000'],
+        ], [
+            'paid_date.required_if' => 'Tanggal bayar wajib diisi.',
+            'paid_date.before_or_equal' => 'Tanggal bayar tidak boleh lebih dari hari ini.',
+            'payment_proof_file.mimes' => 'Bukti bayar harus PDF, JPG, JPEG, PNG, atau WEBP.',
+            'payment_proof_file.max' => 'Bukti bayar maksimal 5MB.',
         ]);
 
         /** @var \App\Models\User|null $user */
@@ -778,10 +994,16 @@ class OpportunitySalesOrderController extends Controller
         $markComplete = $request->boolean('mark_complete') || filled($payload['file_do'] ?? null);
         $markPaid = $request->boolean('mark_paid');
         $markSoComplete = $request->boolean('mark_so_complete');
+        $fillingResi = array_key_exists('no_resi', $payload) && filled($payload['no_resi']);
 
         if ($markPaid) {
             $payload['payment_status'] = 'paid';
-            $payload['paid_date'] = now()->format('Y-m-d H:i:s');
+            $payload['paid_date'] = filled($data['paid_date'] ?? null)
+                ? Carbon::parse($data['paid_date'])->format('Y-m-d 00:00:00')
+                : now()->format('Y-m-d H:i:s');
+            if ($request->hasFile('payment_proof_file')) {
+                $payload['payment_proof'] = $this->salesOrders->storeDocument($request->file('payment_proof_file'), $salesOrder, 'payment');
+            }
         }
         if ($markComplete) {
             if (blank($payload['file_do'] ?? null) && ! $request->hasFile('file_do_file') && blank($snap['file_do'] ?? null)) {
@@ -792,6 +1014,8 @@ class OpportunitySalesOrderController extends Controller
             }
             $payload['delivery_status'] = 'completed';
             $payload['delivery_date'] = now()->format('Y-m-d H:i:s');
+        } elseif ($fillingResi && ! in_array($currentDeliveryStatus, ['completed', 'complete'], true)) {
+            $payload['delivery_status'] = 'ondelivery';
         }
 
         if ($markSoComplete) {
@@ -1028,18 +1252,24 @@ class OpportunitySalesOrderController extends Controller
      */
     protected function formPayload(Opportunity $opportunity, ?OpportunitySalesOrder $salesOrder = null): array
     {
+        $opportunity->loadMissing(['quotation.items']);
+        $qoList = $opportunity->quotation?->items?->values();
         $opportunityProducts = $opportunity->products->values();
-        $sourceItems = $opportunityProducts->map(function ($p, $i) {
+        $sourceItems = $opportunityProducts->map(function ($p, $i) use ($qoList) {
             $list = (float) ($p['sell_exclude'] ?? 0);
             $discount = (float) ($p['discount_exclude'] ?? $p['item_discount'] ?? 0);
+            $qo = $this->quotationItemAt($qoList, $i);
+            $name = trim((string) ($qo?->name ?? $p['name'] ?? ''));
+            $description = $this->specForForm((string) ($qo?->description ?? $p['description'] ?? ''));
 
             return [
                 'index' => $i,
-                'name' => (string) ($p['name'] ?? ''),
+                'name' => $name !== '' ? $name : (string) ($p['name'] ?? ''),
+                'description' => $description,
                 'sku' => (string) ($p['sku'] ?? ''),
                 'qty' => (float) ($p['quantity'] ?? 1),
                 'qty_origin' => (float) ($p['quantity'] ?? 1),
-                'brand' => (string) ($p['brand'] ?? ''),
+                'brand' => (string) ($p['brand'] ?? ($qo?->brand ?? '')),
                 'category' => (string) ($p['category'] ?? ''),
                 'sell_exclude' => $this->soUnitExclude($p),
                 'list_sell_exclude' => $list,
@@ -1053,16 +1283,26 @@ class OpportunitySalesOrderController extends Controller
             if ($soItems === [] && is_array($salesOrder->agc_payload['items'] ?? null)) {
                 $soItems = $salesOrder->agc_payload['items'];
             }
-            $items = collect($soItems)->map(function ($item) use ($opportunityProducts, $sourceItems) {
+            $items = collect($soItems)->map(function ($item) use ($opportunityProducts, $sourceItems, $qoList) {
                 $index = (int) ($item['index'] ?? 0);
                 $product = $opportunityProducts->get($index) ?? [];
                 $source = $sourceItems[$index] ?? null;
+                $qo = $this->quotationItemAt($qoList, $index);
                 $list = (float) ($product['sell_exclude'] ?? ($source['list_sell_exclude'] ?? 0));
                 $discount = (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0);
+                $customName = ! empty($item['name_custom']);
+                $customSpec = ! empty($item['description_custom']);
+                $name = $customName
+                    ? (string) ($item['name'] ?? '')
+                    : (string) ($qo?->name ?? $item['name'] ?? $product['name'] ?? ($source['name'] ?? ''));
+                $description = $customSpec
+                    ? $this->specForForm((string) ($item['description'] ?? ''))
+                    : $this->specForForm((string) ($qo?->description ?? $item['description'] ?? ($source['description'] ?? '')));
 
                 return [
                     'index' => $index,
-                    'name' => (string) ($item['name'] ?? $product['name'] ?? ($source['name'] ?? '')),
+                    'name' => $name,
+                    'description' => $description,
                     'sku' => (string) ($item['sku'] ?? $product['sku'] ?? ($source['sku'] ?? '')),
                     'qty' => (float) ($item['qty'] ?? 1),
                     'qty_origin' => (float) ($source['qty_origin'] ?? $product['quantity'] ?? ($item['qty'] ?? 1)),
@@ -1082,6 +1322,7 @@ class OpportunitySalesOrderController extends Controller
 
         $account = $opportunity->account;
         $customerTop = $account?->top() ?? CustomerTop::DEFAULT;
+        $maxTop = $opportunity->salesOrderMaxTop();
         $addresses = $this->customerAddresses->optionsForAccount($account);
         $addressList = collect($addresses);
         $defaultBilling = data_get($addressList->firstWhere('is_default_billing') ?: $addressList->first(), 'id');
@@ -1097,8 +1338,8 @@ class OpportunitySalesOrderController extends Controller
         $billingId = $salesOrder?->billing_address_id ?: $defaultBilling;
         $shippingId = $salesOrder?->shipping_address_id ?: $defaultShipping;
         $payment = $salesOrder
-            ? CustomerTop::clamp((string) ($salesOrder->payment ?: ($detail['payment'] ?? '')), $customerTop)
-            : CustomerTop::clamp($opportunity->top(), $customerTop);
+            ? CustomerTop::clamp((string) ($salesOrder->payment ?: ($detail['payment'] ?? '')), $maxTop)
+            : CustomerTop::clamp($opportunity->top(), $maxTop);
         $requiredDelivery = $salesOrder?->required_delivery
             ? optional($salesOrder->required_delivery)->format('Y-m-d')
             : Carbon::now()->format('Y-m-d');
@@ -1116,9 +1357,13 @@ class OpportunitySalesOrderController extends Controller
             'customerEditUrl' => $opportunity->account_id ? route('customers.edit', $opportunity->account_id) : null,
             'customerShowUrl' => $opportunity->account_id ? route('customers.show', $opportunity->account_id) : null,
             'payment' => old('payment', $payment),
-            'topOptions' => CustomerTop::optionsAllowedFor($customerTop),
+            'topOptions' => CustomerTop::optionsAllowedFor($maxTop),
             'customerTop' => $customerTop,
             'customerTopLabel' => CustomerTop::label($customerTop),
+            'opportunityTopApproved' => $opportunity->topIsApproved(),
+            'opportunityTopPending' => $opportunity->topNeedsApproval(),
+            'opportunityTopRejected' => $opportunity->topIsRejected(),
+            'opportunityTopLabel' => $opportunity->topLabel(),
             'poNumber' => old('po_number', $salesOrder?->po_number ?: ($detail['po_number'] ?? '')),
             'requiredDelivery' => old('required_delivery', $requiredDelivery),
             'note' => old('note', $salesOrder?->note ?? ($detail['note'] ?? (string) ($opportunity->description ?? ''))),
@@ -1246,5 +1491,91 @@ class OpportunitySalesOrderController extends Controller
             (float) ($product['sell_exclude'] ?? 0),
             (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0)
         );
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $postedItems
+     * @return list<array<string, mixed>>
+     */
+    protected function mapPostedSalesOrderItems(Opportunity $opportunity, array $postedItems): array
+    {
+        $products = $opportunity->products->values();
+        $opportunity->loadMissing(['quotation.items']);
+        $qoList = $opportunity->quotation?->items?->values();
+
+        return collect($postedItems)->map(function ($item) use ($products, $qoList) {
+            $index = (int) $item['index'];
+            $product = $products->get($index) ?? [];
+            $qo = $this->quotationItemAt($qoList, $index);
+            $defaultName = trim((string) ($qo?->name ?? $product['name'] ?? ''));
+            $defaultSpec = (string) ($qo?->description ?? '');
+            $name = trim((string) ($item['name'] ?? ''));
+            $description = (string) ($item['description'] ?? '');
+            $nameCustom = $name !== '' && ! $this->sameSpec($name, $defaultName);
+            $specCustom = ! $this->sameSpec($description, $defaultSpec);
+
+            return [
+                'index' => $index,
+                'sku' => trim((string) ($item['sku'] ?? ($product['sku'] ?? ''))),
+                'qty' => (float) $item['qty'],
+                'name' => $name !== '' ? $name : ($defaultName !== '' ? $defaultName : ($product['name'] ?? null)),
+                'name_custom' => $nameCustom,
+                'description' => $specCustom ? $description : $defaultSpec,
+                'description_custom' => $specCustom,
+                'brand' => $product['brand'] ?? ($qo?->brand ?? ''),
+                'category' => $product['category'] ?? '',
+                'sell_exclude' => $this->soUnitExclude($product),
+                'discount_exclude' => (float) ($product['discount_exclude'] ?? $product['item_discount'] ?? 0),
+            ];
+        })->values()->all();
+    }
+
+    protected function quotationItemAt($qoList, int $index): mixed
+    {
+        if (! $qoList || $qoList->isEmpty()) {
+            return null;
+        }
+
+        foreach ($qoList as $k => $candidate) {
+            if ((int) ($candidate->sort_order ?? $k) === $index) {
+                return $candidate;
+            }
+        }
+
+        return $qoList->get($index);
+    }
+
+    protected function sameSpec(string $a, string $b): bool
+    {
+        return $this->normalizeSpec($a) === $this->normalizeSpec($b);
+    }
+
+    protected function normalizeSpec(string $value): string
+    {
+        $value = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+
+        return mb_strtolower(trim($value));
+    }
+
+    protected function specForForm(?string $description): string
+    {
+        $description = trim((string) $description);
+        if ($description === '' || $description === '<p><br></p>' || $description === '<br>') {
+            return '';
+        }
+        if (strip_tags($description) === $description) {
+            return $description;
+        }
+
+        $withBreaks = str_replace(
+            ['<br>', '<br/>', '<br />', '</p>', '</li>', '</div>'],
+            ["\n", "\n", "\n", "\n", "\n", "\n"],
+            $description
+        );
+        $text = html_entity_decode(strip_tags($withBreaks), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
+
+        return trim($text);
     }
 }

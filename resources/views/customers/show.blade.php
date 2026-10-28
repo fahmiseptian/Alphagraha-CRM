@@ -87,6 +87,8 @@
 
         @include('customers._addresses')
 
+        @include('customers._documents')
+
         <x-card title="Contact Persons (PIC)">
         @if ($contacts->count())
             <ul class="space-y-3" x-data="{ editingId: @js(old('editing_contact_id')) }">

@@ -74,7 +74,8 @@ class CustomerTop
     }
 
     /**
-     * Samakan nilai lama `cash` / `cbd` ke `CBD`.
+     * Samakan nilai lama / payload ke opsi form:
+     * cash/cbd → CBD, top0 → CBD, top14 → 14, "TOP 14 hari" → 14, dll.
      */
     public static function canonicalize(?string $value): string
     {
@@ -85,6 +86,24 @@ class CustomerTop
 
         if (strcasecmp($raw, 'cash') === 0 || strcasecmp($raw, 'cbd') === 0) {
             return self::CASH;
+        }
+
+        if (strcasecmp($raw, 'cod') === 0) {
+            return self::COD;
+        }
+
+        // Format tersimpan di SO / AGC payload: top0, top14, top30, …
+        if (preg_match('/^top(\d+)$/i', $raw, $m)) {
+            $days = (int) $m[1];
+
+            return $days === 0 ? self::CASH : (string) $days;
+        }
+
+        // Label tampilan: "TOP 14", "TOP 14 hari"
+        if (preg_match('/^TOP\s*(\d+)(?:\s*hari)?$/i', $raw, $m)) {
+            $days = (int) $m[1];
+
+            return $days === 0 ? self::CASH : (string) $days;
         }
 
         return $raw;
@@ -174,6 +193,35 @@ class CustomerTop
         }
 
         return 'TOP '.self::days($key);
+    }
+
+    /**
+     * Balik label laporan (TOP 14, CBD, …) ke nilai opsi CustomerTop.
+     */
+    public static function valueFromReportLabel(?string $label): ?string
+    {
+        $label = trim((string) $label);
+        if ($label === '') {
+            return null;
+        }
+
+        $upper = mb_strtoupper($label);
+        if (in_array($upper, ['CBD', 'CASH'], true)) {
+            return self::CASH;
+        }
+        if ($upper === 'COD') {
+            return self::COD;
+        }
+        if (preg_match('/^TOP\s*(\d+)$/i', $label, $m)) {
+            $days = (string) (int) $m[1];
+            foreach ([self::DAYS_7, self::DAYS_14, self::DAYS_30, self::DAYS_45, self::DAYS_60] as $option) {
+                if ($option === $days) {
+                    return $option;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

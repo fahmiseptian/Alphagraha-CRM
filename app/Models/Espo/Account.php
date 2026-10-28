@@ -4,6 +4,7 @@ namespace App\Models\Espo;
 
 use App\Models\Activity;
 use App\Models\CustomerAddress;
+use App\Models\CustomerDocument;
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\Quotation;
 use App\Support\PaymentLevel;
@@ -103,6 +104,13 @@ class Account extends Model
             ->orderByDesc('is_default_billing')
             ->orderBy('sort_order')
             ->orderBy('id');
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(CustomerDocument::class, 'account_id')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
     }
 
     public function opportunities(): HasMany

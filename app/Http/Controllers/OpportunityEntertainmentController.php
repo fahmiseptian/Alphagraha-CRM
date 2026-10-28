@@ -6,9 +6,11 @@ use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Opportunity;
 use App\Models\OpportunityEntertainment;
 use App\Models\OpportunityLog;
+use App\Services\NotificationService;
 use App\Services\OpportunityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\File;
 
 class OpportunityEntertainmentController extends Controller
@@ -20,35 +22,41 @@ class OpportunityEntertainmentController extends Controller
         $this->authorizeAccess($opportunity);
 
         $data = $request->validate([
+            'entertainment_date' => ['required', 'date'],
+            'entertainment_category_id' => ['required', 'integer', Rule::exists('crm_expense_categories', 'id')->where('is_active', true)],
             'entertainment_name' => ['required', 'string', 'max:255'],
             'entertainment_description' => ['nullable', 'string', 'max:2000'],
             'entertainment_amount' => ['required', 'numeric', 'min:0'],
             'entertainment_photo' => [
-                'nullable',
+                'required',
                 File::types(['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'])->max(10 * 1024),
             ],
         ], [], [
+            'entertainment_date' => 'tanggal',
+            'entertainment_category_id' => 'kategori',
             'entertainment_name' => 'nama',
             'entertainment_description' => 'deskripsi',
             'entertainment_amount' => 'nominal',
-            'entertainment_photo' => 'foto',
+            'entertainment_photo' => 'foto / struk',
         ]);
 
+        $photo = $request->file('entertainment_photo');
+        $photoPath = $photo instanceof UploadedFile && $photo->isValid()
+            ? $photo->store('opportunity-entertainments/'.$opportunity->id, 'public')
+            : null;
+
         $item = $opportunity->entertainments()->create([
+            'category_id' => (int) $data['entertainment_category_id'],
             'name' => trim($data['entertainment_name']),
             'description' => filled($data['entertainment_description'] ?? null)
                 ? trim((string) $data['entertainment_description'])
                 : null,
             'amount' => round((float) $data['entertainment_amount'], 2),
+            'entertainment_date' => $data['entertainment_date'],
+            'photo_path' => $photoPath,
             'status' => OpportunityEntertainment::STATUS_PENDING,
             'created_by' => auth()->id(),
         ]);
-
-        $photo = $request->file('entertainment_photo');
-        if ($photo instanceof UploadedFile && $photo->isValid()) {
-            $item->photo_path = $photo->store('opportunity-entertainments/'.$opportunity->id, 'public');
-            $item->save();
-        }
 
         app(OpportunityLogService::class)->record(
             $opportunity,
@@ -58,6 +66,12 @@ class OpportunityEntertainmentController extends Controller
                 'force' => true,
                 'summary' => 'Menambah entertainment: '.$item->name,
             ]
+        );
+
+        app(NotificationService::class)->notifyEntertainmentApprovalRequested(
+            $opportunity,
+            $item,
+            (string) auth()->id()
         );
 
         return back()->with('success', 'Entertainment ditambahkan.');
@@ -90,6 +104,8 @@ class OpportunityEntertainmentController extends Controller
                 'summary' => 'Entertainment complete: '.$entertainment->name,
             ]
         );
+
+        app(NotificationService::class)->markEntertainmentApprovalActioned($entertainment);
 
         return back()->with('success', 'Entertainment ditandai complete.');
     }

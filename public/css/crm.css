@@ -628,6 +628,30 @@ select[data-po-vendor-select] + .select2-container .select2-selection--single .s
     clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
 }
 
+button.crm-kanban-header {
+    width: 100%;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+    appearance: none;
+}
+
+.crm-kanban-header--sortable:hover {
+    filter: brightness(1.05);
+}
+
+.crm-kanban-header__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.crm-kanban-header__sort {
+    font-size: 0.7rem;
+    opacity: 0.85;
+}
+
 .crm-kanban-header--first {
     margin-left: 0;
     padding-left: 1rem;

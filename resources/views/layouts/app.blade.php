@@ -100,6 +100,9 @@
                 $nav = [
                     ['dashboard', 'Dashboard', 'bi-grid-1x2'],
                 ];
+                if ($user->canViewCatalogDashboard()) {
+                    $nav[] = ['dashboard.catalog-index', 'Brand & Kategori', 'bi-bar-chart-steps'];
+                }
                 if ($user->canViewCustomers()) {
                     $nav[] = ['customers.index', 'Customers', 'bi-people'];
                 }
@@ -116,6 +119,16 @@
                 }
                 if ($user->canViewPurchaseOrders()) {
                     $nav[] = ['purchase-orders.index', 'Purchase Order', 'bi-cart-check'];
+                }
+                if ($user->canViewCommissions()) {
+                    $nav[] = [
+                        'commissions.index',
+                        $user->canManageCommissions() ? 'Komisi Sales' : 'Komisi Saya',
+                        'bi-cash-coin',
+                    ];
+                }
+                if ($user->canManageExpenseCategories()) {
+                    $nav[] = ['expense-categories.index', 'Kategori Biaya', 'bi-tags'];
                 }
                 if ($user->canCreateOpportunity() || $user->isAdmin()) {
                     $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
@@ -145,7 +158,13 @@
                 );
             @endphp
             @foreach ($nav as [$route, $label, $icon])
-                @php $active = request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route); @endphp
+                @php
+                    $active = match (true) {
+                        $route === 'dashboard' => request()->routeIs('dashboard'),
+                        $route === 'dashboard.catalog-index' => request()->routeIs('dashboard.catalog-index', 'dashboard.catalog'),
+                        default => request()->routeIs(Str::before($route, '.').'.*') || request()->routeIs($route),
+                    };
+                @endphp
                 <a href="{{ route($route) }}" title="{{ $label }}"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition
                           {{ $active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
@@ -273,6 +292,12 @@
                                   {{ request()->routeIs('settings.margin.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
                             <i class="bi bi-graph-up-arrow text-xs"></i>
                             <span>Margin</span>
+                        </a>
+                        <a href="{{ route('settings.commission.edit') }}"
+                           class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition
+                                  {{ request()->routeIs('settings.commission.*') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white' }}">
+                            <i class="bi bi-wallet2 text-xs"></i>
+                            <span>Komisi</span>
                         </a>
                         <a href="{{ route('settings.po.edit') }}"
                            class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition

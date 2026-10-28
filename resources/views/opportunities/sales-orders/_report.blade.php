@@ -1,4 +1,4 @@
-{{-- Laporan Sales Order AGC (shared preview + PDF) --}}
+{{-- Laporan Sales Order (shared preview + PDF). Kop mengikuti company opportunity. --}}
 @php
     $soCode = $salesOrder->displayRefNumber()
         ?: (string) ($detail['nomor_ref'] ?? $salesOrder->nomor_ref ?? '')
@@ -40,9 +40,31 @@
         return number_format((float) ($amount ?? 0), 0, '.', '.');
     };
 
-    $kopPath = public_path('images/kop-agc.png');
-    $kopBase64 = file_exists($kopPath)
-        ? 'data:image/png;base64,'.base64_encode(file_get_contents($kopPath))
+    // Kop SO: Alpha Graha → agc, Elite → eps, Power Sistem → psi
+    $companyKey = \App\Models\UserProfile::resolveCompanyKey(
+        optional($opportunity ?? null)->company
+    );
+    $kopRelative = config("crm.quotation_companies.{$companyKey}.letterhead")
+        ?: config('crm.quotation_companies.agc.letterhead');
+    $kopPath = $kopRelative ? public_path($kopRelative) : null;
+    if (! $kopPath || ! is_file($kopPath)) {
+        $kopPath = null;
+        foreach ([$companyKey, 'agc'] as $key) {
+            foreach (['png', 'jpeg', 'jpg'] as $ext) {
+                $candidate = public_path("images/kop-{$key}.{$ext}");
+                if (is_file($candidate)) {
+                    $kopPath = $candidate;
+                    break 2;
+                }
+            }
+        }
+    }
+    $kopMime = match (strtolower($kopPath ? pathinfo($kopPath, PATHINFO_EXTENSION) : '')) {
+        'jpg', 'jpeg' => 'image/jpeg',
+        default => 'image/png',
+    };
+    $kopBase64 = $kopPath
+        ? 'data:'.$kopMime.';base64,'.base64_encode((string) file_get_contents($kopPath))
         : '';
 @endphp
 
@@ -115,17 +137,23 @@
 <table style="width: 100%; border-collapse: collapse; border: 1px solid #424242;">
     <thead>
         <tr>
-            <th style="border: 0.5px solid #424242; padding: 5px; width: 50px;">QTY</th>
-            <th style="border: 0.5px solid #424242; padding: 5px;">DESCRIPTION</th>
-            <th style="border: 0.5px solid #424242; padding: 5px; width: 140px;">NO.PO</th>
+            <th style="border: 0.5px solid #424242; padding: 5px; width: 36px;">No</th>
+            <th style="border: 0.5px solid #424242; padding: 5px;">Description</th>
+            <th style="border: 0.5px solid #424242; padding: 5px; width: 50px;">Qty</th>
+            <th style="border: 0.5px solid #424242; padding: 5px; width: 140px;">No PO</th>
             <th style="border: 0.5px solid #424242; padding: 5px; width: 100px; text-align: right;">Price</th>
             <th style="border: 0.5px solid #424242; padding: 5px; width: 100px; text-align: right;">Total</th>
         </tr>
     </thead>
     <tbody>
         @foreach (($detail['items'] ?? []) as $item)
+            @php
+                $lineQty = (float) ($item['qty'] ?? 0);
+                $linePrice = round((float) ($item['price_display'] ?? $item['price'] ?? 0), 0);
+                $lineTotal = round($lineQty * $linePrice, 0);
+            @endphp
             <tr>
-                <td style="border: 0.5px solid #424242; padding: 5px; text-align: center;">{{ (int) ($item['qty'] ?? 0) }}</td>
+                <td style="border: 0.5px solid #424242; padding: 5px; text-align: center;">{{ $loop->iteration }}</td>
                 <td style="border: 0.5px solid #424242; padding: 5px;">
                     @if (! empty($item['brand']))
                         <strong>{{ $item['brand'] }}</strong>
@@ -138,25 +166,26 @@
                         [{{ $item['sku'] }}]
                     @endif
                 </td>
+                <td style="border: 0.5px solid #424242; padding: 5px; text-align: center;">{{ (int) $lineQty }}</td>
                 <td style="border: 0.5px solid #424242; padding: 5px;">{{ $customerOrderRef }}</td>
-                <td style="border: 0.5px solid #424242; padding: 5px; text-align: right;">{{ $fmt($item['price_display'] ?? $item['price'] ?? 0) }}</td>
-                <td style="border: 0.5px solid #424242; padding: 5px; text-align: right;">{{ $fmt($item['amount_display'] ?? $item['subtotal'] ?? 0) }}</td>
+                <td style="border: 0.5px solid #424242; padding: 5px; text-align: right;">{{ $fmt($linePrice) }}</td>
+                <td style="border: 0.5px solid #424242; padding: 5px; text-align: right;">{{ $fmt($lineTotal) }}</td>
             </tr>
         @endforeach
         <tr>
-            <td colspan="4" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">Total</td>
+            <td colspan="5" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">Total</td>
             <td style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">{{ $fmt($detail['subtotal_display'] ?? $detail['total_price_item'] ?? 0) }}</td>
         </tr>
         <tr>
-            <td colspan="4" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">PPN {{ (float) ($detail['ppn_percent'] ?? 11) }}%</td>
+            <td colspan="5" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">PPN {{ (float) ($detail['ppn_percent'] ?? 11) }}%</td>
             <td style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right;">{{ $fmt($detail['ppn_amount'] ?? 0) }}</td>
         </tr>
         <tr>
-            <td colspan="4" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">Shipping Cost</td>
+            <td colspan="5" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 700;">Shipping Cost</td>
             <td style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right;">{{ $fmt($detail['shipping_price'] ?? 0) }}</td>
         </tr>
         <tr>
-            <td colspan="4" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 800; font-size: 12px;">Grand Total</td>
+            <td colspan="5" style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 800; font-size: 12px;">Grand Total</td>
             <td style="border: 0.5px solid #424242; padding: 4px 5px; text-align: right; font-weight: 800; font-size: 12px;">{{ $fmt($detail['grand_total'] ?? 0) }}</td>
         </tr>
     </tbody>

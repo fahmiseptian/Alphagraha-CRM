@@ -154,6 +154,23 @@
                         </select>
                         @if ($purchasingMode)<input type="hidden" name="crm_top" value="{{ $opportunity->top() }}">@endif
                         <p class="mt-1 text-xs text-slate-400">Default dari customer. Bisa diubah untuk deal ini.</p>
+                        @php
+                            $topRanks = collect(\App\Support\CustomerTop::LABELS)
+                                ->mapWithKeys(fn ($label, $value) => [$value => \App\Support\CustomerTop::rank((string) $value)]);
+                        @endphp
+                        <p class="mt-1 text-xs text-amber-700" x-cloak
+                           x-data="{ ranks: @js($topRanks) }"
+                           x-show="!purchasingMode && accountId && (ranks[crmTop] ?? 0) > (ranks[accountMeta?.top || @js(\App\Support\CustomerTop::DEFAULT)] ?? 0)">
+                            <i class="bi bi-shield-exclamation"></i>
+                            TOP melebihi TOP customer (<span x-text="accountMeta?.top_label || accountMeta?.top || 'CBD'"></span>) — perlu approval Superadmin/Finance sebelum bisa dipakai di SO.
+                        </p>
+                        @if ($opportunity->exists && $opportunity->topNeedsApproval())
+                            <p class="mt-1 text-xs font-medium text-amber-700"><i class="bi bi-hourglass-split"></i> {{ $opportunity->topLabel() }} sedang menunggu approval.</p>
+                        @elseif ($opportunity->exists && $opportunity->topIsApproved())
+                            <p class="mt-1 text-xs font-medium text-green-700"><i class="bi bi-check-circle"></i> {{ $opportunity->topLabel() }} sudah di-approve. Mengubah TOP akan meminta approval ulang.</p>
+                        @elseif ($opportunity->exists && $opportunity->topIsRejected())
+                            <p class="mt-1 text-xs font-medium text-red-700"><i class="bi bi-x-circle"></i> {{ $opportunity->topLabel() }} ditolak. Ubah TOP untuk mengajukan ulang.</p>
+                        @endif
                     </div>
                     <div>
                         <label class="crm-label">Contact</label>

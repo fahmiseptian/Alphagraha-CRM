@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Espo\Opportunity;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -35,6 +36,7 @@ class OpportunitySalesOrder extends Model
         'items',
         'agc_payload',
         'created_by',
+        'assigned_user_id',
         'deleted_by',
     ];
 
@@ -50,6 +52,15 @@ class OpportunitySalesOrder extends Model
     public function opportunity(): BelongsTo
     {
         return $this->belongsTo(Opportunity::class, 'opportunity_id');
+    }
+
+    /**
+     * Sales penerima komisi margin SO ini.
+     * Null berarti ikut pemilik opportunity.
+     */
+    public function assignedUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_user_id');
     }
 
     public function creator(): BelongsTo
@@ -73,6 +84,58 @@ class OpportunitySalesOrder extends Model
     }
 
     /**
+     * SO yang margin komisinya milik sales ini.
+     * Override assigned_user_id menang; bila kosong, ikut pemilik opportunity.
+     */
+    public function scopeForCommissionOwner(Builder $query, string $salesUserId): Builder
+    {
+        return $query
+            ->whereHas('opportunity', fn ($q) => $q->where('deleted', 0))
+            ->where(function (Builder $q) use ($salesUserId) {
+                $q->where('assigned_user_id', $salesUserId)
+                    ->orWhere(function (Builder $fallback) use ($salesUserId) {
+                        $fallback->where(function (Builder $empty) {
+                            $empty->whereNull('assigned_user_id')
+                                ->orWhere('assigned_user_id', '');
+                        })->whereHas('opportunity', function ($oq) use ($salesUserId) {
+                            $oq->where('assigned_user_id', $salesUserId);
+                        });
+                    });
+            });
+    }
+
+    public function commissionOwnerId(): ?string
+    {
+        $own = trim((string) $this->assigned_user_id);
+        if ($own !== '') {
+            return $own;
+        }
+
+        $fallback = trim((string) ($this->opportunity?->assigned_user_id ?? ''));
+
+        return $fallback !== '' ? $fallback : null;
+    }
+
+    public function isCommissionReassigned(): bool
+    {
+        $own = trim((string) $this->assigned_user_id);
+        if ($own === '') {
+            return false;
+        }
+
+        return $own !== (string) ($this->opportunity?->assigned_user_id ?? '');
+    }
+
+    public function commissionOwnerName(): string
+    {
+        if (trim((string) $this->assigned_user_id) !== '') {
+            return $this->assignedUser?->display_name ?: '—';
+        }
+
+        return $this->opportunity?->assignedUser?->display_name ?: '—';
+    }
+
+    /**
      * SO tidak boleh dihapus permanen — tetap ada di log Superadmin.
      */
     public function forceDelete()
@@ -85,7 +148,7 @@ class OpportunitySalesOrder extends Model
      */
     public function toLogSnapshot(): array
     {
-        $this->loadMissing(['opportunity.account', 'creator']);
+        $this->loadMissing(['opportunity.account', 'opportunity.assignedUser', 'assignedUser', 'creator']);
 
         return [
             'id' => $this->id,
@@ -108,6 +171,9 @@ class OpportunitySalesOrder extends Model
             'cancel_reason' => $this->cancelReason(),
             'created_by' => $this->created_by,
             'created_by_name' => $this->creator?->display_name,
+            'assigned_user_id' => $this->assigned_user_id,
+            'commission_owner_name' => $this->commissionOwnerName(),
+            'opportunity_owner_name' => $this->opportunity?->assignedUser?->display_name,
             'created_at' => optional($this->created_at)->toDateTimeString(),
             'deleted_at' => optional($this->deleted_at)->toDateTimeString(),
             'deleted_by' => $this->deleted_by,

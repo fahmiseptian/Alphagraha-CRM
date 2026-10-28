@@ -9,6 +9,8 @@ use App\Models\Espo\EspoUser;
 use App\Models\Espo\Opportunity;
 use App\Models\Espo\Team;
 use App\Models\OpportunityLog;
+use App\Services\AccountReceivableService;
+use App\Support\AccountReceivableExcel;
 use App\Support\CustomerTop;
 use App\Support\OpportunityProductBulkExcel;
 use App\Support\OpportunityProductPricing;
@@ -45,42 +47,19 @@ class OpportunityController extends Controller
 
         $kanbanStages = Opportunity::KANBAN_STAGES;
         $view = $request->get('view') === 'list' ? 'list' : 'kanban';
-        $selectedUserId = $this->resolveAssignedUserFilter($request);
-        $period = $this->resolvePeriodFilter($request);
-        $periodRange = $this->periodDateRange($period);
-        $periodLabel = $this->periodLabel($period);
-
-        $search = trim((string) $request->get('q', ''));
-        $stageFilter = (string) $request->get('stage', '');
-        if ($stageFilter !== '' && ! in_array($stageFilter, Opportunity::STAGES, true)) {
-            $stageFilter = '';
-        }
-        $companyFilter = trim((string) $request->get('company', ''));
-        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
-            $companyFilter = '';
-        }
-        $accountId = trim((string) $request->get('account_id', ''));
-        if ($accountId !== '' && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
-            $accountId = '';
-        }
 
         $this->rememberOpportunitiesIndexQuery($request);
 
-        $query = Opportunity::query()->with(['account', 'assignedUser']);
-        $user = $this->currentUser();
-
-        if ($user?->canViewAllOpportunities()) {
-            if ($user->isPurchasing() || $user->isFinance()) {
-                $query->where('stage', Opportunity::WON_STAGE);
-            } elseif ($this->isAdmin() && $selectedUserId !== null) {
-                $query->where($query->getModel()->getTable().'.assigned_user_id', $selectedUserId);
-            }
-        } else {
-            $query = $this->scopeAssigned($query);
-        }
-
-        $this->applyPeriodToOpportunityQuery($query, $periodRange);
-        $this->applyOpportunityIndexFilters($query, $search, $stageFilter, $companyFilter, $accountId);
+        [
+            'query' => $query,
+            'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $periodLabel,
+            'search' => $search,
+            'stageFilter' => $stageFilter,
+            'companyFilter' => $companyFilter,
+            'accountId' => $accountId,
+        ] = $this->opportunityIndexContext($request);
 
         [$sort, $sortDir] = $this->resolveOpportunityListSort($request);
 
@@ -139,6 +118,131 @@ class OpportunityController extends Controller
             'duplicateMap' => Opportunity::duplicateMap($kanbanOpportunities),
             'summary' => $this->buildOpportunitySummary($allOpportunities, $kanbanStages),
         ]);
+    }
+
+    /**
+     * Laporan Account Receivable: SO belum dibayar dari opportunity hasil filter index.
+     */
+    public function accountReceivable(Request $request, AccountReceivableService $receivables)
+    {
+        if (! auth()->user()?->canViewAccountReceivable()) {
+            abort(403, 'Anda tidak memiliki akses ke Account Receivable.');
+        }
+
+        $context = $this->opportunityIndexContext($request);
+        $rows = $receivables->rows((clone $context['query'])->reorder()->select('opportunity.id'));
+
+        $filterQuery = array_filter([
+            'period' => $context['period'] !== 'year' ? $context['period'] : null,
+            'assigned_user_id' => $context['selectedUserId'],
+            'q' => $context['search'],
+            'stage' => $context['stageFilter'],
+            'company' => $context['companyFilter'],
+            'account_id' => $context['accountId'],
+        ], fn ($v) => $v !== null && $v !== '');
+
+        if ($request->get('format') === 'xlsx') {
+            return AccountReceivableExcel::export($rows, 'account-receivable-'.now()->format('Y-m-d').'.xlsx');
+        }
+
+        $range = $this->periodDateRange($context['period']);
+
+        return view('opportunities.account-receivable', [
+            'rows' => $rows,
+            'totals' => $receivables->totals($rows),
+            'periodLabel' => $context['periodLabel'],
+            'rangeStart' => $range[0] ?? $rows->min('invoice_at'),
+            'rangeEnd' => $range ? min($range[1], now()) : now(),
+            'filterQuery' => $filterQuery,
+            'filterSummary' => $this->accountReceivableFilterSummary($context),
+        ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function accountReceivableFilterSummary(array $context): array
+    {
+        $parts = [];
+        if ($context['search'] !== '') {
+            $parts[] = 'Cari: "'.$context['search'].'"';
+        }
+        if ($context['accountId'] !== '') {
+            $parts[] = 'Customer: '.(Account::query()->whereKey($context['accountId'])->value('name') ?: '—');
+        }
+        if ($context['stageFilter'] !== '') {
+            $parts[] = 'Stage: '.$context['stageFilter'];
+        }
+        if ($context['companyFilter'] !== '') {
+            $parts[] = 'Perusahaan: '.$context['companyFilter'];
+        }
+        if ($context['selectedUserId']) {
+            $user = EspoUser::query()->find($context['selectedUserId']);
+            $parts[] = 'Sales: '.($user?->display_name ?: '—');
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Query opportunity sesuai filter index (dipakai daftar opportunity & laporan AR).
+     *
+     * @return array{
+     *     query: \Illuminate\Database\Eloquent\Builder,
+     *     selectedUserId: ?string,
+     *     period: string,
+     *     periodLabel: string,
+     *     search: string,
+     *     stageFilter: string,
+     *     companyFilter: string,
+     *     accountId: string
+     * }
+     */
+    protected function opportunityIndexContext(Request $request): array
+    {
+        $selectedUserId = $this->resolveAssignedUserFilter($request);
+        $period = $this->resolvePeriodFilter($request);
+
+        $search = trim((string) $request->get('q', ''));
+        $stageFilter = (string) $request->get('stage', '');
+        if ($stageFilter !== '' && ! in_array($stageFilter, Opportunity::STAGES, true)) {
+            $stageFilter = '';
+        }
+        $companyFilter = trim((string) $request->get('company', ''));
+        if ($companyFilter !== '' && ! in_array($companyFilter, Opportunity::COMPANIES, true)) {
+            $companyFilter = '';
+        }
+        $accountId = trim((string) $request->get('account_id', ''));
+        if ($accountId !== '' && ! $this->scopeAssigned(Account::query())->where('id', $accountId)->exists()) {
+            $accountId = '';
+        }
+
+        $query = Opportunity::query()->with(['account', 'assignedUser']);
+        $user = $this->currentUser();
+
+        if ($user?->canViewAllOpportunities()) {
+            if ($user->isPurchasing() || $user->isFinance()) {
+                $query->where('stage', Opportunity::WON_STAGE);
+            } elseif ($this->isAdmin() && $selectedUserId !== null) {
+                $query->where($query->getModel()->getTable().'.assigned_user_id', $selectedUserId);
+            }
+        } else {
+            $query = $this->scopeAssigned($query);
+        }
+
+        $this->applyPeriodToOpportunityQuery($query, $this->periodDateRange($period));
+        $this->applyOpportunityIndexFilters($query, $search, $stageFilter, $companyFilter, $accountId);
+
+        return [
+            'query' => $query,
+            'selectedUserId' => $selectedUserId,
+            'period' => $period,
+            'periodLabel' => $this->periodLabel($period),
+            'search' => $search,
+            'stageFilter' => $stageFilter,
+            'companyFilter' => $companyFilter,
+            'accountId' => $accountId,
+        ];
     }
 
     /**
@@ -323,7 +427,7 @@ class OpportunityController extends Controller
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'purchaseOrders.creator', 'purchaseOrders.approver', 'purchaseOrders.vendor', 'purchaseOrders.salesOrder', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'entertainments.category', 'purchaseOrders.creator', 'purchaseOrders.approver', 'purchaseOrders.vendor', 'purchaseOrders.salesOrder', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator', 'salesOrders.assignedUser']);
 
         // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
         if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {
@@ -418,6 +522,7 @@ class OpportunityController extends Controller
         $this->applyValidatedData($opportunity, $data, $request, isNew: true);
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: true);
         $notifyDiscount = $opportunity->discountNeedsAttention();
+        $notifyTop = $opportunity->refreshTopApprovalState();
         $opportunity->save();
         $this->syncTeams($opportunity, $data['team_ids'] ?? []);
         $this->opportunityLogs()->record($opportunity, OpportunityLog::ACTION_CREATED);
@@ -426,6 +531,9 @@ class OpportunityController extends Controller
 
         if ($notifyDiscount) {
             $notifications->notifyDiscountRequested($opportunity);
+        }
+        if ($notifyTop) {
+            $notifications->notifyTopApprovalRequested($opportunity);
         }
         if ($notifyMargin) {
             $notifications->notifyOpportunityMarginRequested($opportunity);
@@ -442,6 +550,9 @@ class OpportunityController extends Controller
         }
         if ($opportunity->marginNeedsApproval()) {
             $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
+        }
+        if ($opportunity->topNeedsApproval()) {
+            $message .= ' '.$opportunity->topLabel().' melebihi TOP customer — menunggu approval Superadmin/Finance.';
         }
 
         return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
@@ -503,6 +614,8 @@ class OpportunityController extends Controller
         $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
             || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
         $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
+        $wasTopPending = $opportunity->getOriginal('crm_top_status') === Opportunity::TOP_PENDING;
+        $notifyTop = $opportunity->refreshTopApprovalState();
         $opportunity->clearPendingApprovalsForLost();
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
@@ -529,6 +642,11 @@ class OpportunityController extends Controller
                     $notifications->markQuotationMarginRequestActioned($opportunity->quotation);
                 }
             }
+            if ($notifyTop) {
+                $notifications->notifyTopApprovalRequested($opportunity);
+            } elseif ($wasTopPending && ! $opportunity->topNeedsApproval()) {
+                $notifications->markTopRequestActioned($opportunity);
+            }
         }
         if (in_array($opportunity->stage, [Opportunity::WON_STAGE, Opportunity::LOST_STAGE], true)) {
             $notifications->markOpportunityDeadlineActioned($opportunity);
@@ -550,8 +668,64 @@ class OpportunityController extends Controller
         if ($opportunity->marginNeedsApproval()) {
             $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
+        if ($opportunity->topNeedsApproval()) {
+            $message .= ' '.$opportunity->topLabel().' melebihi TOP customer — menunggu approval Superadmin/Finance.';
+        }
 
         return redirect()->route('opportunities.show', $opportunity)->with('success', $message);
+    }
+
+    public function approveTop(Request $request, Opportunity $opportunity)
+    {
+        return $this->decideTop($request, $opportunity, approved: true);
+    }
+
+    public function rejectTop(Request $request, Opportunity $opportunity)
+    {
+        return $this->decideTop($request, $opportunity, approved: false);
+    }
+
+    protected function decideTop(Request $request, Opportunity $opportunity, bool $approved)
+    {
+        if (! auth()->user()?->canApproveOpportunityTop()) {
+            abort(403);
+        }
+        $this->authorizeAccess($opportunity);
+
+        if (! $opportunity->topNeedsApproval()) {
+            return back()->with('error', 'TOP opportunity tidak dalam status menunggu approval.');
+        }
+
+        $data = $request->validate([
+            'note' => [$approved ? 'nullable' : 'required', 'string', 'max:1000'],
+        ], [
+            'note.required' => 'Alasan penolakan wajib diisi.',
+        ]);
+        $note = trim((string) ($data['note'] ?? '')) ?: null;
+
+        $before = $this->opportunityLogs()->capture($opportunity);
+        $opportunity->crm_top_status = $approved ? Opportunity::TOP_APPROVED : Opportunity::TOP_REJECTED;
+        $opportunity->crm_top_reviewed_by = auth()->id();
+        $opportunity->crm_top_reviewed_at = now();
+        $opportunity->crm_top_note = $note;
+        $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
+        $opportunity->modified_by_id = auth()->id();
+        $opportunity->save();
+
+        $this->opportunityLogs()->record(
+            $opportunity,
+            $approved ? OpportunityLog::ACTION_TOP_APPROVED : OpportunityLog::ACTION_TOP_REJECTED,
+            $before,
+            ['note' => $note]
+        );
+
+        $notifications = app(\App\Services\NotificationService::class);
+        $notifications->markTopRequestActioned($opportunity);
+        $notifications->notifyTopApprovalDecided($opportunity, $approved, $note);
+
+        return back()->with('success', $approved
+            ? $opportunity->topLabel().' disetujui. SO opportunity ini dapat memakai TOP tersebut.'
+            : $opportunity->topLabel().' ditolak. SO tetap mengikuti TOP customer.');
     }
 
     public function approveDiscount(Request $request, Opportunity $opportunity)
@@ -1463,6 +1637,7 @@ class OpportunityController extends Controller
                 'payment_level_margin' => $fromLevel,
                 'suspended' => $account->isPaymentSuspended(),
                 'top' => $account->top(),
+                'top_label' => CustomerTop::label($account->top()),
             ]];
         })->all();
 
@@ -1504,6 +1679,10 @@ class OpportunityController extends Controller
         }
 
         if ($user->isSuperAdmin() || $user->role === \App\Models\User::ROLE_ADMIN) {
+            return;
+        }
+
+        if ($user->isFinance() && $opportunity->crm_top_status !== null) {
             return;
         }
 

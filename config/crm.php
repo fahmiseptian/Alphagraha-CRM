@@ -40,6 +40,7 @@ return [
             'phone' => '(021) 1234-5678',
             'email' => 'info@alphagraha.co.id',
             'color' => '#2563eb',
+            'letterhead' => 'images/kop-agc.png',
         ],
         'eps' => [
             'legal_name' => 'PT. Elite Proxy Sistem',
@@ -47,6 +48,7 @@ return [
             'phone' => '(021) 5794-8922',
             'email' => 'info@eliteproxy.co.id',
             'color' => '#0ea5e9',
+            'letterhead' => 'images/kop-eps.png',
         ],
         'psi' => [
             'legal_name' => 'PT. Power Sistem Integrasi',
@@ -54,6 +56,7 @@ return [
             'phone' => '(021) 5794-8922',
             'email' => 'info@powersistem.co.id',
             'color' => '#16a34a',
+            'letterhead' => 'images/kop-psi.png',
         ],
     ],
 

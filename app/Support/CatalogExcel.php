@@ -255,10 +255,14 @@ XML);
                 if ($value === '' || $value === null) {
                     continue;
                 }
-                if (is_int($value) || is_float($value) || (is_string($value) && is_numeric($value) && ! preg_match('/^0\d+/', $value))) {
-                    $xml .= '<c r="'.$col.'"><v>'.self::xml($value).'</v></c>';
+                if (self::isSpreadsheetNumber($value)) {
+                    $xml .= '<c r="'.$col.'"><v>'.self::spreadsheetNumber($value).'</v></c>';
                 } else {
-                    $xml .= '<c r="'.$col.'" t="inlineStr"><is><t>'.self::xml((string) $value).'</t></is></c>';
+                    $text = self::xml((string) $value);
+                    if ($text === '') {
+                        continue;
+                    }
+                    $xml .= '<c r="'.$col.'" t="inlineStr"><is><t>'.$text.'</t></is></c>';
                 }
             }
             $xml .= '</row>';
@@ -548,9 +552,52 @@ XML);
         return $letter;
     }
 
+    /**
+     * Nilai <v> Excel hanya boleh angka biasa. is_numeric() PHP menganggap "+628..." angka,
+     * dan Excel menolak file yang berisi tanda + di sel angka.
+     */
+    protected static function isSpreadsheetNumber(mixed $value): bool
+    {
+        if (is_int($value)) {
+            return true;
+        }
+
+        if (is_float($value)) {
+            return is_finite($value);
+        }
+
+        if (! is_string($value) || $value === '') {
+            return false;
+        }
+
+        return preg_match('/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/', $value) === 1;
+    }
+
+    protected static function spreadsheetNumber(int|float|string $value): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return (string) $value;
+        }
+
+        $text = rtrim(rtrim(sprintf('%.10F', $value), '0'), '.');
+
+        return $text === '' || $text === '-0' ? '0' : $text;
+    }
+
     protected static function xml(string|int|float $value): string
     {
-        return htmlspecialchars((string) $value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $text = (string) $value;
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $text) ?? '';
+        $clean = iconv('UTF-8', 'UTF-8//IGNORE', $text);
+        if ($clean !== false) {
+            $text = $clean;
+        }
+
+        return htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8');
     }
 
     protected static function normalizeHeader(string $header): string

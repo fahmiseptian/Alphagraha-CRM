@@ -29,7 +29,7 @@
                         $status = $so->statusSnapshot();
                         $statusColor = fn (?string $value) => match (strtolower((string) $value)) {
                             'pending', 'unpaid' => 'amber',
-                            'onprocess', 'ondelivery' => 'blue',
+                            'onprocess', 'ondelivery', 'on_delivery' => 'blue',
                             'completed', 'paid', 'settlement' => 'green',
                             'cancelled', 'rejected', 'refund' => 'red',
                             default => 'slate',
@@ -68,9 +68,13 @@
                                     &middot; PO {{ $so->po_number }}
                                 @endif
                             </p>
-                            <p class="mt-1 text-xs text-slate-400">
-                                {{ optional($so->creator)->display_name ?: '—' }}
-                                &middot;
+                            <p class="mt-1 text-xs {{ $so->isCommissionReassigned() ? 'font-medium text-amber-700' : 'text-slate-500' }}">
+                                Pemilik {{ $so->commissionOwnerName() }}
+                                @if ($so->isCommissionReassigned())
+                                    <span class="font-normal text-slate-400">· Opp {{ $opportunity->assignedUser?->display_name ?: '—' }}</span>
+                                @endif
+                            </p>
+                            <p class="mt-0.5 text-xs text-slate-400">
                                 {{ $so->created_at?->translatedFormat('d M Y H:i') }}
                             </p>
                         </div>

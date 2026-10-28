@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Espo\Opportunity;
 use App\Models\OpportunityLog;
+use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\User;
@@ -35,9 +36,10 @@ class PurchaseOrderService
         ?int $vendorId = null,
         ?string $vendorName = null,
         ?int $salesOrderId = null,
-        ?string $reportTop = null
+        ?string $reportTop = null,
+        ?string $reportTopSource = null
     ): PurchaseOrder {
-        return DB::transaction(function () use ($opportunity, $number, $items, $paymentTerm, $createdBy, $vendorId, $vendorName, $salesOrderId, $reportTop) {
+        return DB::transaction(function () use ($opportunity, $number, $items, $paymentTerm, $createdBy, $vendorId, $vendorName, $salesOrderId, $reportTop, $reportTopSource) {
             [$vendorId, $vendorName] = $this->resolveVendor($vendorId, $vendorName);
             $salesOrderId = $this->resolveSalesOrderId($opportunity, $salesOrderId);
 
@@ -49,6 +51,7 @@ class PurchaseOrderService
                 'vendor_name' => $vendorName,
                 'payment_term' => $this->normalizePaymentTerm($paymentTerm),
                 'report_top' => $this->normalizeReportTop($reportTop),
+                'report_top_source' => $this->normalizeReportTopSource($reportTopSource),
                 'currency' => $opportunity->amount_currency ?: 'IDR',
                 'total' => 0,
                 'created_by' => $createdBy,
@@ -86,12 +89,14 @@ class PurchaseOrderService
         array $pos,
         ?string $createdBy = null,
         ?int $salesOrderId = null,
-        ?string $reportTop = null
+        ?string $reportTop = null,
+        ?string $reportTopSource = null
     ): array {
-        return DB::transaction(function () use ($opportunity, $pos, $createdBy, $salesOrderId, $reportTop) {
+        return DB::transaction(function () use ($opportunity, $pos, $createdBy, $salesOrderId, $reportTop, $reportTopSource) {
             $created = [];
             $salesOrderId = $this->resolveSalesOrderId($opportunity, $salesOrderId);
             $reportTop = $this->normalizeReportTop($reportTop);
+            $reportTopSource = $this->normalizeReportTopSource($reportTopSource);
 
             foreach (array_values($pos) as $poData) {
                 [$vendorId, $vendorName] = $this->resolveVendor(
@@ -111,6 +116,7 @@ class PurchaseOrderService
                     'vendor_name' => $vendorName,
                     'payment_term' => $term,
                     'report_top' => $reportTop,
+                    'report_top_source' => $reportTopSource,
                     'currency' => $opportunity->amount_currency ?: 'IDR',
                     'total' => 0,
                     'created_by' => $createdBy,
@@ -201,9 +207,10 @@ class PurchaseOrderService
         ?int $vendorId = null,
         ?string $vendorName = null,
         ?int $salesOrderId = null,
-        ?string $reportTop = null
+        ?string $reportTop = null,
+        ?string $reportTopSource = null
     ): PurchaseOrder {
-        return DB::transaction(function () use ($purchaseOrder, $number, $items, $paymentTerm, $updatedBy, $vendorId, $vendorName, $salesOrderId, $reportTop) {
+        return DB::transaction(function () use ($purchaseOrder, $number, $items, $paymentTerm, $updatedBy, $vendorId, $vendorName, $salesOrderId, $reportTop, $reportTopSource) {
             [$vendorId, $vendorName] = $this->resolveVendor($vendorId, $vendorName);
 
             $payload = [
@@ -220,12 +227,31 @@ class PurchaseOrderService
                 }
             }
 
-            if ($reportTop !== null) {
-                $payload['report_top'] = $this->normalizeReportTop($reportTop);
+            $resolvedSalesOrderId = (int) ($payload['sales_order_id'] ?? $purchaseOrder->sales_order_id);
+            $shouldSyncReportTop = $reportTop !== null || $reportTopSource !== null;
+
+            if ($shouldSyncReportTop) {
+                $normalizedTop = $reportTop !== null
+                    ? $this->normalizeReportTop($reportTop)
+                    : $this->normalizeReportTop($purchaseOrder->report_top);
+                $normalizedSource = $reportTopSource !== null
+                    ? $this->normalizeReportTopSource($reportTopSource)
+                    : $this->normalizeReportTopSource($purchaseOrder->report_top_source);
+
+                $payload['report_top'] = $normalizedTop;
+                $payload['report_top_source'] = $normalizedSource;
             }
 
             $purchaseOrder->update($payload);
             $this->syncItems($purchaseOrder, $items, $updatedBy);
+
+            if ($shouldSyncReportTop && $resolvedSalesOrderId > 0) {
+                $this->syncReportTopForSalesOrder(
+                    $resolvedSalesOrderId,
+                    $payload['report_top'] ?? null,
+                    $payload['report_top_source'] ?? null
+                );
+            }
 
             $opportunity = $purchaseOrder->opportunity()->first();
             if ($opportunity) {
@@ -238,6 +264,46 @@ class PurchaseOrderService
 
             return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
         });
+    }
+
+    /**
+     * Samakan TOP laporan untuk semua PO yang terikat Sales Order yang sama.
+     */
+    public function syncReportTopForSalesOrder(
+        int $salesOrderId,
+        ?string $reportTop,
+        ?string $reportTopSource
+    ): void {
+        PurchaseOrder::query()
+            ->where('sales_order_id', $salesOrderId)
+            ->update([
+                'report_top' => $this->normalizeReportTop($reportTop),
+                'report_top_source' => $this->normalizeReportTopSource($reportTopSource),
+            ]);
+    }
+
+    /**
+     * Jika TOP laporan diambil dari SO (atau data lama tanpa source),
+     * ikuti perubahan payment SO. Source 'custom' tidak diubah.
+     */
+    public function syncReportTopFromSalesOrder(OpportunitySalesOrder $salesOrder): void
+    {
+        $label = trim($salesOrder->paymentLabel());
+        if ($label === '' || $label === '—') {
+            return;
+        }
+
+        PurchaseOrder::query()
+            ->where('sales_order_id', $salesOrder->id)
+            ->where(function ($q) {
+                $q->where('report_top_source', PurchaseOrder::REPORT_TOP_FROM_SO)
+                    ->orWhereNull('report_top_source')
+                    ->orWhere('report_top_source', '');
+            })
+            ->update([
+                'report_top' => $this->normalizeReportTop($label),
+                'report_top_source' => PurchaseOrder::REPORT_TOP_FROM_SO,
+            ]);
     }
 
     /**
@@ -283,6 +349,16 @@ class PurchaseOrderService
         $label = trim((string) $reportTop);
 
         return $label !== '' ? mb_substr($label, 0, 50) : null;
+    }
+
+    public function normalizeReportTopSource(?string $source): ?string
+    {
+        $source = trim((string) $source);
+
+        return in_array($source, [
+            PurchaseOrder::REPORT_TOP_CUSTOM,
+            PurchaseOrder::REPORT_TOP_FROM_SO,
+        ], true) ? $source : null;
     }
 
     /**

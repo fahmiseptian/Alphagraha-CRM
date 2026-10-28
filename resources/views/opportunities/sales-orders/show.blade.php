@@ -24,7 +24,8 @@
             'pending' => ['amber', 'bi-hourglass-split', 'Menunggu'],
             'unpaid' => ['amber', 'bi-wallet2', 'Belum dibayar'],
             'onprocess' => ['blue', 'bi-gear', 'Diproses'],
-            'ondelivery' => ['blue', 'bi-truck', 'Dikirim'],
+            'ondelivery' => ['blue', 'bi-truck', 'Dalam pengiriman'],
+            'on_delivery' => ['blue', 'bi-truck', 'Dalam pengiriman'],
             'paid' => ['green', 'bi-check-circle', 'Lunas'],
             'settlement' => ['green', 'bi-check-circle', 'Settlement'],
             'completed' => ['green', 'bi-check2-circle', 'Selesai'],
@@ -191,6 +192,7 @@
 @section('content')
 <div x-data="salesOrderDetail({{ \Illuminate\Support\Js::from([
     'canEdit' => $canEdit,
+    'today' => now()->format('Y-m-d'),
     'editForm' => $editForm ?? [],
     'redirect' => url()->current(),
 ]) }})" x-init="init()">
@@ -339,6 +341,16 @@
                     @if (($tileItem['meta']['status'] ?? '') !== '' && strtolower((string) $tileItem['meta']['status']) !== strtolower((string) $tileItem['meta']['label']))
                         <p class="text-xs opacity-70">{{ $tileItem['meta']['status'] }}</p>
                     @endif
+                    @if ($tileItem['title'] === 'Pembayaran' && in_array($paymentStatusKey, ['paid', 'settlement'], true))
+                        <p class="text-xs opacity-80">
+                            @if (filled($detail['paid_date'] ?? null))
+                                Dibayar {{ $fmtDate($detail['paid_date'], 'd M Y') }}
+                            @endif
+                            @if (filled($detail['payment_proof'] ?? null))
+                                · <a href="{{ $detail['payment_proof'] }}" target="_blank" class="font-medium underline">Lihat bukti</a>
+                            @endif
+                        </p>
+                    @endif
                 </div>
                 @if ($tileItem['title'] === 'Status SO' && $canCompleteSo)
                     <button type="button"
@@ -404,6 +416,56 @@
         <div class="bg-white px-5 py-4 sm:col-span-2 lg:col-span-1">
             <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Tipe</p>
             <p class="mt-1 text-sm font-semibold text-slate-800">Sales Order</p>
+        </div>
+    </div>
+</div>
+
+<div class="mb-5" x-data="{ open: {{ $errors->has('assigned_user_id') ? 'true' : 'false' }} }">
+    <button type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            @click="open = !open; if (open) $nextTick(() => { const sel = $refs.ownerPanel?.querySelector('select.select2'); if (sel && window.CrmSelect2) window.CrmSelect2.refresh(sel); })">
+        <i class="bi bi-person"></i>
+        <span x-text="open ? 'Sembunyikan pemilik komisi' : 'Pemilik komisi'"></span>
+        <i class="bi text-[10px]" :class="open ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+    </button>
+    <div x-ref="ownerPanel" x-show="open" x-cloak class="mt-2 rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+        <div class="flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Pemilik komisi margin</p>
+                <p class="mt-1 text-sm font-semibold text-slate-800">{{ $salesOrder->commissionOwnerName() }}</p>
+                <p class="mt-1 text-xs text-slate-500">
+                    Opportunity milik {{ $opportunity->assignedUser?->display_name ?: '—' }}.
+                    @if ($salesOrder->isCommissionReassigned())
+                        Margin SO ini masuk komisi {{ $salesOrder->commissionOwnerName() }}, bukan pemilik opportunity.
+                    @else
+                        Margin SO ini mengikuti pemilik opportunity.
+                    @endif
+                </p>
+            </div>
+            @if ($canAssignOwner ?? false)
+                <form method="POST"
+                      action="{{ route('opportunities.sales-orders.owner', [$opportunity, $salesOrder]) }}"
+                      class="flex w-full flex-col gap-2 sm:flex-row sm:items-end lg:w-auto lg:min-w-[28rem]">
+                    @csrf
+                    <div class="min-w-0 flex-1">
+                        <label class="crm-label" for="so-commission-owner">Alihkan ke sales</label>
+                        <select id="so-commission-owner" name="assigned_user_id" class="select2 select2-search w-full" data-placeholder="Ikuti pemilik opportunity">
+                            <option value="">Ikuti pemilik opportunity</option>
+                            @foreach ($commissionSalesUsers ?? [] as $salesUser)
+                                <option value="{{ $salesUser->id }}" @selected((string) old('assigned_user_id', $salesOrder->assigned_user_id) === (string) $salesUser->id)>
+                                    {{ $salesUser->display_name }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('assigned_user_id')
+                            <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
+                        Simpan pemilik
+                    </button>
+                </form>
+            @endif
         </div>
     </div>
 </div>
@@ -871,9 +933,22 @@
                 </div>
                 @endif
 
-                <div x-show="focusField === 'payment_paid'">
-                    <label class="crm-label">Update Pembayaran</label>
-                    <p class="text-sm text-slate-600">Klik simpan untuk mengubah status pembayaran menjadi <strong>paid</strong>.</p>
+                <div x-show="focusField === 'payment_paid'" class="space-y-4">
+                    <div>
+                        <label class="crm-label">Update Pembayaran</label>
+                        <p class="text-sm text-slate-600">Klik simpan untuk mengubah status pembayaran menjadi <strong>paid</strong>.</p>
+                    </div>
+                    <div>
+                        <label class="crm-label">Tanggal bayar <span class="text-red-500">*</span></label>
+                        <input type="date" x-model="form.paid_date" max="{{ now()->format('Y-m-d') }}"
+                               :required="focusField === 'payment_paid'" class="crm-field">
+                        <p class="mt-1 text-xs text-slate-400">Tidak boleh lebih dari hari ini.</p>
+                    </div>
+                    <div>
+                        <label class="crm-label">Bukti bayar <span class="font-normal text-slate-400">(opsional)</span></label>
+                        <input type="file" x-ref="paymentProofInput" @change="setFile($event, 'payment_proof_file')" accept=".pdf,.jpg,.jpeg,.png,.webp" class="crm-field">
+                        <p class="mt-1 text-xs text-slate-400">Maks 5MB. PDF, JPG, JPEG, PNG, atau WEBP.</p>
+                    </div>
                 </div>
 
                 <div x-show="focusField === 'so_complete'">
@@ -969,6 +1044,8 @@ function salesOrderDetail(cfg) {
             faktur_pajak_file: null,
             foto_serah_terima_file: null,
             file_do_file: null,
+            paid_date: cfg.today,
+            payment_proof_file: null,
             note: cfg.editForm.note || '',
         },
         cfg,
@@ -983,7 +1060,10 @@ function salesOrderDetail(cfg) {
             this.form.faktur_pajak_file = null;
             this.form.foto_serah_terima_file = null;
             this.form.file_do_file = null;
+            this.form.payment_proof_file = null;
+            this.form.paid_date = cfg.today;
             await this.$nextTick();
+            if (this.$refs.paymentProofInput) this.$refs.paymentProofInput.value = '';
             if (this.$refs.poFileInput) this.$refs.poFileInput.value = '';
             if (this.$refs.fakturFileInput) this.$refs.fakturFileInput.value = '';
             if (this.$refs.bastFileInput) this.$refs.bastFileInput.value = '';
@@ -1011,6 +1091,7 @@ function salesOrderDetail(cfg) {
             }
             if (this.focusField === 'payment_paid') {
                 payload.mark_paid = '1';
+                payload.paid_date = this.form.paid_date || null;
             }
             if (this.focusField === 'so_complete') {
                 payload.mark_so_complete = '1';
@@ -1036,6 +1117,21 @@ function salesOrderDetail(cfg) {
                     this.saving = false;
                     return;
                 }
+                const paymentProofFile = this.focusField === 'payment_paid'
+                    ? (this.form.payment_proof_file || this.$refs.paymentProofInput?.files?.[0] || null)
+                    : null;
+                if (this.focusField === 'payment_paid') {
+                    if (! this.form.paid_date) {
+                        this.editError = 'Tanggal bayar wajib diisi.';
+                        this.saving = false;
+                        return;
+                    }
+                    if (this.form.paid_date > cfg.today) {
+                        this.editError = 'Tanggal bayar tidak boleh lebih dari hari ini.';
+                        this.saving = false;
+                        return;
+                    }
+                }
                 const payload = this.buildPayload();
                 const fd = new FormData();
                 fd.append('_method', 'PUT');
@@ -1044,6 +1140,7 @@ function salesOrderDetail(cfg) {
                 if (fakturFile) fd.append('faktur_pajak_file', fakturFile);
                 if (bastFile) fd.append('foto_serah_terima_file', bastFile);
                 if (doFile) fd.append('file_do_file', doFile);
+                if (paymentProofFile) fd.append('payment_proof_file', paymentProofFile);
 
                 const res = await fetch(cfg.editForm.updateUrl, {
                     method: 'POST',

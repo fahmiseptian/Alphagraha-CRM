@@ -111,7 +111,8 @@
                 </select>
             </div>
         @endif
-        @if (auth()->user()->canEditPaymentLevel())
+        @php $isCreating = ($method ?? 'POST') === 'POST'; @endphp
+        @if (auth()->user()->canEditPaymentLevel() && ! $isCreating)
             <div>
                 <label class="crm-label">Level Pembayaran <span class="text-red-500">*</span></label>
                 <select name="crm_payment_level" class="select2 w-full" required data-placeholder="— Pilih level —">
@@ -123,18 +124,35 @@
             </div>
         @else
             <div>
-                <label class="crm-label">Level Pembayaran</label>
-                <p class="py-2 text-sm font-medium text-slate-700">{{ $account->paymentLevelLabel() }}</p>
+                <label class="crm-label">Level Pembayaran @if ($isCreating)<span class="text-red-500">*</span>@endif</label>
+                <p class="py-2 text-sm font-medium text-slate-700">
+                    {{ $isCreating ? ($paymentLevels[\App\Support\PaymentLevel::LANCAR] ?? 'Lancar') : $account->paymentLevelLabel() }}
+                </p>
+                @if ($isCreating)
+                    <input type="hidden" name="crm_payment_level" value="{{ \App\Support\PaymentLevel::LANCAR }}">
+                    <p class="mt-1 text-xs text-slate-400">Default customer baru: Lancar (bisa diubah setelah disimpan oleh Finance).</p>
+                @endif
             </div>
         @endif
         <div>
             <label class="crm-label">TOP <span class="text-red-500">*</span></label>
-            <select name="crm_top" class="select2 w-full" required data-placeholder="— Pilih TOP —">
-                @foreach ($topOptions as $value => $label)
-                    <option value="{{ $value }}" @selected(old('crm_top', $account->top()) === (string) $value)>{{ $label }}</option>
-                @endforeach
-            </select>
-            <p class="mt-1 text-xs text-slate-400">Terms of Payment. Default: CBD.</p>
+            @if ($isCreating)
+                <input type="hidden" name="crm_top" value="{{ \App\Support\CustomerTop::CASH }}">
+                <select class="select2 w-full" disabled data-placeholder="CBD">
+                    <option value="{{ \App\Support\CustomerTop::CASH }}" selected>CBD</option>
+                </select>
+                <p class="mt-1 text-xs text-slate-400">Customer baru dikunci ke CBD. Hanya Finance / Superadmin yang bisa mengubah setelah disimpan.</p>
+            @elseif (auth()->user()->canEditCustomerTop())
+                <select name="crm_top" class="select2 w-full" required data-placeholder="— Pilih TOP —">
+                    @foreach ($topOptions as $value => $label)
+                        <option value="{{ $value }}" @selected(old('crm_top', $account->top()) === (string) $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+                <p class="mt-1 text-xs text-slate-400">Terms of Payment. Hanya Finance / Superadmin yang bisa mengubah.</p>
+            @else
+                <p class="py-2 text-sm font-medium text-slate-700">{{ $account->topLabel() }}</p>
+                <p class="mt-1 text-xs text-slate-400">Hanya Finance / Superadmin yang bisa mengubah TOP.</p>
+            @endif
         </div>
         <div class="sm:col-span-2">
             <label class="crm-label">Description</label>

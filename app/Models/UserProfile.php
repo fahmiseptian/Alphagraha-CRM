@@ -125,6 +125,65 @@ class UserProfile extends Model
     }
 
     /**
+     * Daftar periode komisi (Q) dalam satu tahun kalender, mengikuti panjang target sales.
+     * - 1 tahun → 1 periode
+     * - 6 bulan → 2 periode (Q1–Q2)
+     * - 3 bulan → 4 periode (Q1–Q4)
+     * - 1 bulan → 12 periode
+     *
+     * @return list<array{key: string, index: int, label: string, start: Carbon, end: Carbon}>
+     */
+    public function commissionQuarters(int $year): array
+    {
+        $months = self::periodLengthMonths($this->resolvedSalesTargetPeriod());
+        $quarters = [];
+        $index = 1;
+
+        for ($startMonth = 1; $startMonth <= 12; $startMonth += $months) {
+            $endMonth = min($startMonth + $months - 1, 12);
+            $start = Carbon::create($year, $startMonth, 1)->startOfDay();
+            $end = Carbon::create($year, $endMonth, 1)->endOfMonth()->endOfDay();
+
+            if ($months >= 12) {
+                $label = 'Tahun '.$year;
+            } elseif ($months === 1) {
+                $label = $start->translatedFormat('M Y');
+            } else {
+                $label = 'Q'.$index.' '.$year
+                    .' ('.$start->translatedFormat('M').'–'.$end->translatedFormat('M').')';
+            }
+
+            $quarters[] = [
+                'key' => sprintf('%d-Q%d', $year, $index),
+                'index' => $index,
+                'label' => $label,
+                'start' => $start,
+                'end' => $end,
+            ];
+            $index++;
+        }
+
+        return $quarters;
+    }
+
+    /**
+     * Periode komisi aktif saat ini (berdasarkan bulan sekarang).
+     *
+     * @return array{key: string, index: int, label: string, start: Carbon, end: Carbon}|null
+     */
+    public function currentCommissionQuarter(?Carbon $now = null): ?array
+    {
+        $now = ($now ?? Carbon::now())->copy();
+        foreach ($this->commissionQuarters($now->year) as $quarter) {
+            if ($now->between($quarter['start'], $quarter['end'])) {
+                return $quarter;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Rentang tanggal untuk menghitung progress target Closed Won.
      * - Jika tenggat manual diisi: [tenggat − periode, tenggat].
      * - Jika kosong: segmen kalender dari awal tahun (1/3/6/12 bulan).

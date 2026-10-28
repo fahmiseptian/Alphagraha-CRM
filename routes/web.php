@@ -1,4 +1,4 @@
- <?php
+<?php
 
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActivityMediaController;
@@ -13,10 +13,13 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\VendorController;
 use App\Http\Controllers\Admin\WilayahController;
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\CommissionController;
+use App\Http\Controllers\ExpenseCategoryController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerContactController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\CustomerDocumentController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\NotificationController;
@@ -46,6 +49,9 @@ Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth')->
 // Aplikasi (butuh login)
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+    Route::get('/dashboard/catalog-index', [DashboardController::class, 'catalogIndex'])
+        ->middleware('role:superadmin')
+        ->name('dashboard.catalog-index');
     Route::get('/dashboard/catalog', [DashboardController::class, 'catalog'])
         ->middleware('role:superadmin')
         ->name('dashboard.catalog');
@@ -59,6 +65,7 @@ Route::middleware('auth')->group(function () {
 
     // Pelanggan (data EspoCRM)
     Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
+    Route::get('/customers/export', [CustomerController::class, 'export'])->name('customers.export');
     Route::get('/customers/create', [CustomerController::class, 'create'])->name('customers.create');
     Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
     Route::get('/customers/{id}', [CustomerController::class, 'show'])->name('customers.show');
@@ -70,6 +77,23 @@ Route::middleware('auth')->group(function () {
     Route::post('/customers/{account}/addresses', [CustomerAddressController::class, 'store'])->name('customers.addresses.store');
     Route::put('/customers/{account}/addresses/{address}', [CustomerAddressController::class, 'update'])->name('customers.addresses.update');
     Route::delete('/customers/{account}/addresses/{address}', [CustomerAddressController::class, 'destroy'])->name('customers.addresses.destroy');
+    Route::post('/customers/{account}/documents', [CustomerDocumentController::class, 'store'])->name('customers.documents.store');
+    Route::get('/customers/{account}/documents/{document}/download', [CustomerDocumentController::class, 'download'])->name('customers.documents.download');
+    Route::delete('/customers/{account}/documents/{document}', [CustomerDocumentController::class, 'destroy'])->name('customers.documents.destroy');
+
+    // Komisi: Finance/Superadmin kelola semua; Sales lihat milik sendiri
+    Route::get('/commissions', [CommissionController::class, 'index'])->name('commissions.index');
+    Route::get('/commissions/{user}', [CommissionController::class, 'show'])->name('commissions.show');
+    Route::get('/commissions/{user}/details/{section}', [CommissionController::class, 'detail'])->name('commissions.detail');
+    Route::post('/commissions/{user}/expenses', [CommissionController::class, 'storeExpense'])->name('commissions.expenses.store');
+    Route::get('/commissions/{user}/expenses/{expense}/download', [CommissionController::class, 'downloadExpense'])->name('commissions.expenses.download');
+    Route::delete('/commissions/{user}/expenses/{expense}', [CommissionController::class, 'destroyExpense'])->name('commissions.expenses.destroy');
+    Route::post('/commissions/{user}/entertainments/{entertainment}/approve', [CommissionController::class, 'approveEntertainment'])->name('commissions.entertainments.approve');
+
+    Route::get('/expense-categories', [ExpenseCategoryController::class, 'index'])->name('expense-categories.index');
+    Route::post('/expense-categories', [ExpenseCategoryController::class, 'store'])->name('expense-categories.store');
+    Route::put('/expense-categories/{category}', [ExpenseCategoryController::class, 'update'])->name('expense-categories.update');
+    Route::delete('/expense-categories/{category}', [ExpenseCategoryController::class, 'destroy'])->name('expense-categories.destroy');
 
     // Lookup wilayah (DB; kecamatan lazy-sync dari API bila kosong)
     Route::get('/wilayah/provinces', [WilayahLookupController::class, 'provinces'])->name('wilayah.provinces');
@@ -96,6 +120,7 @@ Route::middleware('auth')->group(function () {
 
     // Opportunity / Deal (EspoCRM, dapat diedit)
     Route::get('/opportunities', [OpportunityController::class, 'index'])->name('opportunities.index');
+    Route::get('/opportunities/account-receivable', [OpportunityController::class, 'accountReceivable'])->name('opportunities.account-receivable');
     Route::get('/opportunities/create', [OpportunityController::class, 'create'])->name('opportunities.create');
     Route::get('/opportunities/products/template', [OpportunityController::class, 'downloadProductTemplate'])->name('opportunities.products.template');
     Route::post('/opportunities', [OpportunityController::class, 'store'])->name('opportunities.store');
@@ -106,6 +131,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/opportunities/{opportunity}/discount/approve', [OpportunityController::class, 'approveDiscount'])->name('opportunities.discount.approve');
     Route::post('/opportunities/{opportunity}/discount/reject', [OpportunityController::class, 'rejectDiscount'])->name('opportunities.discount.reject');
     Route::post('/opportunities/{opportunity}/discount/revert', [OpportunityController::class, 'revertDiscount'])->name('opportunities.discount.revert');
+    Route::post('/opportunities/{opportunity}/top/approve', [OpportunityController::class, 'approveTop'])->name('opportunities.top.approve');
+    Route::post('/opportunities/{opportunity}/top/reject', [OpportunityController::class, 'rejectTop'])->name('opportunities.top.reject');
     Route::post('/opportunities/{opportunity}/margin/approve', [OpportunityController::class, 'approveMargin'])->name('opportunities.margin.approve');
     Route::post('/opportunities/{opportunity}/margin/reject', [OpportunityController::class, 'rejectMargin'])->name('opportunities.margin.reject');
     Route::delete('/opportunities/{opportunity}', [OpportunityController::class, 'destroy'])->name('opportunities.destroy');
@@ -137,6 +164,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
     Route::get('/sales-orders', [OpportunitySalesOrderController::class, 'index'])->name('sales-orders.index');
+    Route::get('/sales-orders/account-receivable', [OpportunitySalesOrderController::class, 'accountReceivable'])->name('sales-orders.account-receivable');
     Route::get('/opportunities/{opportunity}/sales-orders/create', [OpportunitySalesOrderController::class, 'create'])->name('opportunities.sales-orders.create');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/edit', [OpportunitySalesOrderController::class, 'edit'])->name('opportunities.sales-orders.edit')->whereNumber('salesOrder');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'show'])->name('opportunities.sales-orders.show')->whereNumber('salesOrder');
@@ -144,6 +172,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/pdf', [OpportunitySalesOrderController::class, 'pdf'])->name('opportunities.sales-orders.pdf')->whereNumber('salesOrder');
     Route::put('/opportunities/{opportunity}/sales-orders/{salesOrder}', [OpportunitySalesOrderController::class, 'update'])->name('opportunities.sales-orders.update')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/core', [OpportunitySalesOrderController::class, 'updateCore'])->name('opportunities.sales-orders.update-core')->whereNumber('salesOrder');
+    Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/owner', [OpportunitySalesOrderController::class, 'assignOwner'])->name('opportunities.sales-orders.owner')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel', [OpportunitySalesOrderController::class, 'requestCancel'])->name('opportunities.sales-orders.cancel')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel/approve', [OpportunitySalesOrderController::class, 'approveCancel'])->name('opportunities.sales-orders.cancel.approve')->whereNumber('salesOrder');
     Route::post('/opportunities/{opportunity}/sales-orders/{salesOrder}/cancel/reject', [OpportunitySalesOrderController::class, 'rejectCancel'])->name('opportunities.sales-orders.cancel.reject')->whereNumber('salesOrder');
@@ -190,6 +219,8 @@ Route::middleware('auth')->group(function () {
         Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
         Route::get('/settings/margin', [SettingController::class, 'editMargin'])->name('settings.margin.edit');
         Route::put('/settings/margin', [SettingController::class, 'updateMargin'])->name('settings.margin.update');
+        Route::get('/settings/commission', [SettingController::class, 'editCommission'])->name('settings.commission.edit');
+        Route::put('/settings/commission', [SettingController::class, 'updateCommission'])->name('settings.commission.update');
         Route::get('/settings/po', [SettingController::class, 'editPo'])->name('settings.po.edit');
         Route::put('/settings/po', [SettingController::class, 'updatePo'])->name('settings.po.update');
         Route::get('/settings/terms', [SettingController::class, 'editTerms'])->name('settings.terms.edit');

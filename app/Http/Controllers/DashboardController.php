@@ -14,9 +14,12 @@ use App\Models\OpportunityEntertainment;
 use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Models\Quotation;
+use App\Models\User;
 use App\Models\UserProfile;
+use App\Services\CommissionService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -265,13 +268,14 @@ class DashboardController extends Controller
     protected function financeDashboard(string $period, ?array $periodRange, string $periodLabel)
     {
         $soBase = $this->closedWonSalesOrdersQuery($periodRange);
+        $commissions = app(CommissionService::class);
 
         $needsInvoiceQuery = $this->scopeSalesOrdersMissingInvoice(clone $soBase);
         $needsInvoiceCount = (clone $needsInvoiceQuery)->count();
         $needsInvoice = $needsInvoiceQuery
             ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
             ->orderByDesc('created_at')
-            ->limit(30)
+            ->limit(12)
             ->get();
 
         $unpaidQuery = $this->scopeSalesOrdersUnpaid(clone $soBase);
@@ -279,28 +283,69 @@ class DashboardController extends Controller
         $unpaidOrders = $unpaidQuery
             ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
             ->orderByDesc('created_at')
-            ->limit(20)
+            ->limit(12)
             ->get();
 
-        $deliveryPendingQuery = $this->scopeSalesOrdersDeliveryPending(clone $soBase);
-        $deliveryPendingCount = (clone $deliveryPendingQuery)->count();
-
+        $deliveryPendingCount = $this->scopeSalesOrdersDeliveryPending(clone $soBase)->count();
         $paidCount = $this->scopeSalesOrdersPaid(clone $soBase)->count();
         $soPeriodCount = (clone $soBase)->count();
 
+        // Antrian approval: semua pending (tidak dibatasi periode) agar finance tidak melewatkan request.
         $entertainmentQuery = OpportunityEntertainment::query()
             ->where('status', OpportunityEntertainment::STATUS_PENDING)
-            ->whereHas('opportunity', fn (Builder $q) => $q->where('stage', Opportunity::WON_STAGE));
-        $this->applyPeriodToDateColumn($entertainmentQuery, 'created_at', $periodRange);
+            ->whereHas('opportunity');
         $entertainmentPendingCount = (clone $entertainmentQuery)->count();
         $entertainmentPendingAmount = (float) (clone $entertainmentQuery)->sum('amount');
         $entertainmentPending = (clone $entertainmentQuery)
-            ->with(['opportunity.account', 'creator'])
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator'])
+            ->orderByDesc('entertainment_date')
             ->orderByDesc('created_at')
-            ->limit(8)
-            ->get();
+            ->limit(20)
+            ->get()
+            ->map(function (OpportunityEntertainment $item) use ($commissions) {
+                $salesId = (string) ($item->opportunity?->assigned_user_id ?? '');
+                $periodDate = $commissions->entertainmentPeriodDate($item) ?? now();
+                $periodKey = null;
+                if ($salesId !== '') {
+                    $profile = UserProfile::query()->where('user_id', $salesId)->first()
+                        ?: UserProfile::ensureForUser($salesId, true, User::ROLE_SALES);
+                    $periodKey = $commissions->resolveQuarterFromDate($profile, $periodDate)['key'] ?? null;
+                }
+
+                $item->setAttribute('commission_sales_id', $salesId !== '' ? $salesId : null);
+                $item->setAttribute('commission_year', (int) $periodDate->year);
+                $item->setAttribute('commission_period', $periodKey);
+                $item->setAttribute(
+                    'commission_url',
+                    $salesId !== ''
+                        ? route('commissions.show', array_filter([
+                            'user' => $salesId,
+                            'year' => (int) $periodDate->year,
+                            'period' => $periodKey,
+                        ]))
+                        : null
+                );
+
+                return $item;
+            });
+
+        $salesUsersCount = User::query()
+            ->where('deleted', 0)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_SALES))
+            ->count();
+
+        $topApprovalPending = Opportunity::query()
+            ->where('deleted', 0)
+            ->where('crm_top_status', Opportunity::TOP_PENDING)
+            ->with(['account', 'assignedUser'])
+            ->orderByDesc('crm_top_requested_at')
+            ->limit(20)
+            ->get()
+            ->filter(fn (Opportunity $opp) => $opp->topNeedsApproval())
+            ->values();
 
         return view('dashboard-finance', compact(
+            'topApprovalPending',
             'period',
             'periodLabel',
             'needsInvoice',
@@ -313,6 +358,7 @@ class DashboardController extends Controller
             'entertainmentPending',
             'entertainmentPendingCount',
             'entertainmentPendingAmount',
+            'salesUsersCount',
         ));
     }
 
@@ -431,12 +477,107 @@ class DashboardController extends Controller
     }
 
     /**
+     * Index brand & kategori Closed Won (semua entri, bukan hanya top leaderboard).
+     * Khusus admin / superadmin.
+     */
+    public function catalogIndex(Request $request)
+    {
+        if (! auth()->user()?->canViewCatalogDashboard()) {
+            abort(403, 'Hanya admin yang dapat melihat dashboard brand & kategori.');
+        }
+
+        $type = (string) $request->get('type', 'brand');
+        if (! in_array($type, ['brand', 'category'], true)) {
+            $type = 'brand';
+        }
+
+        $period = (string) $request->get('leaderboard_period', $request->get('period', 'year'));
+        if (! in_array($period, ['alltime', 'month', 'year', '3months', '6months'], true)) {
+            $period = 'year';
+        }
+
+        $sort = (string) $request->get('catalog_sort', 'total');
+        if (! in_array($sort, ['name', 'count', 'won', 'items', 'total', 'margin'], true)) {
+            $sort = 'total';
+        }
+
+        $sortDir = strtolower((string) $request->get('dir', $sort === 'name' ? 'asc' : 'desc'));
+        if (! in_array($sortDir, ['asc', 'desc'], true)) {
+            $sortDir = $sort === 'name' ? 'asc' : 'desc';
+        }
+
+        $search = trim((string) $request->get('q', ''));
+        $includeEmpty = $request->boolean('include_empty', true);
+        $perPage = 25;
+        $page = max(1, (int) $request->get('page', 1));
+
+        // Sort awal di builder cukup total; urutan final ditentukan di bawah (termasuk dir).
+        $catalog = $this->buildCatalogDirectory($period, 'total', null, $includeEmpty);
+        $entries = $type === 'brand' ? $catalog['brands'] : $catalog['categories'];
+
+        if ($search !== '') {
+            $needle = mb_strtolower($search);
+            $entries = $entries->filter(
+                fn (array $entry) => str_contains(mb_strtolower($entry['name']), $needle)
+            )->values();
+        }
+
+        $entries = $entries
+            ->sort(function (array $a, array $b) use ($sort, $sortDir) {
+                $cmp = match ($sort) {
+                    'name' => strcasecmp($a['name'], $b['name']),
+                    'count' => $a['oppti_count'] <=> $b['oppti_count'],
+                    'won' => $a['won_count'] <=> $b['won_count'],
+                    'items' => $a['item_count'] <=> $b['item_count'],
+                    'margin' => $a['won_margin'] <=> $b['won_margin'],
+                    default => $a['won_total'] <=> $b['won_total'],
+                };
+                if ($cmp === 0 && $sort !== 'name') {
+                    $cmp = strcasecmp($a['name'], $b['name']);
+                }
+
+                return $sortDir === 'asc' ? $cmp : -$cmp;
+            })
+            ->values()
+            ->map(fn (array $entry, int $index) => array_merge($entry, ['rank' => $index + 1]));
+
+        $total = $entries->count();
+        $pageItems = $entries->forPage($page, $perPage)->values();
+        $paginator = new LengthAwarePaginator(
+            $pageItems,
+            $total,
+            $perPage,
+            $page,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]
+        );
+
+        $typeLabel = $type === 'brand' ? 'Brand' : 'Category';
+        $periodLabel = $this->periodLabel($period);
+
+        return view('dashboard.catalog-index', [
+            'type' => $type,
+            'typeLabel' => $typeLabel,
+            'period' => $period,
+            'periodLabel' => $periodLabel,
+            'sort' => $sort,
+            'sortDir' => $sortDir,
+            'search' => $search,
+            'includeEmpty' => $includeEmpty,
+            'entries' => $paginator,
+            'totalCount' => $total,
+        ]);
+    }
+
+    /**
      * Daftar opportunity Closed Won yang memakai brand / category tertentu.
      */
     public function catalog(Request $request)
     {
-        if (! auth()->user()?->isSuperAdmin()) {
-            abort(403, 'Hanya superadmin yang dapat melihat daftar ini.');
+        if (! auth()->user()?->canViewCatalogDashboard()) {
+            abort(403, 'Hanya admin yang dapat melihat daftar ini.');
         }
 
         $type = (string) $request->get('type', '');
@@ -476,18 +617,32 @@ class DashboardController extends Controller
 
         $field = $type === 'brand' ? 'brand' : 'category';
         $column = $type === 'brand' ? 'crm_item_brand' : 'crm_item_category';
+        $like = '%'.addcslashes($needle, '%_\\').'%';
 
+        $periodRange = $this->periodDateRange($period);
+
+        // Semua opportunity di periode (created_at) + Closed Won by close_date → tabel + status
         $query = Opportunity::query()
             ->with(['account', 'assignedUser'])
-            ->where('stage', Opportunity::WON_STAGE);
-        $this->applyLeaderboardPeriodToCloseDate($query, $period);
+            ->where(function ($q) use ($periodRange) {
+                if ($periodRange === null) {
+                    return;
+                }
+                [$start, $end] = $periodRange;
+                $q->whereBetween('created_at', [$start, $end])
+                    ->orWhere(function ($won) use ($start, $end) {
+                        $won->where('stage', Opportunity::WON_STAGE)
+                            ->whereBetween('close_date', [
+                                $start->toDateString(),
+                                $end->toDateString(),
+                            ]);
+                    });
+            });
         $this->applySalesFilter($query, $selectedSalesId);
-
-        $like = '%'.addcslashes($needle, '%_\\').'%';
         $query->whereRaw('LOWER(COALESCE('.$column.', "")) LIKE ?', [$like]);
 
         $deals = collect();
-        foreach ($query->orderByDesc('close_date')->orderByDesc('id')->get() as $opportunity) {
+        foreach ($query->orderByDesc('close_date')->orderByDesc('created_at')->orderByDesc('id')->get() as $opportunity) {
             $matched = $opportunity->products
                 ->filter(fn (array $product) => mb_strtolower(trim((string) ($product[$field] ?? ''))) === $needle)
                 ->values();
@@ -496,20 +651,29 @@ class DashboardController extends Controller
                 continue;
             }
 
+            $isWon = (string) $opportunity->stage === Opportunity::WON_STAGE;
             $deals->push([
                 'opportunity' => $opportunity,
                 'products' => $matched,
                 'item_count' => $matched->count(),
-                'won_total' => (float) $matched->sum(fn (array $product) => (float) ($product['subtotal'] ?? 0)),
-                'won_margin' => (float) $matched->sum(fn (array $product) => (float) ($product['margin'] ?? 0)),
+                'is_won' => $isWon,
+                'won_total' => $isWon
+                    ? (float) $matched->sum(fn (array $product) => (float) ($product['subtotal'] ?? 0))
+                    : 0.0,
+                'won_margin' => $isWon
+                    ? (float) $matched->sum(fn (array $product) => (float) ($product['margin'] ?? 0))
+                    : 0.0,
             ]);
         }
 
+        $wonDeals = $deals->where('is_won', true);
         $totals = [
-            'deal_count' => $deals->count(),
-            'item_count' => (int) $deals->sum('item_count'),
-            'won_total' => (float) $deals->sum('won_total'),
-            'won_margin' => (float) $deals->sum('won_margin'),
+            'oppti_count' => $deals->count(),
+            'won_count' => $wonDeals->count(),
+            'deal_count' => $wonDeals->count(),
+            'item_count' => (int) $wonDeals->sum('item_count'),
+            'won_total' => (float) $wonDeals->sum('won_total'),
+            'won_margin' => (float) $wonDeals->sum('won_margin'),
         ];
 
         $typeLabel = $type === 'brand' ? 'Brand' : 'Category';
@@ -519,11 +683,19 @@ class DashboardController extends Controller
             'leaderboard_period' => $period,
             'sales' => $selectedSalesId,
         ], fn ($value) => filled($value));
+        $indexQuery = array_filter([
+            'type' => $type,
+            'leaderboard_period' => $period,
+            'period' => $period,
+            'sales' => $selectedSalesId,
+            'catalog_sort' => $request->get('catalog_sort'),
+            'q' => $request->get('q'),
+        ], fn ($value) => filled($value));
 
         return view('dashboard.catalog', compact(
             'type', 'typeLabel', 'name', 'displayName',
             'period', 'periodLabel', 'selectedSalesId', 'selectedSales',
-            'deals', 'totals', 'dashboardQuery'
+            'deals', 'totals', 'dashboardQuery', 'indexQuery'
         ));
     }
 
@@ -767,24 +939,93 @@ class DashboardController extends Controller
             'brands' => $this->rankCatalogEntries(
                 $brands,
                 Brand::query()->pluck('name'),
-                $sort
+                $sort,
+                limit: 10
             ),
             'categories' => $this->rankCatalogEntries(
                 $categories,
                 Category::query()->pluck('name'),
-                $sort
+                $sort,
+                limit: 10
             ),
         ];
     }
 
     /**
-     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids: array<string, true>}>  $bucket
+     * Semua brand & kategori (termasuk yang tidak masuk top leaderboard).
+     *
+     * @return array{brands: Collection, categories: Collection}
      */
-    protected function accumulateCatalogEntry(array &$bucket, string $label, float $total, float $margin, string $opportunityId): void
+    protected function buildCatalogDirectory(
+        string $period,
+        string $sort,
+        ?string $salesId,
+        bool $includeEmpty = true
+    ): array {
+        $brands = [];
+        $categories = [];
+        $periodRange = $this->periodDateRange($period);
+
+        // Semua opportunity (periode by created_at) → Jumlah Oppti
+        $allQuery = Opportunity::query();
+        $this->applyPeriodToDateColumn($allQuery, 'created_at', $periodRange);
+        $this->applySalesFilter($allQuery, $salesId);
+        $allQuery->lazyById(50)->each(function (Opportunity $opportunity) use (&$brands, &$categories) {
+            $seenBrand = [];
+            $seenCategory = [];
+            foreach ($opportunity->products as $product) {
+                $brand = trim((string) ($product['brand'] ?? ''));
+                $category = trim((string) ($product['category'] ?? ''));
+                $brandKey = mb_strtolower($brand);
+                $categoryKey = mb_strtolower($category);
+
+                if ($brand !== '' && ! isset($seenBrand[$brandKey])) {
+                    $this->registerCatalogOpportunity($brands, $brand, (string) $opportunity->id);
+                    $seenBrand[$brandKey] = true;
+                }
+                if ($category !== '' && ! isset($seenCategory[$categoryKey])) {
+                    $this->registerCatalogOpportunity($categories, $category, (string) $opportunity->id);
+                    $seenCategory[$categoryKey] = true;
+                }
+            }
+        });
+
+        // Closed Won (periode by close_date) → Jumlah Close Won + item/total/margin
+        $wonQuery = Opportunity::query()->where('stage', Opportunity::WON_STAGE);
+        $this->applyLeaderboardPeriodToCloseDate($wonQuery, $period);
+        $this->applySalesFilter($wonQuery, $salesId);
+        $wonQuery->lazyById(50)->each(function (Opportunity $opportunity) use (&$brands, &$categories) {
+            foreach ($opportunity->products as $product) {
+                $total = (float) ($product['subtotal'] ?? 0);
+                $margin = (float) ($product['margin'] ?? 0);
+
+                $this->accumulateCatalogEntry($brands, (string) ($product['brand'] ?? ''), $total, $margin, (string) $opportunity->id);
+                $this->accumulateCatalogEntry($categories, (string) ($product['category'] ?? ''), $total, $margin, (string) $opportunity->id);
+            }
+        });
+
+        $brandNames = Brand::query()->orderBy('name')->pluck('name');
+        $categoryNames = Category::query()->orderBy('name')->pluck('name');
+
+        if ($includeEmpty) {
+            $this->seedEmptyCatalogEntries($brands, $brandNames);
+            $this->seedEmptyCatalogEntries($categories, $categoryNames);
+        }
+
+        return [
+            'brands' => $this->rankCatalogEntries($brands, $brandNames, $sort, limit: null),
+            'categories' => $this->rankCatalogEntries($categories, $categoryNames, $sort, limit: null),
+        ];
+    }
+
+    /**
+     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids: array<string, true>, oppti_ids: array<string, true>}>  $bucket
+     */
+    protected function ensureCatalogBucket(array &$bucket, string $label): ?string
     {
         $label = trim($label);
         if ($label === '') {
-            return;
+            return null;
         }
 
         $key = mb_strtolower($label);
@@ -795,46 +1036,106 @@ class DashboardController extends Controller
                 'won_margin' => 0.0,
                 'item_count' => 0,
                 'deal_ids' => [],
+                'oppti_ids' => [],
             ];
+        } elseif (! isset($bucket[$key]['oppti_ids'])) {
+            $bucket[$key]['oppti_ids'] = [];
+        }
+
+        return $key;
+    }
+
+    /**
+     * Catat opportunity (semua stage) ke Jumlah Oppti.
+     *
+     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids: array<string, true>, oppti_ids: array<string, true>}>  $bucket
+     */
+    protected function registerCatalogOpportunity(array &$bucket, string $label, string $opportunityId): void
+    {
+        $key = $this->ensureCatalogBucket($bucket, $label);
+        if ($key === null || $opportunityId === '') {
+            return;
+        }
+
+        $bucket[$key]['oppti_ids'][$opportunityId] = true;
+    }
+
+    /**
+     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids: array<string, true>, oppti_ids?: array<string, true>}>  $bucket
+     */
+    protected function accumulateCatalogEntry(array &$bucket, string $label, float $total, float $margin, string $opportunityId): void
+    {
+        $key = $this->ensureCatalogBucket($bucket, $label);
+        if ($key === null) {
+            return;
         }
 
         $bucket[$key]['won_total'] += $total;
         $bucket[$key]['won_margin'] += $margin;
         $bucket[$key]['item_count']++;
-        $bucket[$key]['deal_ids'][$opportunityId] = true;
+        if ($opportunityId !== '') {
+            $bucket[$key]['deal_ids'][$opportunityId] = true;
+            $bucket[$key]['oppti_ids'][$opportunityId] = true;
+        }
     }
 
     /**
-     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids?: array<string, true>}>  $bucket
+     * Pastikan master brand/kategori muncul meski belum ada Closed Won.
+     *
+     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids: array<string, true>, oppti_ids?: array<string, true>}>  $bucket
      */
-    protected function rankCatalogEntries(array $bucket, Collection $canonicalNames, string $sort): Collection
+    protected function seedEmptyCatalogEntries(array &$bucket, Collection $canonicalNames): void
     {
+        foreach ($canonicalNames as $label) {
+            $this->ensureCatalogBucket($bucket, (string) $label);
+        }
+    }
+
+    /**
+     * @param  array<string, array{name: string, won_total: float, won_margin: float, item_count: int, deal_ids?: array<string, true>, oppti_ids?: array<string, true>}>  $bucket
+     */
+    protected function rankCatalogEntries(
+        array $bucket,
+        Collection $canonicalNames,
+        string $sort,
+        ?int $limit = 10
+    ): Collection {
         $canonical = $canonicalNames
             ->filter(fn ($name) => filled(trim((string) $name)))
             ->mapWithKeys(fn ($name) => [mb_strtolower(trim((string) $name)) => trim((string) $name)]);
 
-        return collect($bucket)
+        $ranked = collect($bucket)
             ->map(function (array $entry, string $key) use ($canonical) {
                 $entry['name'] = $canonical->get($key, $entry['name']);
                 $entry['key'] = $key;
-                $entry['deal_count'] = count($entry['deal_ids'] ?? []);
-                unset($entry['deal_ids']);
+                $entry['won_count'] = count($entry['deal_ids'] ?? []);
+                $entry['deal_count'] = $entry['won_count'];
+                $entry['oppti_count'] = count($entry['oppti_ids'] ?? $entry['deal_ids'] ?? []);
+                unset($entry['deal_ids'], $entry['oppti_ids']);
 
                 return $entry;
             })
             ->sort(function (array $a, array $b) use ($sort) {
                 return match ($sort) {
-                    'count' => $b['deal_count'] <=> $a['deal_count']
+                    'count' => $b['oppti_count'] <=> $a['oppti_count']
+                        ?: $b['won_total'] <=> $a['won_total'],
+                    'won' => $b['won_count'] <=> $a['won_count']
+                        ?: $b['won_total'] <=> $a['won_total'],
+                    'margin' => $b['won_margin'] <=> $a['won_margin']
                         ?: $b['won_total'] <=> $a['won_total'],
                     default => $b['won_total'] <=> $a['won_total']
-                        ?: $b['deal_count'] <=> $a['deal_count'],
+                        ?: $b['won_count'] <=> $a['won_count'],
                 };
             })
-            ->values()
-            ->take(10)
-            ->map(fn (array $entry, int $index) => array_merge($entry, [
-                'rank' => $index + 1,
-            ]));
+            ->values();
+
+        if ($limit !== null) {
+            $ranked = $ranked->take($limit)->values();
+        }
+
+        return $ranked->map(fn (array $entry, int $index) => array_merge($entry, [
+            'rank' => $index + 1,
+        ]));
     }
 
     protected function wonMarginForTargetPeriod(string $userId, UserProfile $profile): float

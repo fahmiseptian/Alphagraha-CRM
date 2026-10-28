@@ -19,6 +19,10 @@ class PurchaseOrder extends Model
 
     public const APPROVAL_REJECTED = 'rejected';
 
+    public const REPORT_TOP_CUSTOM = 'custom';
+
+    public const REPORT_TOP_FROM_SO = 'so';
+
     protected $table = 'crm_purchase_orders';
 
     protected $fillable = [
@@ -29,6 +33,7 @@ class PurchaseOrder extends Model
         'vendor_name',
         'payment_term',
         'report_top',
+        'report_top_source',
         'total',
         'currency',
         'created_by',

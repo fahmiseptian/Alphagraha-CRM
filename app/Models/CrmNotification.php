@@ -53,6 +53,16 @@ class CrmNotification extends Model
 
     public const TYPE_CUSTOMER_INDUSTRY_UPDATE = 'customer_industry_update';
 
+    public const TYPE_CUSTOMER_CREATED = 'customer_created';
+
+    public const TYPE_ENTERTAINMENT_APPROVAL_REQUESTED = 'entertainment_approval_requested';
+
+    public const TYPE_TOP_APPROVAL_REQUESTED = 'top_approval_requested';
+
+    public const TYPE_TOP_APPROVED = 'top_approved';
+
+    public const TYPE_TOP_REJECTED = 'top_rejected';
+
     public const TYPE_GENERAL = 'general';
 
     protected $fillable = [
@@ -77,11 +87,13 @@ class CrmNotification extends Model
     }
 
     /**
-     * Notifikasi yang butuh aksi bisnis — tidak boleh ditandai dibaca hanya karena dibuka/ditutup.
+     * Tipe notifikasi yang butuh aksi bisnis — tidak boleh ditandai dibaca hanya karena dibuka/ditutup.
+     *
+     * @return list<string>
      */
-    public function requiresAction(): bool
+    public static function actionTypes(): array
     {
-        return in_array($this->type, [
+        return [
             self::TYPE_DISCOUNT_REQUESTED,
             self::TYPE_MARGIN_REQUESTED,
             self::TYPE_ACTIVITY_DUE,
@@ -91,7 +103,17 @@ class CrmNotification extends Model
             self::TYPE_SALES_ORDER_CANCEL_REQUESTED,
             self::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
             self::TYPE_CUSTOMER_INDUSTRY_UPDATE,
-        ], true);
+            self::TYPE_ENTERTAINMENT_APPROVAL_REQUESTED,
+            self::TYPE_TOP_APPROVAL_REQUESTED,
+        ];
+    }
+
+    /**
+     * Notifikasi yang butuh aksi bisnis — tidak boleh ditandai dibaca hanya karena dibuka/ditutup.
+     */
+    public function requiresAction(): bool
+    {
+        return in_array($this->type, self::actionTypes(), true);
     }
 
     public function markAsRead(): void
@@ -118,6 +140,9 @@ class CrmNotification extends Model
             self::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED, self::TYPE_PURCHASE_ORDER_APPROVED, self::TYPE_PURCHASE_ORDER_REJECTED => 'bi-cart-check',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bi-person-check',
             self::TYPE_CUSTOMER_INDUSTRY_UPDATE => 'bi-buildings',
+            self::TYPE_CUSTOMER_CREATED => 'bi-person-plus',
+            self::TYPE_ENTERTAINMENT_APPROVAL_REQUESTED => 'bi-cup-hot',
+            self::TYPE_TOP_APPROVAL_REQUESTED, self::TYPE_TOP_APPROVED, self::TYPE_TOP_REJECTED => 'bi-calendar2-check',
             default => 'bi-bell',
         };
     }
@@ -147,6 +172,11 @@ class CrmNotification extends Model
             self::TYPE_PURCHASE_ORDER_REJECTED => 'bg-red-50 text-red-600',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bg-brand-50 text-brand-600',
             self::TYPE_CUSTOMER_INDUSTRY_UPDATE => 'bg-amber-50 text-amber-600',
+            self::TYPE_CUSTOMER_CREATED => 'bg-teal-50 text-teal-600',
+            self::TYPE_ENTERTAINMENT_APPROVAL_REQUESTED => 'bg-amber-50 text-amber-600',
+            self::TYPE_TOP_APPROVAL_REQUESTED => 'bg-amber-50 text-amber-600',
+            self::TYPE_TOP_APPROVED => 'bg-green-50 text-green-600',
+            self::TYPE_TOP_REJECTED => 'bg-red-50 text-red-600',
             default => 'bg-slate-100 text-slate-600',
         };
     }

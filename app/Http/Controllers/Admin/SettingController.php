@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\CrmSetting;
+use App\Services\CommissionService;
 use App\Support\CustomerTop;
 use App\Support\FreeShippingZone;
 use App\Support\OpportunityProductPricing;
@@ -368,5 +369,92 @@ class SettingController extends Controller
         return redirect()
             ->route('settings.shipping.edit')
             ->with('success', 'Kawasan free ongkir berhasil disimpan ('.count($codes).' kota).');
+    }
+
+    public function editCommission()
+    {
+        $commissions = app(CommissionService::class);
+
+        return view('admin.settings.commission', [
+            'tiers' => $commissions->rateTiers(),
+            'roundTo' => $commissions->roundUnit(),
+        ]);
+    }
+
+    public function updateCommission(Request $request)
+    {
+        $tiersInput = $request->input('tiers', []);
+        if (is_array($tiersInput)) {
+            foreach ($tiersInput as $index => $tier) {
+                if (! is_array($tier)) {
+                    continue;
+                }
+                $tiersInput[$index]['min_percent'] = $this->parseSettingNumber($tier['min_percent'] ?? null);
+                $tiersInput[$index]['rate_percent'] = $this->parseSettingNumber($tier['rate_percent'] ?? null);
+            }
+            $request->merge(['tiers' => $tiersInput]);
+        }
+        $request->merge([
+            'round_to' => $this->parseSettingNumber($request->input('round_to')),
+        ]);
+
+        $data = $request->validate([
+            'round_to' => ['required', 'numeric', 'min:1'],
+            'tiers' => ['required', 'array', 'min:1'],
+            'tiers.*.min_percent' => ['required', 'numeric', 'min:0', 'max:100000'],
+            'tiers.*.rate_percent' => ['required', 'numeric', 'min:0', 'max:100'],
+        ]);
+
+        $commissions = app(CommissionService::class);
+        $tiers = $commissions->normalizeRateTiers($data['tiers']);
+        $percents = array_map(fn (array $tier) => (string) $tier['min_percent'], $tiers);
+        if ($tiers === [] || count($percents) !== count(array_unique($percents))) {
+            return back()
+                ->withErrors(['tiers' => 'Setiap jenjang wajib punya batas persen target yang berbeda.'])
+                ->withInput();
+        }
+
+        CrmSetting::set(CommissionService::SETTING_TIERS, $tiers, [
+            'type' => 'json',
+            'group' => 'commission',
+            'label' => 'Jenjang tarif komisi',
+            'description' => 'Nett Profit di atas persen target ini mendapat tarif komisi.',
+        ]);
+
+        CrmSetting::set(CommissionService::SETTING_ROUND_TO, round((float) $data['round_to'], 2), [
+            'type' => 'number',
+            'group' => 'commission',
+            'label' => 'Pembulatan komisi',
+            'description' => 'Komisi dibulatkan ke bawah per nominal ini.',
+        ]);
+
+        return redirect()
+            ->route('settings.commission.edit')
+            ->with('success', 'Pengaturan tarif komisi berhasil disimpan.');
+    }
+
+    protected function parseSettingNumber(mixed $value): float
+    {
+        if (is_int($value) || is_float($value)) {
+            return (float) $value;
+        }
+
+        $s = trim((string) $value);
+        if ($s === '') {
+            return 0.0;
+        }
+
+        if (str_contains($s, ',')) {
+            $s = str_replace('.', '', $s);
+            $s = str_replace(',', '.', $s);
+
+            return (float) $s;
+        }
+
+        if (preg_match('/^\d{1,3}(\.\d{3})+$/', $s)) {
+            return (float) str_replace('.', '', $s);
+        }
+
+        return (float) $s;
     }
 }

@@ -120,7 +120,13 @@
                                 @if ($item->description)
                                     <div class="desc">{{ $item->description }}</div>
                                 @endif
-                                <div class="muted">{{ $item->created_at?->translatedFormat('d M Y H:i') }}</div>
+                                <div class="muted">
+                                    @if ($item->entertainment_date)
+                                        Tanggal {{ $item->entertainment_date->translatedFormat('d M Y') }}
+                                        &middot;
+                                    @endif
+                                    diinput {{ $item->created_at?->translatedFormat('d M Y H:i') }}
+                                </div>
                             </td>
                             <td>
                                 <span class="badge {{ $item->isComplete() ? 'badge-complete' : 'badge-pending' }}">{{ $item->statusLabel() }}</span>

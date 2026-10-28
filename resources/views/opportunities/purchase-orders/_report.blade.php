@@ -86,7 +86,7 @@
             <tr>
                 <td class="col-label">Jual Ongkir</td>
                 <td class="num">{{ $fmt($s['jual_ongkir_incl']) }}</td>
-                <td class="num">{{ $fmt($s['jual_ongkir_excl']) }}</td>
+                <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="num">{{ $fmt($s['jual_ongkir_incl']) }}</td>
                 <td class="blank">&nbsp;</td>
@@ -94,7 +94,7 @@
             <tr>
                 <td class="col-label">Modal Ongkir</td>
                 <td class="num">{{ $fmt($s['modal_ongkir_incl']) }}</td>
-                <td class="num">{{ $fmt($s['modal_ongkir_excl']) }}</td>
+                <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
@@ -120,7 +120,7 @@
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
                 <td class="blank">&nbsp;</td>
-                <td class="num">{{ $s['modal_ongkir_excl'] !== null || $s['jual_ongkir_excl'] !== null ? $fmt($s['profit_ongkir']) : '' }}</td>
+                <td class="num">{{ $s['modal_ongkir_incl'] !== null || $s['jual_ongkir_incl'] !== null ? $fmt($s['profit_ongkir']) : '' }}</td>
                 <td class="blank">&nbsp;</td>
             </tr>
             <tr class="row-total">

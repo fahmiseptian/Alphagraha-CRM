@@ -1,5 +1,7 @@
 @php
     $entertainmentErrors = $errors->hasAny([
+        'entertainment_date',
+        'entertainment_category_id',
         'entertainment_name',
         'entertainment_description',
         'entertainment_amount',
@@ -7,6 +9,8 @@
     ]);
     $currency = $opportunity->amount_currency ?: 'IDR';
     $canCompleteEntertainment = (bool) auth()->user()?->canCompleteEntertainment();
+    $expenseCategories = \App\Models\ExpenseCategory::options();
+    $defaultCategoryId = \App\Models\ExpenseCategory::defaultEntertainmentId();
 @endphp
 
 <x-card id="entertainments" :padding="false" x-data="{ adding: {{ $entertainmentErrors ? 'true' : 'false' }} }"
@@ -30,6 +34,28 @@
     <div x-show="adding" x-cloak class="border-b border-slate-100 px-5 py-3">
         <form method="POST" action="{{ route('opportunities.entertainments.store', $opportunity) }}" enctype="multipart/form-data" class="space-y-3">
             @csrf
+            <div>
+                <label class="crm-label">Tanggal <span class="text-red-500">*</span></label>
+                <input type="date" name="entertainment_date"
+                       value="{{ old('entertainment_date', now()->format('Y-m-d')) }}" required
+                       class="crm-field @error('entertainment_date') border-red-300 @enderror">
+                <p class="mt-1 text-[11px] text-slate-400">Tanggal keperluan entertainment (dipakai untuk periode komisi).</p>
+                @error('entertainment_date')
+                    <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                @enderror
+            </div>
+            <div>
+                <label class="crm-label">Kategori <span class="text-red-500">*</span></label>
+                <select name="entertainment_category_id" required
+                        class="crm-field @error('entertainment_category_id') border-red-300 @enderror">
+                    @foreach ($expenseCategories as $category)
+                        <option value="{{ $category->id }}" @selected((string) old('entertainment_category_id', $defaultCategoryId) === (string) $category->id)>{{ $category->name }}</option>
+                    @endforeach
+                </select>
+                @error('entertainment_category_id')
+                    <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                @enderror
+            </div>
             <div>
                 <label class="crm-label">Nama <span class="text-red-500">*</span></label>
                 <input type="text" name="entertainment_name" value="{{ old('entertainment_name') }}" required maxlength="255"
@@ -62,10 +88,10 @@
                     @enderror
                 </div>
                 <div>
-                    <label class="crm-label">Foto / struk</label>
-                    <input type="file" name="entertainment_photo" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf"
+                    <label class="crm-label">Foto / struk <span class="text-red-500">*</span></label>
+                    <input type="file" name="entertainment_photo" required accept=".jpg,.jpeg,.png,.webp,.gif,.pdf"
                            class="block w-full text-xs text-slate-600 file:mr-2 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-brand-600 hover:file:bg-brand-100">
-                    <p class="mt-1 text-[11px] text-slate-400">Opsional. JPG, PNG, WebP, atau PDF. Maks. 10 MB.</p>
+                    <p class="mt-1 text-[11px] text-slate-400">Wajib diunggah · JPG, PNG, WebP, atau PDF · maks. 10 MB</p>
                     @error('entertainment_photo')
                         <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
                     @enderror
@@ -93,6 +119,9 @@
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <p class="truncate text-sm font-medium text-slate-800">{{ $item->name }}</p>
+                            @if ($item->category)
+                                <span class="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{{ $item->category->name }}</span>
+                            @endif
                             <x-badge :color="$item->statusColor()">{{ $item->statusLabel() }}</x-badge>
                         </div>
                         <p class="mt-0.5 text-sm font-semibold text-slate-700">{{ money($item->amount, $currency) }}</p>
@@ -104,8 +133,10 @@
                         @endif
                         <p class="mt-1 text-xs text-slate-400">
                             {{ optional($item->creator)->display_name ?: '—' }}
-                            &middot;
-                            {{ $item->created_at?->translatedFormat('d M Y H:i') }}
+                            @if ($item->entertainment_date)
+                                &middot; {{ $item->entertainment_date->translatedFormat('d M Y') }}
+                            @endif
+                            &middot; diinput {{ $item->created_at?->translatedFormat('d M Y H:i') }}
                             @if ($item->isComplete())
                                 &middot; complete oleh {{ optional($item->completedByUser)->display_name ?: '—' }}
                                 {{ $item->completed_at?->translatedFormat('d M Y H:i') }}

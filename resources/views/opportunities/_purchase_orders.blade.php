@@ -189,12 +189,24 @@
     $poPayloadById = [];
     $soOrder = collect($poSalesOrders)->pluck('number', 'id')->all();
     foreach ($poList as $po) {
+        $storedReportTop = trim((string) ($po->report_top ?? ''));
+        $reportTopSource = $po->report_top_source;
+        // Data lama tanpa source = ikut SO (sama seperti default buat PO).
+        if (! in_array($reportTopSource, ['custom', 'so'], true)) {
+            $reportTopSource = 'so';
+        }
+        $reportTopValue = \App\Support\CustomerTop::valueFromReportLabel($storedReportTop)
+            ?: \App\Support\CustomerTop::DAYS_30;
+
         $poEditPayload = [
             'id' => $po->id,
             'number' => $po->number,
             'vendor_id' => $po->vendor_id,
             'payment_term' => $po->payment_term ?: 'top',
             'sales_order_id' => $po->sales_order_id,
+            'report_top' => $storedReportTop !== '' ? $storedReportTop : null,
+            'report_top_source' => $reportTopSource,
+            'report_top_value' => $reportTopValue,
             'items' => $po->items->map(fn ($i) => [
                 'opportunity_product_name' => $i->opportunity_product_name ?? '',
                 'product_name' => $i->product_name,
@@ -323,8 +335,8 @@
             salesOrders: @js($poSalesOrders),
             salesOrderId: @js($preselectedSalesOrderId ? (string) $preselectedSalesOrderId : ''),
             productSource: 'so',
-            topSource: 'so',
-            reportTopValue: @js(\App\Support\CustomerTop::DAYS_30),
+            topSource: @js(old('report_top_source', 'so')),
+            reportTopValue: @js(old('report_top_value', \App\Support\CustomerTop::DAYS_30)),
             topOptions: @js(collect(\App\Support\CustomerTop::LABELS)->map(fn ($label, $value) => [
                 'value' => (string) $value,
                 'label' => $label,
@@ -366,6 +378,9 @@
                 const next = id ? String(id) : '';
                 const changed = String(this.salesOrderId || '') !== next;
                 this.salesOrderId = next;
+                if (next && this.mode !== 'edit') {
+                    this.topSource = 'so';
+                }
                 if (changed && this.mode === 'plan') {
                     this.productSource = 'so';
                     this.applyPlanProductsFromSource();
@@ -414,19 +429,21 @@
                         const editEl = this.$refs.editSalesOrderSelect;
                         if (planEl) this.initSalesOrderSelect(planEl, true);
                         if (editEl) this.initSalesOrderSelect(editEl, false);
-                        const topEl = this.$refs.reportTopValueSelect;
-                        if (topEl && window.CrmSelect2 && window.jQuery) {
-                            const topDisabled = this.mode !== 'plan' || this.topSource !== 'custom';
-                            topEl.disabled = topDisabled;
-                            const $top = window.jQuery(topEl);
+                        const syncTopSelect = (el, enabledModes) => {
+                            if (!el || !window.CrmSelect2 || !window.jQuery) return;
+                            const topDisabled = !enabledModes.includes(this.mode) || this.topSource !== 'custom';
+                            el.disabled = topDisabled;
+                            const $top = window.jQuery(el);
                             if (! $top.hasClass('select2-hidden-accessible')) {
-                                CrmSelect2.initElement(topEl);
-                                CrmSelect2.bindAlpine(topEl, this, 'reportTopValue');
+                                CrmSelect2.initElement(el);
+                                CrmSelect2.bindAlpine(el, this, 'reportTopValue');
                             } else if (String($top.val() || '') !== String(this.reportTopValue || '')) {
                                 $top.val(this.reportTopValue || '').trigger('change.select2');
                             }
                             $top.prop('disabled', topDisabled).trigger('change.select2');
-                        }
+                        };
+                        syncTopSelect(this.$refs.reportTopValueSelect, ['plan']);
+                        syncTopSelect(this.$refs.editReportTopValueSelect, ['edit']);
                     }, 30);
                 });
             },
@@ -657,6 +674,18 @@
                 this.vendorId = po.vendor_id ? String(po.vendor_id) : '';
                 this.paymentTerm = po.payment_term || 'top';
                 this.salesOrderId = po.sales_order_id ? String(po.sales_order_id) : (this.salesOrderId || '');
+                let source = po.report_top_source;
+                if (source !== 'so' && source !== 'custom') {
+                    source = 'so';
+                }
+                this.topSource = source;
+                if (source === 'custom') {
+                    const fromPayload = po.report_top_value ? String(po.report_top_value) : '';
+                    const matched = (this.topOptions || []).find((o) => String(o.report_label) === String(po.report_top || ''));
+                    this.reportTopValue = fromPayload || (matched ? String(matched.value) : '30');
+                } else {
+                    this.reportTopValue = '30';
+                }
                 this.groups = this.hydrateGroupsFromFlatItems(po.items && po.items.length ? po.items : []);
                 this.items = [];
                 this.planProducts = [];
@@ -1282,10 +1311,14 @@
             },
          }"
          x-init="
+            if (!mode && salesOrderId) {
+                startCreate();
+            }
             if (mode === 'plan') {
                 if (!salesOrderId && (salesOrders || []).length === 1) {
                     salesOrderId = String(salesOrders[0].id);
                 }
+                topSource = 'so';
                 applyPlanProductsFromSource();
                 poDrafts = [];
             }
@@ -1376,11 +1409,7 @@
                 <template x-if="!shippingEditing">
                     <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums text-slate-800">
                         <span x-show="Number(shippingExclude) > 0">
-                            <span class="text-xs text-slate-400">Excl</span>
-                            <span class="font-semibold" x-text="formatMoney(shippingExclude)"></span>
-                        </span>
-                        <span x-show="Number(shippingExclude) > 0">
-                            <span class="text-xs text-slate-400">Incl</span>
+                            <span class="text-xs text-slate-400">Include</span>
                             <span class="font-semibold" x-text="formatMoney(shippingInclude())"></span>
                         </span>
                         <span x-show="!(Number(shippingExclude) > 0)" class="font-normal text-slate-400">Belum diisi</span>
@@ -1389,16 +1418,6 @@
                 <template x-if="shippingEditing">
                     <div class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
                         <div>
-                            <label class="crm-label text-[10px] text-slate-400">Exclude</label>
-                            <input type="text" inputmode="decimal"
-                                   x-effect="if (editingField !== 'ship-ex') $el.value = formatId(shippingExclude)"
-                                   @focus="editingField = 'ship-ex'"
-                                   @blur="editingField = null; $el.value = formatId(shippingExclude)"
-                                   @input="onShippingExcludeChange(parseId($event.target.value))"
-                                   placeholder="0"
-                                   class="crm-field w-full min-w-[7rem] text-right tabular-nums">
-                        </div>
-                        <div>
                             <label class="crm-label text-[10px] text-slate-400">Include</label>
                             <input type="text" inputmode="decimal"
                                    x-effect="if (editingField !== 'ship-inc') $el.value = formatId(shippingInclude())"
@@ -1406,8 +1425,7 @@
                                    @blur="editingField = null; $el.value = formatId(shippingInclude())"
                                    @input="onShippingIncludeChange(parseId($event.target.value))"
                                    placeholder="0"
-                                   class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
-                                   title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                   class="crm-field w-full min-w-[7rem] text-right tabular-nums">
                         </div>
                         <input type="hidden" name="crm_shipping_cost" :value="shippingExclude">
                     </div>
@@ -1441,11 +1459,7 @@
                 <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
                 @if ($shipExcl > 0)
                     <span class="text-sm tabular-nums text-slate-800">
-                        <span class="text-xs text-slate-400">Excl</span>
-                        <span class="font-semibold">{{ money($shipExcl, $poCurrency) }}</span>
-                    </span>
-                    <span class="text-sm tabular-nums text-slate-800">
-                        <span class="text-xs text-slate-400">Incl</span>
+                        <span class="text-xs text-slate-400">Include</span>
                         <span class="font-semibold">{{ money($shipIncl, $poCurrency) }}</span>
                     </span>
                 @else
@@ -1535,14 +1549,16 @@
                                 <label class="crm-label">Sumber produk</label>
                                 <div class="flex flex-wrap gap-3 pt-2">
                                     <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-                                        <input type="radio" value="so" x-model="productSource"
+                                        <input type="radio" name="ui_plan_product_source" value="so"
+                                               :checked="productSource === 'so'"
                                                @change="setProductSource('so')"
                                                class="border-slate-300 text-brand-600 focus:ring-brand-500"
                                                :disabled="!salesOrderId">
                                         Dari Sales Order
                                     </label>
                                     <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-                                        <input type="radio" value="opp" x-model="productSource"
+                                        <input type="radio" name="ui_plan_product_source" value="opp"
+                                               :checked="productSource === 'opp'"
                                                @change="setProductSource('opp')"
                                                class="border-slate-300 text-brand-600 focus:ring-brand-500">
                                         Dari Opportunity
@@ -1554,20 +1570,23 @@
                             </div>
                             <div>
                                 <label class="crm-label">TOP laporan PO</label>
+                                <input type="hidden" name="report_top_source" :value="topSource" :disabled="mode !== 'plan'">
                                 <div class="flex flex-wrap gap-3 pt-2">
                                     <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-                                        <input type="radio" name="report_top_source" value="custom" x-model="topSource"
-                                               @change="setTopSource('custom')"
-                                               :disabled="mode !== 'plan'"
-                                               class="border-slate-300 text-brand-600 focus:ring-brand-500">
-                                        Buat sendiri
-                                    </label>
-                                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-                                        <input type="radio" name="report_top_source" value="so" x-model="topSource"
+                                        <input type="radio" name="ui_plan_top_source" value="so"
+                                               :checked="topSource === 'so'"
                                                @change="setTopSource('so')"
                                                class="border-slate-300 text-brand-600 focus:ring-brand-500"
                                                :disabled="mode !== 'plan' || !salesOrderId">
                                         Dari Sales Order
+                                    </label>
+                                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                        <input type="radio" name="ui_plan_top_source" value="custom"
+                                               :checked="topSource === 'custom'"
+                                               @change="setTopSource('custom')"
+                                               :disabled="mode !== 'plan'"
+                                               class="border-slate-300 text-brand-600 focus:ring-brand-500">
+                                        Buat sendiri
                                     </label>
                                 </div>
                                 <div x-show="topSource === 'custom'" class="mt-2">
@@ -1587,6 +1606,9 @@
                                        :disabled="mode !== 'plan' || topSource !== 'so'">
                                 <p class="mt-1 text-[11px] text-slate-400">
                                     Mengisi kotak <span class="font-semibold">TOP</span> di laporan PO.
+                                    <span x-show="topSource === 'so'" class="font-medium text-slate-600">
+                                        Jika TOP Sales Order diubah, laporan PO ikut berubah.
+                                    </span>
                                     <span x-show="reportTopPreview()" class="font-medium text-slate-600"
                                           x-text="'Preview: ' + reportTopPreview()"></span>
                                 </p>
@@ -2522,6 +2544,64 @@
                                 <p class="mt-1 text-[11px] text-slate-400">Default mengikuti TOP vendor; bisa diubah.</p>
                             </div>
                         </div>
+
+                        <div class="border-t border-slate-100 pt-3">
+                            <label class="crm-label">TOP laporan PO</label>
+                            <input type="hidden" name="report_top_source" :value="topSource" :disabled="mode !== 'edit'">
+                            <div class="flex flex-wrap gap-3 pt-2">
+                                <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                    <input type="radio" name="ui_edit_top_source" value="so"
+                                           :checked="topSource === 'so'"
+                                           @change="setTopSource('so')"
+                                           class="border-slate-300 text-brand-600 focus:ring-brand-500"
+                                           :disabled="mode !== 'edit' || !salesOrderId">
+                                    Dari Sales Order
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                                    <input type="radio" name="ui_edit_top_source" value="custom"
+                                           :checked="topSource === 'custom'"
+                                           @change="setTopSource('custom')"
+                                           :disabled="mode !== 'edit'"
+                                           class="border-slate-300 text-brand-600 focus:ring-brand-500">
+                                    Buat sendiri
+                                </label>
+                            </div>
+                            <div x-show="topSource === 'custom'" class="mt-2 max-w-md">
+                                <select x-ref="editReportTopValueSelect"
+                                        name="report_top_value"
+                                        class="select2 select2-search w-full"
+                                        data-placeholder="Pilih TOP…"
+                                        x-model="reportTopValue"
+                                        :disabled="mode !== 'edit' || topSource !== 'custom'"
+                                        :required="mode === 'edit' && topSource === 'custom'">
+                                    @foreach (\App\Support\CustomerTop::LABELS as $topValue => $topLabel)
+                                        <option value="{{ $topValue }}">{{ $topLabel }} → {{ \App\Support\CustomerTop::reportLabel($topValue) }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <input type="hidden" name="report_top_value" value=""
+                                   :disabled="mode !== 'edit' || topSource !== 'so'">
+                            <p class="mt-1 text-[11px] text-slate-400">
+                                Mengisi kotak <span class="font-semibold">TOP</span> di laporan PO.
+                                <span x-show="topSource === 'so'" class="font-medium text-slate-600">
+                                    Jika TOP Sales Order diubah, laporan PO ikut berubah.
+                                </span>
+                                <span x-show="reportTopPreview()" class="font-medium text-slate-600"
+                                      x-text="'Preview: ' + reportTopPreview()"></span>
+                            </p>
+                            <p class="mt-1 text-[11px] text-amber-700" x-show="topSource === 'so' && !salesOrderId">
+                                Pilih Sales Order dulu untuk memakai TOP dari SO.
+                            </p>
+                            <p class="mt-1 text-[11px] text-amber-700" x-show="topSource === 'so' && salesOrderId && !reportTopPreview()">
+                                Sales Order belum punya TOP/payment.
+                            </p>
+                            @error('report_top_value')
+                                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                            @enderror
+                            @error('report_top_source')
+                                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
+                            @enderror
+                        </div>
                     </div>
 
                     <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3"
@@ -2587,7 +2667,7 @@
                                             'text-green-700' => $soNode['margin'] >= 0,
                                             'text-red-600' => $soNode['margin'] < 0,
                                         ])>
-                                            Margin {{ money($soNode['margin'], $poCurrency) }}
+                                            Margin {{ money_signed($soNode['margin'], $poCurrency) }}
                                             @if ($soNode['margin_percent'] !== null)
                                                 ({{ number_format($soNode['margin_percent'], 2, ',', '.') }}%)
                                             @endif
@@ -2838,7 +2918,7 @@
                                             'text-green-700' => $soNode['margin'] >= 0,
                                             'text-red-600' => $soNode['margin'] < 0,
                                         ])>
-                                            Margin {{ money($soNode['margin'], $poCurrency) }}
+                                            Margin {{ money_signed($soNode['margin'], $poCurrency) }}
                                             @if ($soNode['margin_percent'] !== null)
                                                 ({{ number_format($soNode['margin_percent'], 2, ',', '.') }}%)
                                             @endif

@@ -17,10 +17,12 @@ class OpportunityEntertainment extends Model
 
     protected $fillable = [
         'opportunity_id',
+        'category_id',
         'name',
         'description',
         'photo_path',
         'amount',
+        'entertainment_date',
         'status',
         'created_by',
         'completed_by',
@@ -29,12 +31,18 @@ class OpportunityEntertainment extends Model
 
     protected $casts = [
         'amount' => 'float',
+        'entertainment_date' => 'date',
         'completed_at' => 'datetime',
     ];
 
     public function opportunity(): BelongsTo
     {
         return $this->belongsTo(Opportunity::class, 'opportunity_id');
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(ExpenseCategory::class, 'category_id');
     }
 
     public function creator(): BelongsTo

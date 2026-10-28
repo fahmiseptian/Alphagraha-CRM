@@ -48,32 +48,37 @@
     </a>
 </div>
 
+@php
+    $soQueue = fn (string $queue = '') => route('sales-orders.index', array_filter([
+        'period' => $period,
+        'queue' => $queue !== '' ? $queue : null,
+    ]));
+@endphp
+
 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <x-stat-card title="Belum invoice · {{ $periodLabel }}" :value="number_format($needsInvoiceCount)" icon="bi-file-earmark-plus" color="amber"
                  sub="Prioritas: isi nomor & tanggal invoice"
-                 :href="route('sales-orders.index')" />
-    <x-stat-card title="Sudah invoice · {{ $periodLabel }}" :value="number_format($invoicedCount)" icon="bi-file-earmark-check" color="green"
-                 :sub="number_format($soPeriodCount).' SO total'"
-                 :href="route('sales-orders.index')" />
+                 :href="$soQueue('needs_invoice')" />
+    <x-stat-card title="SO · {{ $periodLabel }}" :value="number_format($soPeriodCount)" icon="bi-receipt" color="brand"
+                 :sub="number_format($invoicedCount).' sudah invoice'"
+                 :href="$soQueue()" />
     <x-stat-card title="Invoice unpaid · {{ $periodLabel }}" :value="number_format($unpaidInvoicedCount)" icon="bi-cash-coin" color="rose"
                  sub="Sudah invoice, belum paid"
-                 :href="route('sales-orders.index')" />
+                 :href="$soQueue('unpaid')" />
     <x-stat-card title="DO pending · {{ $periodLabel }}" :value="number_format($deliveryPendingCount)" icon="bi-truck" color="purple"
                  sub="Resi / file DO belum complete"
-                 :href="route('sales-orders.index')" />
+                 :href="$soQueue('delivery_pending')" />
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-    <x-stat-card title="SO · {{ $periodLabel }}" :value="number_format($soPeriodCount)" icon="bi-receipt" color="brand"
-                 :href="route('sales-orders.index')" />
     <x-stat-card title="Sudah paid · {{ $periodLabel }}" :value="number_format($paidCount)" icon="bi-check2-circle" color="green"
-                 :href="route('sales-orders.index')" />
+                 :href="$soQueue('paid')" />
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
     <x-card class="lg:col-span-2" :padding="false" title="Antrian isi Invoice · {{ $periodLabel }}">
         <x-slot:action>
-            <a href="{{ route('sales-orders.index') }}" class="text-xs font-semibold text-brand-600 hover:text-brand-700">
+            <a href="{{ $soQueue('needs_invoice') }}" class="text-xs font-semibold text-brand-600 hover:text-brand-700">
                 Semua SO
             </a>
         </x-slot:action>
@@ -120,7 +125,7 @@
             </div>
             @if ($needsInvoiceCount > $needsInvoice->count())
                 <div class="border-t border-slate-100 px-5 py-3">
-                    <a href="{{ route('sales-orders.index') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
+                    <a href="{{ $soQueue('needs_invoice') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
                         Lihat semua {{ number_format($needsInvoiceCount) }} yang menunggu invoice
                         <i class="bi bi-arrow-right"></i>
                     </a>

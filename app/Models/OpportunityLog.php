@@ -30,6 +30,10 @@ class OpportunityLog extends Model
 
     public const ACTION_MARGIN_REJECTED = 'margin_rejected';
 
+    public const ACTION_TOP_APPROVED = 'top_approved';
+
+    public const ACTION_TOP_REJECTED = 'top_rejected';
+
     public const ACTION_DELETED = 'deleted';
 
     public const ACTION_NOTE_ADDED = 'note_added';
@@ -74,6 +78,8 @@ class OpportunityLog extends Model
         self::ACTION_DISCOUNT_REVERTED => 'Diskon dikembalikan',
         self::ACTION_MARGIN_APPROVED => 'Margin disetujui',
         self::ACTION_MARGIN_REJECTED => 'Margin ditolak',
+        self::ACTION_TOP_APPROVED => 'TOP disetujui',
+        self::ACTION_TOP_REJECTED => 'TOP ditolak',
         self::ACTION_DELETED => 'Dihapus',
         self::ACTION_NOTE_ADDED => 'Catatan ditambah',
         self::ACTION_NOTE_DELETED => 'Catatan dihapus',
@@ -185,10 +191,10 @@ class OpportunityLog extends Model
     public function actionBadgeColor(): string
     {
         return match ($this->action) {
-            self::ACTION_CREATED, self::ACTION_DISCOUNT_APPROVED, self::ACTION_MARGIN_APPROVED, self::ACTION_SALES_ORDER_CREATED, self::ACTION_ENTERTAINMENT_COMPLETED, self::ACTION_SALES_ORDER_CANCEL_APPROVED => 'green',
+            self::ACTION_CREATED, self::ACTION_DISCOUNT_APPROVED, self::ACTION_MARGIN_APPROVED, self::ACTION_TOP_APPROVED, self::ACTION_SALES_ORDER_CREATED, self::ACTION_ENTERTAINMENT_COMPLETED, self::ACTION_SALES_ORDER_CANCEL_APPROVED => 'green',
             self::ACTION_UPDATED, self::ACTION_PRODUCTS_UPDATED, self::ACTION_QUOTATION_SYNCED, self::ACTION_PO_SYNCED, self::ACTION_SALES_ORDER_UPDATED => 'blue',
             self::ACTION_STAGE_CHANGED, self::ACTION_SHIPPING_UPDATED, self::ACTION_DISCOUNT_REVERTED, self::ACTION_SALES_ORDER_CANCEL_REQUESTED => 'brand',
-            self::ACTION_DISCOUNT_REJECTED, self::ACTION_MARGIN_REJECTED, self::ACTION_DELETED, self::ACTION_SALES_ORDER_ARCHIVED, self::ACTION_SALES_ORDER_CANCEL_REJECTED => 'red',
+            self::ACTION_DISCOUNT_REJECTED, self::ACTION_MARGIN_REJECTED, self::ACTION_TOP_REJECTED, self::ACTION_DELETED, self::ACTION_SALES_ORDER_ARCHIVED, self::ACTION_SALES_ORDER_CANCEL_REJECTED => 'red',
             self::ACTION_NOTE_ADDED, self::ACTION_DOCUMENT_UPLOADED, self::ACTION_ENTERTAINMENT_ADDED => 'purple',
             self::ACTION_NOTE_DELETED, self::ACTION_DOCUMENT_DELETED, self::ACTION_ENTERTAINMENT_DELETED => 'amber',
             default => 'slate',
@@ -202,8 +208,8 @@ class OpportunityLog extends Model
             self::ACTION_UPDATED => 'bi-pencil-square',
             self::ACTION_STAGE_CHANGED => 'bi-signpost-split',
             self::ACTION_PRODUCTS_UPDATED => 'bi-box-seam',
-            self::ACTION_DISCOUNT_APPROVED, self::ACTION_MARGIN_APPROVED => 'bi-check-circle',
-            self::ACTION_DISCOUNT_REJECTED, self::ACTION_MARGIN_REJECTED => 'bi-x-circle',
+            self::ACTION_DISCOUNT_APPROVED, self::ACTION_MARGIN_APPROVED, self::ACTION_TOP_APPROVED => 'bi-check-circle',
+            self::ACTION_DISCOUNT_REJECTED, self::ACTION_MARGIN_REJECTED, self::ACTION_TOP_REJECTED => 'bi-x-circle',
             self::ACTION_DISCOUNT_REVERTED => 'bi-arrow-counterclockwise',
             self::ACTION_DELETED => 'bi-trash',
             self::ACTION_NOTE_ADDED => 'bi-sticky',

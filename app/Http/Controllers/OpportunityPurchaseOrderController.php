@@ -111,7 +111,8 @@ class OpportunityPurchaseOrderController extends Controller
                 $data['pos'],
                 auth()->id(),
                 $data['sales_order_id'],
-                $data['report_top'] ?? null
+                $data['report_top'] ?? null,
+                $data['report_top_source'] ?? null
             );
 
             $count = count($created);
@@ -134,7 +135,8 @@ class OpportunityPurchaseOrderController extends Controller
             $data['vendor_id'],
             $data['vendor_name'] ?? null,
             $data['sales_order_id'],
-            $data['report_top'] ?? null
+            $data['report_top'] ?? null,
+            $data['report_top_source'] ?? null
         );
 
         $message = auth()->user()?->isSuperAdmin()
@@ -160,7 +162,8 @@ class OpportunityPurchaseOrderController extends Controller
             $data['vendor_id'],
             $data['vendor_name'] ?? null,
             $data['sales_order_id'] ?? null,
-            $data['report_top'] ?? null
+            $data['report_top'] ?? null,
+            $data['report_top_source'] ?? null
         );
 
         return back()->with('success', 'Purchase Order berhasil diperbarui. Total per produk di-mirror ke modal opportunity & ketersediaan vendor diperbarui.');
@@ -418,6 +421,7 @@ class OpportunityPurchaseOrderController extends Controller
         return [
             'sales_order_id' => (int) $data['sales_order_id'],
             'report_top' => $reportTop,
+            'report_top_source' => (string) $data['report_top_source'],
             'pos' => $pos,
         ];
     }
@@ -498,7 +502,10 @@ class OpportunityPurchaseOrderController extends Controller
                     )
                     : 'exists:crm_opportunity_sales_orders,id',
             ])),
-            'report_top_source' => ['nullable', Rule::in(['custom', 'so'])],
+            'report_top_source' => [
+                $existing ? 'required' : 'nullable',
+                Rule::in([PurchaseOrder::REPORT_TOP_CUSTOM, PurchaseOrder::REPORT_TOP_FROM_SO]),
+            ],
             'report_top_value' => ['nullable', 'string', Rule::in(CustomerTop::OPTIONS)],
             'vendor_id' => ['required', 'integer', 'exists:crm_vendors,id'],
             'vendor_name' => ['nullable', 'string', 'max:255'],
@@ -526,6 +533,7 @@ class OpportunityPurchaseOrderController extends Controller
             'number.required' => 'Isi nomor urut PO. Contoh: '.PurchaseOrderService::numberExample().'.',
             'sales_order_id.required' => 'Pilih Sales Order terkait untuk Purchase Order ini.',
             'sales_order_id.exists' => 'Sales Order tidak ditemukan di opportunity ini.',
+            'report_top_source.required' => 'Pilih sumber TOP untuk laporan PO.',
             'vendor_id.required' => 'Pilih vendor untuk Purchase Order ini (satu PO = satu vendor).',
             'items.*.opportunity_product_name.required' => 'Setiap item harus terikat ke produk opportunity.',
             'items.*.vendors.*.quoted_at.before_or_equal' => 'Tanggal vendor tidak boleh lebih dari hari ini.',
@@ -540,7 +548,7 @@ class OpportunityPurchaseOrderController extends Controller
             : ($existing?->sales_order_id ? (int) $existing->sales_order_id : null);
 
         if (! empty($data['report_top_source']) && $opportunity && $data['sales_order_id']) {
-            if ($data['report_top_source'] === 'custom' && empty($data['report_top_value'])) {
+            if ($data['report_top_source'] === PurchaseOrder::REPORT_TOP_CUSTOM && empty($data['report_top_value'])) {
                 throw ValidationException::withMessages([
                     'report_top_value' => 'Pilih nilai TOP untuk laporan PO.',
                 ]);
@@ -553,6 +561,7 @@ class OpportunityPurchaseOrderController extends Controller
             );
         } else {
             $data['report_top'] = null;
+            $data['report_top_source'] = null;
         }
         $items = [];
         foreach ($data['items'] as $itemIndex => $item) {

@@ -4,11 +4,15 @@ namespace App\Services;
 
 use App\Models\Activity;
 use App\Models\CrmNotification;
+use App\Models\Espo\Account;
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunityEntertainment;
 use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Models\User;
+use App\Models\UserProfile;
+use App\Support\CustomerTop;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -283,6 +287,111 @@ class NotificationService
                 showPopup: true,
                 uniqueKey: 'discount_revert:'.$opportunity->id.':'.uniqid('', true),
                 data: array_merge(['opportunity_id' => $opportunity->id], $this->actorPayload()),
+            );
+        }
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, string>
+     */
+    protected function topApproverIds(?string $exceptUserId = null)
+    {
+        return User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->whereIn('app_role', [User::ROLE_SUPERADMIN, User::ROLE_FINANCE]))
+            ->pluck('id')
+            ->filter(fn ($id) => $id !== $exceptUserId)
+            ->values();
+    }
+
+    /**
+     * Popup + bell ke Superadmin & Finance saat sales meminta TOP di atas TOP customer.
+     */
+    public function notifyTopApprovalRequested(Opportunity $opportunity): void
+    {
+        $requesterId = $opportunity->crm_top_requested_by;
+        $requesterName = $this->actorName($requesterId ?: $opportunity->assigned_user_id);
+        $customerName = $opportunity->account?->name ?: 'customer';
+        $customerTopLabel = CustomerTop::label($opportunity->crm_top_customer ?: $opportunity->customerTop());
+
+        $link = route('opportunities.show', $opportunity);
+        $title = 'Request approval TOP';
+        $body = $requesterName.' mengajukan '.$opportunity->topLabel().' pada Opportunity "'.$opportunity->name
+            .'" ('.$customerName.', TOP customer: '.$customerTopLabel.').';
+        $uniqueKey = 'top_request:'.$opportunity->id;
+
+        foreach ($this->topApproverIds($requesterId) as $userId) {
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_TOP_APPROVAL_REQUESTED,
+                $uniqueKey,
+                opportunityId: $opportunity->id,
+            );
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_TOP_APPROVAL_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey,
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'top' => $opportunity->top(),
+                    'customer_top' => $opportunity->crm_top_customer,
+                    'requested_by' => $requesterId,
+                    'sales_user_id' => $requesterId ?: $opportunity->assigned_user_id,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Hasil approval TOP ke sales (assigned + requester) dan ke Superadmin/Finance lain.
+     */
+    public function notifyTopApprovalDecided(Opportunity $opportunity, bool $approved, ?string $note = null): void
+    {
+        $reviewerId = $opportunity->crm_top_reviewed_by ?: auth()->id();
+        $actor = $this->actorName($reviewerId);
+        $topLabel = $opportunity->topLabel();
+        $customerTopLabel = CustomerTop::label($opportunity->crm_top_customer ?: $opportunity->customerTop());
+
+        $type = $approved ? CrmNotification::TYPE_TOP_APPROVED : CrmNotification::TYPE_TOP_REJECTED;
+        $title = $approved ? 'TOP opportunity disetujui' : 'TOP opportunity ditolak';
+        $body = $approved
+            ? $topLabel.' untuk Opportunity "'.$opportunity->name.'" disetujui oleh '.$actor.'. SO dapat memakai TOP ini.'
+            : $topLabel.' untuk Opportunity "'.$opportunity->name.'" ditolak oleh '.$actor.'. SO tetap mengikuti TOP customer ('.$customerTopLabel.').';
+        if ($note) {
+            $body .= ' Catatan: '.$note;
+        }
+
+        $link = route('opportunities.show', $opportunity);
+
+        $recipients = collect([
+            $opportunity->assigned_user_id,
+            $opportunity->crm_top_requested_by,
+        ])
+            ->merge($this->topApproverIds())
+            ->filter(fn ($id) => $id && $id !== $reviewerId)
+            ->unique()
+            ->values();
+
+        foreach ($recipients as $userId) {
+            $this->notify(
+                $userId,
+                $type,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: 'top_decision:'.$opportunity->id.':'.uniqid('', true),
+                data: array_merge([
+                    'opportunity_id' => $opportunity->id,
+                    'top' => $opportunity->top(),
+                    'approved' => $approved,
+                ], $this->actorPayload($reviewerId)),
             );
         }
     }
@@ -796,17 +905,7 @@ class NotificationService
         CrmNotification::query()
             ->where('user_id', $userId)
             ->whereNull('read_at')
-            ->whereNotIn('type', [
-                CrmNotification::TYPE_DISCOUNT_REQUESTED,
-                CrmNotification::TYPE_MARGIN_REQUESTED,
-                CrmNotification::TYPE_ACTIVITY_DUE,
-                CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
-                CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
-                CrmNotification::TYPE_SALES_ORDER_CREATED,
-                CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
-                CrmNotification::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
-                CrmNotification::TYPE_CUSTOMER_INDUSTRY_UPDATE,
-            ])
+            ->whereNotIn('type', CrmNotification::actionTypes())
             ->update([
                 'read_at' => now(),
                 'show_popup' => false,
@@ -851,12 +950,13 @@ class NotificationService
         int|string|null $quotationId = null,
         int|string|null $activityId = null,
         int|string|null $salesOrderId = null,
+        int|string|null $entertainmentId = null,
     ): void {
         CrmNotification::query()
             ->where('user_id', $userId)
-            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId, $activityId, $salesOrderId) {
+            ->where(function ($q) use ($type, $uniqueKey, $opportunityId, $quotationId, $activityId, $salesOrderId, $entertainmentId) {
                 $q->where('unique_key', $uniqueKey)
-                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId, $activityId, $salesOrderId) {
+                    ->orWhere(function ($q2) use ($type, $opportunityId, $quotationId, $activityId, $salesOrderId, $entertainmentId) {
                         $q2->where('type', $type)
                             ->whereNull('read_at');
 
@@ -871,6 +971,9 @@ class NotificationService
                         }
                         if ($salesOrderId) {
                             $q2->where('data->sales_order_id', $salesOrderId);
+                        }
+                        if ($entertainmentId) {
+                            $q2->where('data->entertainment_id', $entertainmentId);
                         }
                     });
             })
@@ -905,6 +1008,13 @@ class NotificationService
         ]);
     }
 
+    public function markTopRequestActioned(Opportunity $opportunity): void
+    {
+        $this->markActioned(CrmNotification::TYPE_TOP_APPROVAL_REQUESTED, [
+            'opportunity_id' => $opportunity->id,
+        ]);
+    }
+
     public function markDiscountRequestActioned(Opportunity $opportunity): void
     {
         $this->markActioned(CrmNotification::TYPE_DISCOUNT_REQUESTED, [
@@ -919,6 +1029,7 @@ class NotificationService
     {
         $this->markDiscountRequestActioned($opportunity);
         $this->markOpportunityMarginRequestActioned($opportunity);
+        $this->markTopRequestActioned($opportunity);
 
         $opportunity->loadMissing('quotation');
         if ($opportunity->quotation) {
@@ -1489,6 +1600,137 @@ class NotificationService
                 'assigned_user_id' => $newUserId,
             ], $this->actorPayload($assignedByUserId)),
         );
+    }
+
+    /**
+     * Notifikasi ke Finance saat ada permintaan approval entertainment.
+     */
+    public function notifyEntertainmentApprovalRequested(
+        Opportunity $opportunity,
+        OpportunityEntertainment $entertainment,
+        ?string $requestedByUserId = null
+    ): void {
+        $requestedByUserId = $requestedByUserId ?: (string) ($entertainment->created_by ?: auth()->id());
+        $requester = $requestedByUserId
+            ? User::query()->whereKey($requestedByUserId)->first()
+            : null;
+        $requesterName = $requester?->display_name ?: 'Sales';
+
+        $currency = $opportunity->amount_currency ?: 'IDR';
+        $amountLabel = function_exists('money')
+            ? money((float) $entertainment->amount, $currency)
+            : number_format((float) $entertainment->amount, 0, ',', '.');
+
+        $salesId = (string) ($opportunity->assigned_user_id ?? '');
+        $periodDate = $entertainment->entertainment_date
+            ? Carbon::parse($entertainment->entertainment_date)->startOfDay()
+            : ($entertainment->created_at?->copy() ?? now());
+        $year = (int) $periodDate->year;
+        $periodKey = null;
+        if ($salesId !== '') {
+            $profile = UserProfile::query()->where('user_id', $salesId)->first()
+                ?: UserProfile::ensureForUser($salesId, true, User::ROLE_SALES);
+            $quarter = $profile->currentCommissionQuarter($periodDate);
+            $periodKey = $quarter['key'] ?? null;
+        }
+
+        $link = $salesId !== ''
+            ? route('commissions.show', array_filter([
+                'user' => $salesId,
+                'year' => $year,
+                'period' => $periodKey,
+            ]))
+            : route('opportunities.show', $opportunity).'#entertainments';
+
+        $title = 'Approval entertainment';
+        $body = $requesterName.' mengajukan entertainment "'.$entertainment->name.'" '.$amountLabel
+            .' pada Opportunity "'.$opportunity->name.'".';
+        $uniqueKey = 'entertainment_approval:'.$entertainment->id;
+
+        $recipientIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_FINANCE))
+            ->pluck('id')
+            ->filter(fn ($id) => (string) $id !== (string) $requestedByUserId)
+            ->values();
+
+        foreach ($recipientIds as $userId) {
+            $this->replacePendingActionNotifications(
+                $userId,
+                CrmNotification::TYPE_ENTERTAINMENT_APPROVAL_REQUESTED,
+                $uniqueKey,
+                entertainmentId: $entertainment->id,
+            );
+
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_ENTERTAINMENT_APPROVAL_REQUESTED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey.':'.$userId,
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'entertainment_id' => $entertainment->id,
+                    'sales_user_id' => $salesId !== '' ? $salesId : null,
+                    'amount' => (float) $entertainment->amount,
+                    'requested_by' => $requestedByUserId,
+                ],
+            );
+        }
+    }
+
+    public function markEntertainmentApprovalActioned(OpportunityEntertainment $entertainment): void
+    {
+        $this->markActioned(CrmNotification::TYPE_ENTERTAINMENT_APPROVAL_REQUESTED, [
+            'entertainment_id' => $entertainment->id,
+        ]);
+    }
+
+    /**
+     * Notifikasi ke tim Finance saat customer baru dibuat.
+     */
+    public function notifyCustomerCreated(Account $account, ?string $createdByUserId = null): void
+    {
+        $createdByUserId = $createdByUserId ?: auth()->id();
+        $creator = $createdByUserId
+            ? User::query()->whereKey($createdByUserId)->first()
+            : null;
+        $creatorName = $creator?->display_name ?: 'Sales';
+        $customerName = $account->name ?: $account->id;
+
+        $title = 'Customer baru';
+        $body = $creatorName.' menambahkan customer "'.$customerName.'".';
+        $link = route('customers.show', $account->id);
+        $uniqueKey = 'customer_created:'.$account->id;
+
+        $recipientIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_FINANCE))
+            ->pluck('id')
+            ->filter(fn ($id) => (string) $id !== (string) $createdByUserId)
+            ->values();
+
+        foreach ($recipientIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_CUSTOMER_CREATED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey.':'.$userId,
+                data: [
+                    'account_id' => $account->id,
+                    'account_name' => $customerName,
+                    'created_by' => $createdByUserId,
+                    'created_by_name' => $creatorName,
+                ],
+            );
+        }
     }
 
     /**

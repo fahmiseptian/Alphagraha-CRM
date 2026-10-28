@@ -102,7 +102,7 @@ class PurchaseOrderReportService
         }
 
         $profitOngkir = round(
-            (float) ($jualOngkirExcl ?? 0) - (float) ($modalOngkirExcl ?? 0),
+            (float) ($jualOngkirIncl ?? 0) - (float) ($modalOngkirIncl ?? 0),
             2
         );
         $totalProfit = round($profitBarang + $profitOngkir, 2);
@@ -453,9 +453,25 @@ class PurchaseOrderReportService
             : $opportunity->purchaseOrders;
 
         foreach ($purchaseOrders as $po) {
-            $fromPo = trim((string) ($po->report_top ?? ''));
-            if ($fromPo !== '') {
-                return $fromPo;
+            $source = trim((string) ($po->report_top_source ?? ''));
+            // 'so' atau data lama (null): ikut TOP Sales Order.
+            // Hanya 'custom' yang memakai nilai snapshot di PO.
+            $followsSo = $source === '' || $source === PurchaseOrder::REPORT_TOP_FROM_SO;
+            if ($followsSo) {
+                $linked = $salesOrder ?: $po->salesOrder;
+                if ($linked) {
+                    $fromSo = trim($linked->paymentLabel());
+                    if ($fromSo !== '' && $fromSo !== '—') {
+                        return $fromSo;
+                    }
+                }
+            }
+
+            if ($source === PurchaseOrder::REPORT_TOP_CUSTOM) {
+                $fromPo = trim((string) ($po->report_top ?? ''));
+                if ($fromPo !== '') {
+                    return $fromPo;
+                }
             }
         }
 

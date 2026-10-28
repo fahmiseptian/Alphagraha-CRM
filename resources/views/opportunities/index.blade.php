@@ -150,6 +150,9 @@
         <div class="crm-opp-filters__actions">
             <div class="crm-opp-filters__buttons">
                 <x-btn type="submit" variant="primary" icon="bi-funnel">Filter</x-btn>
+                <x-btn type="submit" variant="secondary" icon="bi-receipt"
+                       formaction="{{ route('opportunities.account-receivable') }}" formtarget="_blank"
+                       title="Account Receivable: Sales Order belum dibayar sesuai filter">AR</x-btn>
                 @if ($hasFilters)
                     <x-btn href="{{ route('opportunities.index', $isList ? ['view' => 'list'] : []) }}" variant="ghost">Reset</x-btn>
                 @endif
@@ -351,21 +354,40 @@
                     $isWon = $stage === \App\Models\Espo\Opportunity::WON_STAGE;
                     $isLast = $index === count($kanbanStages) - 1;
                 @endphp
-                <div class="crm-kanban-col" x-data="{ visible: 5, step: 5, total: {{ $cards->count() }} }">
-                    <div @class([
-                        'crm-kanban-header',
-                        'crm-kanban-header--first' => $index === 0,
-                        'crm-kanban-header--last' => $isLast,
-                        'crm-kanban-header--won' => $isWon,
-                    ])>
-                        <span>{{ $stage }}</span>
+                <div class="crm-kanban-col"
+                     x-data="kanbanColumnSort({
+                         visible: 5,
+                         step: 5,
+                         total: {{ $cards->count() }},
+                         amounts: {{ $cards->map(fn ($o) => (float) ($o->amount ?? 0))->values()->toJson() }}
+                     })">
+                    <button type="button"
+                            @click="toggleSort()"
+                            @class([
+                                'crm-kanban-header',
+                                'crm-kanban-header--sortable',
+                                'crm-kanban-header--first' => $index === 0,
+                                'crm-kanban-header--last' => $isLast,
+                                'crm-kanban-header--won' => $isWon,
+                            ])
+                            :title="sortTitle()">
+                        <span class="crm-kanban-header__label">
+                            <span>{{ $stage }}</span>
+                            <i class="bi crm-kanban-header__sort"
+                               :class="sortIcon()"
+                               aria-hidden="true"></i>
+                        </span>
                         <span class="crm-kanban-header__count">{{ $cards->count() }}</span>
-                    </div>
+                    </button>
 
                     <div class="crm-kanban-body">
                         @forelse ($cards as $opp)
                             @php $hasDuplicates = ! empty($duplicateMap[$opp->id] ?? []); @endphp
-                            <div class="crm-kanban-card {{ $hasDuplicates ? 'ring-1 ring-amber-300' : '' }}" x-data="{ open: false }" x-show="{{ $loop->index }} < visible">
+                            <div :style="'order:' + displayOrder({{ $loop->index }})"
+                                 x-show="displayOrder({{ $loop->index }}) < visible"
+                                 x-cloak>
+                            <div class="crm-kanban-card {{ $hasDuplicates ? 'ring-1 ring-amber-300' : '' }}"
+                                 x-data="{ open: false }">
                                 <div class="crm-kanban-card__top">
                                     <a href="{{ route('opportunities.show', $opp) }}" class="crm-kanban-card__title" title="{{ $opp->name }}">
                                         {{ $opp->name }}
@@ -470,6 +492,7 @@
                                     @endif
                                 </div>
                             </div>
+                            </div>
                         @empty
                             <div class="crm-kanban-empty">No deals</div>
                         @endforelse
@@ -482,6 +505,7 @@
                                 x-cloak
                                 @click="visible = Math.min(visible + step, total)"
                                 title="Load more"
+                                style="order: 9999"
                             >
                                 <i class="bi bi-three-dots"></i>
                             </button>
@@ -493,3 +517,44 @@
     </div>
 @endif
 @endsection
+
+@push('scripts')
+<script>
+    function kanbanColumnSort(config) {
+        const amounts = Array.isArray(config.amounts) ? config.amounts.map(Number) : [];
+        const baseOrder = amounts.map((_, i) => i);
+
+        return {
+            visible: config.visible || 5,
+            step: config.step || 5,
+            total: config.total || amounts.length,
+            amounts,
+            sortDir: null, // null | 'desc' | 'asc'
+            order: baseOrder.slice(),
+            toggleSort() {
+                if (this.amounts.length === 0) return;
+                this.sortDir = this.sortDir === 'desc' ? 'asc' : 'desc';
+                const indexed = this.amounts.map((amount, index) => ({ amount, index }));
+                indexed.sort((a, b) => this.sortDir === 'desc'
+                    ? (b.amount - a.amount)
+                    : (a.amount - b.amount));
+                this.order = indexed.map((row) => row.index);
+            },
+            displayOrder(originalIndex) {
+                const pos = this.order.indexOf(originalIndex);
+                return pos === -1 ? originalIndex : pos;
+            },
+            sortIcon() {
+                if (this.sortDir === 'desc') return 'bi-sort-down';
+                if (this.sortDir === 'asc') return 'bi-sort-up';
+                return 'bi-arrow-down-up';
+            },
+            sortTitle() {
+                if (this.sortDir === 'desc') return 'Urutkan: nominal terkecil';
+                if (this.sortDir === 'asc') return 'Urutkan: nominal terbesar';
+                return 'Klik untuk urutkan nominal (terbesar/terkecil)';
+            },
+        };
+    }
+</script>
+@endpush

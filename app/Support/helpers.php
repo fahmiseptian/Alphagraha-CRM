@@ -17,6 +17,24 @@ if (! function_exists('money')) {
     }
 }
 
+if (! function_exists('money_signed')) {
+    /**
+     * Format mata uang dengan tanda minus di depan simbol.
+     * Contoh: money_signed(-1500000) => "-Rp 1.500.000"
+     */
+    function money_signed($amount, string $currency = 'IDR'): string
+    {
+        $amount = (float) $amount;
+        $formatted = money(abs($amount), $currency);
+
+        if ($currency === 'IDR' ? round($amount) < 0 : round($amount, 2) < 0) {
+            return '-'.$formatted;
+        }
+
+        return $formatted;
+    }
+}
+
 if (! function_exists('money_compact')) {
     /**
      * Format mata uang ringkas untuk tampilan sempit (leaderboard, dll).

@@ -92,6 +92,8 @@ class OpportunityLogService
         OpportunityLog::ACTION_DISCOUNT_REVERTED,
         OpportunityLog::ACTION_MARGIN_APPROVED,
         OpportunityLog::ACTION_MARGIN_REJECTED,
+        OpportunityLog::ACTION_TOP_APPROVED,
+        OpportunityLog::ACTION_TOP_REJECTED,
         OpportunityLog::ACTION_NOTE_ADDED,
         OpportunityLog::ACTION_NOTE_DELETED,
         OpportunityLog::ACTION_DOCUMENT_UPLOADED,
@@ -401,6 +403,8 @@ class OpportunityLogService
             OpportunityLog::ACTION_DISCOUNT_REVERTED => 'Mengembalikan diskon ke menunggu approval',
             OpportunityLog::ACTION_MARGIN_APPROVED => 'Menyetujui margin',
             OpportunityLog::ACTION_MARGIN_REJECTED => 'Menolak margin',
+            OpportunityLog::ACTION_TOP_APPROVED => 'Menyetujui TOP '.\App\Support\CustomerTop::label($snapshot['crm_top'] ?? null),
+            OpportunityLog::ACTION_TOP_REJECTED => 'Menolak TOP '.\App\Support\CustomerTop::label($snapshot['crm_top'] ?? null),
             OpportunityLog::ACTION_QUOTATION_SYNCED => $productText !== ''
                 ? 'Produk disinkronkan dari Quotation ('.$productText.')'
                 : 'Produk disinkronkan dari Quotation',

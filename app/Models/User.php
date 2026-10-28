@@ -170,6 +170,12 @@ class User extends Authenticatable
         return $this->canManageBrands() || $this->canManageCategories() || $this->canManageVendors();
     }
 
+    /** Dashboard brand & kategori (semua, bukan hanya leaderboard): Superadmin */
+    public function canViewCatalogDashboard(): bool
+    {
+        return $this->isSuperAdmin();
+    }
+
     /** Customer: Sales/Admin/Superadmin + Purchasing + Finance + Invoice */
     public function canViewCustomers(): bool
     {
@@ -186,6 +192,12 @@ class User extends Authenticatable
     public function canViewOpportunities(): bool
     {
         return ! $this->isProduct() && ! $this->isEkspedisi() && ! $this->isInvoice();
+    }
+
+    /** Laporan AR: Finance, Sales, Admin, Superadmin. Purchasing / Invoice / Product / Ekspedisi tidak. */
+    public function canViewAccountReceivable(): bool
+    {
+        return $this->canViewOpportunities() && ! $this->isPurchasing();
     }
 
     public function canCreateOpportunity(): bool
@@ -282,6 +294,12 @@ class User extends Authenticatable
         return $this->isSuperAdmin();
     }
 
+    /** Approve TOP opportunity yang melebihi TOP customer. */
+    public function canApproveOpportunityTop(): bool
+    {
+        return $this->isSuperAdmin() || $this->isFinance();
+    }
+
     public function canApproveMargin(): bool
     {
         return $this->isSuperAdmin();
@@ -307,6 +325,27 @@ class User extends Authenticatable
         return $this->isFinance() || $this->isSuperAdmin();
     }
 
+    public function canEditCustomerTop(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin();
+    }
+
+    public function canManageCommissions(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin();
+    }
+
+    public function canManageExpenseCategories(): bool
+    {
+        return $this->isFinance() || $this->isSuperAdmin();
+    }
+
+    /** Sales: lihat komisi sendiri. Finance/Superadmin: kelola semua. */
+    public function canViewCommissions(): bool
+    {
+        return $this->canManageCommissions() || $this->isSales();
+    }
+
     public function canEditWonCostVendor(): bool
     {
         return $this->isPurchasing() || $this->isSuperAdmin();
@@ -323,7 +362,7 @@ class User extends Authenticatable
         return $this->isSuperAdmin();
     }
 
-    /** Lihat PO (read-only): sales, admin, finance, purchasing, superadmin — Closed Won. */
+    /** Lihat PO (read-only): sales, admin, purchasing, superadmin — Closed Won. */
     public function canViewPurchaseOrders(): bool
     {
         return in_array($this->role, [
@@ -331,7 +370,6 @@ class User extends Authenticatable
             self::ROLE_ADMIN,
             self::ROLE_SALES,
             self::ROLE_PURCHASING,
-            self::ROLE_FINANCE,
         ], true);
     }
 
@@ -377,6 +415,11 @@ class User extends Authenticatable
             self::ROLE_FINANCE,
             self::ROLE_INVOICE,
         ], true);
+    }
+
+    public function canManageCustomerDocuments(): bool
+    {
+        return $this->canManageCustomerAddresses();
     }
 
     public function canDeleteCustomer(): bool

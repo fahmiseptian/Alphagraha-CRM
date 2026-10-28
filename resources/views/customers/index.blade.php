@@ -19,14 +19,17 @@
 @endphp
 
 @section('content')
-<x-page-header title="Customers" :description="number_format($accounts->total()) . ' customers'">
-    <x-slot:actions>
-        <x-btn href="{{ route('customers.create') }}" icon="bi-plus-lg">New Customer</x-btn>
-    </x-slot:actions>
-</x-page-header>
+<div data-live-region="header">
+    <x-page-header title="Customers" :description="number_format($accounts->total()) . ' customers'">
+        <x-slot:actions>
+            <x-btn href="{{ route('customers.export', $filterQuery) }}" variant="secondary" icon="bi-download" title="Ekspor customer sesuai filter yang sedang aktif">Export Excel</x-btn>
+            <x-btn href="{{ route('customers.create') }}" icon="bi-plus-lg">New Customer</x-btn>
+        </x-slot:actions>
+    </x-page-header>
+</div>
 
 <x-card class="mb-4" :padding="false">
-    <form method="GET" action="{{ route('customers.index') }}" class="crm-opp-filters">
+    <form method="GET" action="{{ route('customers.index') }}" class="crm-opp-filters" id="customer-filter-form">
         @if ($type ?? null)
             <input type="hidden" name="type" value="{{ $type }}">
         @endif
@@ -39,7 +42,7 @@
                 <label class="crm-label">Nama Customer</label>
                 <div class="crm-search">
                     <i class="bi bi-search"></i>
-                    <input type="text" name="q" value="{{ $search }}"
+                    <input type="text" name="q" value="{{ $search }}" id="customer-search-input"
                            placeholder="Ketik nama customer, email, kota, sales..."
                            class="crm-field" autocomplete="off">
                 </div>
@@ -87,17 +90,23 @@
         <div class="crm-opp-filters__actions">
             <div class="crm-opp-filters__buttons">
                 <x-btn type="submit" variant="primary" icon="bi-search">Cari</x-btn>
-                @if ($hasFilters)
-                    <x-btn href="{{ route('customers.index') }}" variant="ghost">Reset</x-btn>
-                @endif
+                <span data-live-region="reset">
+                    @if ($hasFilters)
+                        <x-btn href="{{ route('customers.index') }}" variant="ghost">Reset</x-btn>
+                    @endif
+                </span>
+                <span id="customer-search-loading" class="hidden text-xs text-slate-400">
+                    <i class="bi bi-arrow-repeat inline-block animate-spin"></i> Mencari...
+                </span>
             </div>
-            <p class="crm-opp-filters__total">
+            <p class="crm-opp-filters__total" data-live-region="total">
                 Total: <strong>{{ number_format($accounts->total()) }}</strong>
             </p>
         </div>
     </form>
 </x-card>
 
+<div data-live-region="links">
     <div class="mb-4">
         <a href="{{ route('customers.index', collect($filterQuery)->except('industry')->put('missing_industry', 1)->all()) }}"
            @class([
@@ -136,7 +145,9 @@
         @endforeach
     </div>
 @endif
+</div>
 
+<div data-live-region="results">
 <x-card :padding="false">
     @if ($accounts->count())
         <div class="crm-table-wrap">
@@ -213,4 +224,77 @@
         <x-empty-state icon="bi-people" title="No customers found" message="Coba ubah kata kunci atau filter pencarian." />
     @endif
 </x-card>
+</div>
 @endsection
+
+@push('scripts')
+<script>
+(() => {
+    const form = document.getElementById('customer-filter-form');
+    const input = document.getElementById('customer-search-input');
+    const loading = document.getElementById('customer-search-loading');
+    if (!form || !input) return;
+
+    let timer = null;
+    let controller = null;
+    let lastQuery = null;
+
+    const buildUrl = () => {
+        const params = new URLSearchParams();
+        for (const [key, value] of new FormData(form)) {
+            const text = String(value).trim();
+            if (text !== '') params.append(key, text);
+        }
+        const query = params.toString();
+
+        return { query, url: form.action + (query ? '?' + query : '') };
+    };
+
+    const refresh = async () => {
+        const { query, url } = buildUrl();
+        if (query === lastQuery) return;
+        lastQuery = query;
+
+        controller?.abort();
+        const current = new AbortController();
+        controller = current;
+        loading?.classList.remove('hidden');
+
+        try {
+            const response = await fetch(url, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' },
+                signal: current.signal,
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+
+            const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+            document.querySelectorAll('[data-live-region]').forEach((region) => {
+                const fresh = doc.querySelector(`[data-live-region="${region.dataset.liveRegion}"]`);
+                region.innerHTML = fresh ? fresh.innerHTML : '';
+            });
+            history.replaceState(null, '', url);
+        } catch (error) {
+            if (error.name === 'AbortError') return;
+            lastQuery = null;
+            console.error('Live search customer gagal:', error);
+        } finally {
+            if (controller === current) loading?.classList.add('hidden');
+        }
+    };
+
+    lastQuery = buildUrl().query;
+
+    input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(refresh, 350);
+    });
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        clearTimeout(timer);
+        lastQuery = null;
+        refresh();
+    });
+})();
+</script>
+@endpush

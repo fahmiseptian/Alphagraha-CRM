@@ -12,8 +12,10 @@ use App\Models\WilayahRegency;
 use App\Services\CustomerAddressService;
 use App\Services\EspoEntityWriter;
 use App\Services\NotificationService;
+use App\Support\CustomerExcel;
 use App\Support\CustomerTop;
 use App\Support\PaymentLevel;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
@@ -33,20 +35,96 @@ class CustomerController extends Controller
             abort(403, 'Anda tidak memiliki akses ke Customers.');
         }
 
+        $filters = $this->customerFilters($request);
+        $query = $this->filteredCustomerQuery($filters);
+
+        $accounts = $query->orderByDesc('account.created_at')->paginate(15)->withQueryString();
+
+        $types = $this->scopeAssigned(Account::query())
+            ->whereNotNull('type')->where('type', '<>', '')
+            ->distinct()->orderBy('type')->pluck('type');
+
+        $canFilterSales = ! auth()->user()->isSales();
+        $salesUsers = $canFilterSales
+            ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
+            : collect();
+
+        return view('customers.index', [
+            'accounts' => $accounts,
+            'search' => $filters['search'],
+            'type' => $filters['type'],
+            'types' => $types,
+            'assignedUserId' => $filters['assignedUserId'] ?? '',
+            'levelFilter' => $filters['levelFilter'],
+            'industryFilter' => $filters['industryFilter'],
+            'missingIndustry' => $filters['missingIndustry'],
+            'canFilterSales' => $canFilterSales,
+            'salesUsers' => $salesUsers,
+            'paymentLevels' => PaymentLevel::LEVELS,
+            'industries' => Industry::query()->ordered()->get(),
+        ]);
+    }
+
+    public function export(Request $request)
+    {
+        if (! auth()->user()?->canViewCustomers()) {
+            abort(403, 'Anda tidak memiliki akses ke Customers.');
+        }
+
+        $accounts = $this->filteredCustomerQuery($this->customerFilters($request))
+            ->reorder()
+            ->orderBy('account.name')
+            ->get();
+
+        return CustomerExcel::export($accounts, 'customers-'.now()->format('Y-m-d').'.xlsx');
+    }
+
+    /**
+     * @return array{
+     *     search: string,
+     *     type: ?string,
+     *     assignedUserId: ?string,
+     *     levelFilter: string,
+     *     industryFilter: string,
+     *     missingIndustry: bool
+     * }
+     */
+    protected function customerFilters(Request $request): array
+    {
         $search = trim((string) $request->get('q'));
-        $type = $request->filled('type') ? $request->get('type') : null;
-        $assignedUserId = $this->resolveCustomerSalesFilter($request);
+        $type = $request->filled('type') ? (string) $request->get('type') : null;
         $levelFilter = trim((string) $request->get('level', ''));
         if ($levelFilter !== '' && ! PaymentLevel::isValid($levelFilter)) {
             $levelFilter = '';
         }
-        $industryFilter = trim((string) $request->get('industry', ''));
-        $missingIndustry = $request->boolean('missing_industry');
 
+        return [
+            'search' => $search,
+            'type' => $type,
+            'assignedUserId' => $this->resolveCustomerSalesFilter($request),
+            'levelFilter' => $levelFilter,
+            'industryFilter' => trim((string) $request->get('industry', '')),
+            'missingIndustry' => $request->boolean('missing_industry'),
+        ];
+    }
+
+    /**
+     * @param  array{
+     *     search: string,
+     *     type: ?string,
+     *     assignedUserId: ?string,
+     *     levelFilter: string,
+     *     industryFilter: string,
+     *     missingIndustry: bool
+     * }  $filters
+     */
+    protected function filteredCustomerQuery(array $filters): Builder
+    {
         $query = $this->scopeAssigned(Account::query())
             ->with(['assignedUser', 'emailAddresses', 'phoneNumbers'])
             ->withCount('opportunities');
 
+        $search = $filters['search'];
         if ($search !== '') {
             $like = '%'.$search.'%';
 
@@ -74,51 +152,27 @@ class CustomerController extends Controller
             $query->orderByRaw('CASE WHEN account.name LIKE ? THEN 0 ELSE 1 END', [$like]);
         }
 
-        if ($type) {
-            $query->where('account.type', $type);
+        if ($filters['type']) {
+            $query->where('account.type', $filters['type']);
         }
 
-        if ($assignedUserId !== null) {
-            $query->where('account.assigned_user_id', $assignedUserId);
+        if ($filters['assignedUserId'] !== null) {
+            $query->where('account.assigned_user_id', $filters['assignedUserId']);
         }
 
-        if ($levelFilter !== '') {
-            $query->where('account.crm_payment_level', $levelFilter);
+        if ($filters['levelFilter'] !== '') {
+            $query->where('account.crm_payment_level', $filters['levelFilter']);
         }
 
-        if ($missingIndustry) {
+        if ($filters['missingIndustry']) {
             $query->where(function ($q) {
                 $q->whereNull('account.industry')->orWhere('account.industry', '');
             });
-        } elseif ($industryFilter !== '') {
-            $query->where('account.industry', $industryFilter);
+        } elseif ($filters['industryFilter'] !== '') {
+            $query->where('account.industry', $filters['industryFilter']);
         }
 
-        $accounts = $query->orderByDesc('account.created_at')->paginate(15)->withQueryString();
-
-        $types = $this->scopeAssigned(Account::query())
-            ->whereNotNull('type')->where('type', '<>', '')
-            ->distinct()->orderBy('type')->pluck('type');
-
-        $canFilterSales = ! auth()->user()->isSales();
-        $salesUsers = $canFilterSales
-            ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name'])
-            : collect();
-
-        return view('customers.index', [
-            'accounts' => $accounts,
-            'search' => $search,
-            'type' => $type,
-            'types' => $types,
-            'assignedUserId' => $assignedUserId ?? '',
-            'levelFilter' => $levelFilter,
-            'industryFilter' => $industryFilter,
-            'missingIndustry' => $missingIndustry,
-            'canFilterSales' => $canFilterSales,
-            'salesUsers' => $salesUsers,
-            'paymentLevels' => PaymentLevel::LEVELS,
-            'industries' => Industry::query()->ordered()->get(),
-        ]);
+        return $query;
     }
 
     /**
@@ -154,6 +208,8 @@ class CustomerController extends Controller
         $account = new Account([
             'type' => 'Customer',
             'assigned_user_id' => auth()->id(),
+            'crm_top' => CustomerTop::CASH,
+            'crm_payment_level' => PaymentLevel::LANCAR,
         ]);
 
         return view('customers.create', $this->formData($account) + compact('account'));
@@ -164,6 +220,12 @@ class CustomerController extends Controller
         if (! auth()->user()?->canViewCustomers()) {
             abort(403);
         }
+
+        // Customer baru: TOP & level pembayaran dikunci ke CBD + Lancar.
+        $request->merge([
+            'crm_top' => CustomerTop::CASH,
+            'crm_payment_level' => PaymentLevel::LANCAR,
+        ]);
 
         $data = $this->validateData($request);
         $now = Carbon::now()->format('Y-m-d H:i:s');
@@ -181,6 +243,8 @@ class CustomerController extends Controller
         $this->writer->syncPrimaryPhone($account->id, 'Account', $data['phone'] ?? null);
         $this->addresses->upsertPrimaryFromAccount($account->fresh());
         $this->maybeCompleteIndustryUpdateNotification();
+
+        app(NotificationService::class)->notifyCustomerCreated($account->fresh());
 
         return redirect()->route('customers.show', $account->id)
             ->with('success', 'Customer created successfully.');
@@ -257,6 +321,7 @@ class CustomerController extends Controller
 
         $contacts = $account->contacts()->with(['emailAddresses', 'phoneNumbers'])->get();
         $addresses = $account->addresses()->get();
+        $documents = $account->documents()->get();
         $provinces = WilayahProvince::query()->orderBy('name')->get(['code', 'name']);
 
         $opportunities = $account->opportunities()
@@ -273,7 +338,7 @@ class CustomerController extends Controller
             ->limit(30)
             ->get();
 
-        return view('customers.show', compact('account', 'contacts', 'addresses', 'provinces', 'opportunities', 'quotations', 'activities'));
+        return view('customers.show', compact('account', 'contacts', 'addresses', 'documents', 'provinces', 'opportunities', 'quotations', 'activities'));
     }
 
     protected function validateData(Request $request, ?Account $account = null): array
@@ -300,8 +365,11 @@ class CustomerController extends Controller
             'billing_address_country' => ['nullable', 'string', 'max:100'],
             'description' => ['nullable', 'string'],
             'assigned_user_id' => ['nullable', 'string', Rule::exists('user', 'id')->where('deleted', 0)],
-            'crm_top' => ['required', Rule::in(CustomerTop::OPTIONS)],
         ];
+
+        if ($account === null || auth()->user()?->canEditCustomerTop()) {
+            $rules['crm_top'] = ['required', Rule::in(CustomerTop::OPTIONS)];
+        }
 
         if (auth()->user()?->canEditPaymentLevel()) {
             $rules['crm_payment_level'] = ['required', Rule::in(PaymentLevel::LEVELS)];
@@ -367,7 +435,12 @@ class CustomerController extends Controller
             $account->crm_payment_level = PaymentLevel::LANCAR;
         }
 
-        $account->crm_top = CustomerTop::normalize($data['crm_top'] ?? null);
+        if ($isNew) {
+            $account->crm_payment_level = PaymentLevel::LANCAR;
+            $account->crm_top = CustomerTop::CASH;
+        } elseif (auth()->user()?->canEditCustomerTop() && isset($data['crm_top'])) {
+            $account->crm_top = CustomerTop::normalize($data['crm_top']);
+        }
 
         if ($this->isAdmin()) {
             $account->assigned_user_id = ($data['assigned_user_id'] ?? null) ?: null;

@@ -50,6 +50,8 @@ class Opportunity extends Model implements HasMedia
         'crm_margin_status', 'crm_margin_percent', 'crm_margin_threshold',
         'crm_margin_nominal', 'crm_margin_nominal_threshold',
         'crm_margin_requested_at', 'crm_margin_reviewed_by', 'crm_margin_reviewed_at', 'crm_margin_note',
+        'crm_top_status', 'crm_top_customer', 'crm_top_requested_by', 'crm_top_requested_at',
+        'crm_top_reviewed_by', 'crm_top_reviewed_at', 'crm_top_note',
     ];
 
     protected $casts = [
@@ -83,6 +85,8 @@ class Opportunity extends Model implements HasMedia
         'crm_discount_amount' => 'float',
         'crm_discount_requested_at' => 'datetime',
         'crm_discount_reviewed_at' => 'datetime',
+        'crm_top_requested_at' => 'datetime',
+        'crm_top_reviewed_at' => 'datetime',
         'crm_margin_percent' => 'float',
         'crm_margin_threshold' => 'float',
         'crm_margin_nominal' => 'float',
@@ -96,6 +100,12 @@ class Opportunity extends Model implements HasMedia
     public const DISCOUNT_APPROVED = 'approved';
 
     public const DISCOUNT_REJECTED = 'rejected';
+
+    public const TOP_PENDING = 'pending';
+
+    public const TOP_APPROVED = 'approved';
+
+    public const TOP_REJECTED = 'rejected';
 
     public const MARGIN_PENDING = 'pending';
 
@@ -1191,6 +1201,115 @@ class Opportunity extends Model implements HasMedia
         return CustomerTop::label($this->top());
     }
 
+    public function customerTop(): string
+    {
+        if ($this->relationLoaded('account') && $this->getRelation('account')?->getKey() !== $this->account_id) {
+            $this->unsetRelation('account');
+        }
+        $this->loadMissing('account');
+
+        return $this->account?->top() ?? CustomerTop::DEFAULT;
+    }
+
+    /**
+     * TOP deal lebih longgar dari TOP customer (mis. customer CBD, deal TOP 30) — wajib approval.
+     */
+    public function topExceedsCustomer(): bool
+    {
+        return CustomerTop::rank($this->top()) > CustomerTop::rank($this->customerTop());
+    }
+
+    public function topNeedsApproval(): bool
+    {
+        return $this->crm_top_status === self::TOP_PENDING && $this->topExceedsCustomer();
+    }
+
+    public function topIsApproved(): bool
+    {
+        return $this->crm_top_status === self::TOP_APPROVED && $this->topExceedsCustomer();
+    }
+
+    public function topIsRejected(): bool
+    {
+        return $this->crm_top_status === self::TOP_REJECTED && $this->topExceedsCustomer();
+    }
+
+    /**
+     * Batas TOP untuk SO: TOP deal bila sudah di-approve, selain itu TOP customer.
+     */
+    public function salesOrderMaxTop(): string
+    {
+        return $this->topIsApproved() ? $this->top() : $this->customerTop();
+    }
+
+    /**
+     * Set / reset status approval TOP setelah data form diisi.
+     * True = request baru (perlu notifikasi approver).
+     */
+    public function refreshTopApprovalState(): bool
+    {
+        $customerTop = $this->customerTop();
+
+        if ($this->stage === self::LOST_STAGE) {
+            if ($this->crm_top_status === self::TOP_PENDING) {
+                $this->resetTopApproval();
+            }
+
+            return false;
+        }
+
+        if (! $this->topExceedsCustomer()) {
+            if ($this->crm_top_status !== null) {
+                $this->resetTopApproval();
+            }
+
+            return false;
+        }
+
+        $changed = $this->crm_top_status === null
+            || $this->isDirty('crm_top')
+            || (string) $this->crm_top_customer !== $customerTop;
+
+        if (! $changed) {
+            return false;
+        }
+
+        $this->crm_top_status = self::TOP_PENDING;
+        $this->crm_top_customer = $customerTop;
+        $this->crm_top_requested_by = auth()->id() ?: $this->assigned_user_id;
+        $this->crm_top_requested_at = now();
+        $this->crm_top_reviewed_by = null;
+        $this->crm_top_reviewed_at = null;
+        $this->crm_top_note = null;
+
+        return true;
+    }
+
+    public function resetTopApproval(): void
+    {
+        $this->crm_top_status = null;
+        $this->crm_top_customer = null;
+        $this->crm_top_requested_by = null;
+        $this->crm_top_requested_at = null;
+        $this->crm_top_reviewed_by = null;
+        $this->crm_top_reviewed_at = null;
+        $this->crm_top_note = null;
+    }
+
+    public function topRequesterName(): ?string
+    {
+        return $this->crm_top_requested_by
+            ? \App\Models\User::query()->whereKey($this->crm_top_requested_by)->first()?->display_name
+            : null;
+    }
+
+    public function topReviewerName(): ?string
+    {
+        return $this->crm_top_reviewed_by
+            ? \App\Models\User::query()->whereKey($this->crm_top_reviewed_by)->first()?->display_name
+            : null;
+    }
+
     /**
      * Minimal margin (%) efektif: max(level pembayaran customer, TOP opportunity).
      * Null bila customer Suspend (tidak boleh quote).
@@ -1597,6 +1716,10 @@ class Opportunity extends Model implements HasMedia
 
         if ($this->crm_discount_status === self::DISCOUNT_PENDING) {
             $this->crm_discount_status = null;
+        }
+
+        if ($this->crm_top_status === self::TOP_PENDING) {
+            $this->resetTopApproval();
         }
 
         if ($this->crm_margin_status === self::MARGIN_PENDING) {

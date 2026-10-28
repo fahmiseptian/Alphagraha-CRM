@@ -83,6 +83,19 @@
                     <p class="mt-1 text-xs text-slate-400">
                         Customer: {{ $form['customerTopLabel'] ?? 'CBD' }}.
                     </p>
+                    @if (! empty($form['opportunityTopApproved']))
+                        <p class="mt-1 text-xs text-green-700">
+                            <i class="bi bi-check-circle"></i> {{ $form['opportunityTopLabel'] }} dari Opportunity sudah di-approve.
+                        </p>
+                    @elseif (! empty($form['opportunityTopPending']))
+                        <p class="mt-1 text-xs text-amber-700">
+                            <i class="bi bi-hourglass-split"></i> {{ $form['opportunityTopLabel'] }} di Opportunity menunggu approval Superadmin/Finance — sementara dibatasi TOP customer.
+                        </p>
+                    @elseif (! empty($form['opportunityTopRejected']))
+                        <p class="mt-1 text-xs text-red-700">
+                            <i class="bi bi-x-circle"></i> {{ $form['opportunityTopLabel'] }} di Opportunity ditolak — SO mengikuti TOP customer.
+                        </p>
+                    @endif
                 </div>
                 <div>
                     <label class="crm-label">No. PO customer <span class="text-red-500">*</span></label>
@@ -156,7 +169,8 @@
 
         <x-card title="Produk untuk Sales Order ini">
             <p class="mb-4 text-sm text-slate-500">
-                Item dan qty di bawah hanya untuk SO ini, tidak mengubah produk opportunity. Brand dan Category wajib terisi.
+                Item, nama, spek, dan qty di bawah hanya untuk SO ini, tidak mengubah produk opportunity. Brand dan Category wajib terisi.
+                Perubahan Quotation akan mengikuti ke SO yang masih pending.
             </p>
             @if (! empty($form['brandCategoryError']))
                 <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -175,8 +189,9 @@
                 <template x-for="(item, i) in items" :key="item.index">
                     <div class="rounded-xl border border-slate-200 p-4">
                         <div class="mb-2 flex items-start justify-between gap-3">
-                            <div>
-                                <p class="text-sm font-semibold text-slate-800" x-text="item.name || ('Produk ' + (i + 1))"></p>
+                            <div class="min-w-0 flex-1">
+                                <label class="crm-label text-xs">Nama barang</label>
+                                <input type="text" x-model="item.name" class="crm-field" placeholder="Nama barang">
                                 <p class="mt-0.5 text-xs" :class="(item.brand && item.category) ? 'text-slate-400' : 'text-red-600'">
                                     <span x-text="'Brand: ' + (item.brand || '—')"></span>
                                     <span> · </span>
@@ -185,7 +200,7 @@
                             </div>
                             <div class="flex shrink-0 items-center gap-2">
                                 <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
-                                      x-text="'Qty opportunity ' + (item.qty_origin ?? item.qty)"></span>
+                                      x-text="'Qty opportunity ' + formatId(item.qty_origin ?? item.qty, 2)"></span>
                                 <button type="button"
                                         @click="removeItem(i)"
                                         :disabled="items.length <= 1"
@@ -202,7 +217,11 @@
                             </div>
                             <div class="sm:col-span-3">
                                 <label class="crm-label text-xs">Qty SO ini</label>
-                                <input type="number" min="1" step="1" x-model.number="item.qty" class="crm-field">
+                                <input type="text" inputmode="decimal" class="crm-field tabular-nums"
+                                       x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(item.qty, 2)"
+                                       @focus="editingField = `qty-${i}`"
+                                       @blur="editingField = null; $el.value = formatId(item.qty, 2)"
+                                       @input="item.qty = parseId($event.target.value)">
                             </div>
                             <div class="sm:col-span-5">
                                 <label class="crm-label text-xs">Harga jual (exclude)</label>
@@ -210,6 +229,10 @@
                                 <p class="mt-1 text-[11px] text-slate-400" x-show="item.has_item_discount" x-cloak>
                                     Pakai Diskon Item (list <span x-text="formatMoney(item.list_sell_exclude)"></span>)
                                 </p>
+                            </div>
+                            <div class="sm:col-span-12">
+                                <label class="crm-label text-xs">Spek barang</label>
+                                <textarea x-model="item.description" rows="3" class="crm-field" placeholder="Spesifikasi barang"></textarea>
                             </div>
                         </div>
                     </div>
@@ -256,6 +279,7 @@ function salesOrderForm(cfg) {
         sourceItems: JSON.parse(JSON.stringify(cfg.form.sourceItems || cfg.form.items || [])),
         items: JSON.parse(JSON.stringify(cfg.form.items || [])),
         saving: false,
+        editingField: null,
         cfg,
 
         init() {
@@ -323,6 +347,19 @@ function salesOrderForm(cfg) {
         formatMoney(n) {
             const v = Number(n || 0);
             return 'Rp ' + Math.round(v).toLocaleString('id-ID');
+        },
+
+        formatId(value, decimals = 0) {
+            if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
+            const n = Number(value);
+            if (!Number.isFinite(n)) return '0';
+            return n.toLocaleString('id-ID', { maximumFractionDigits: decimals });
+        },
+
+        parseId(str) {
+            if (window.CrmNumber) return window.CrmNumber.parse(str);
+            const n = parseFloat(String(str ?? '').replace(/\./g, '').replace(',', '.'));
+            return Number.isFinite(n) ? n : 0;
         },
 
         get canSubmitItems() {
@@ -416,6 +453,8 @@ function salesOrderForm(cfg) {
                     fd.append('items[' + i + '][index]', it.index);
                     fd.append('items[' + i + '][sku]', it.sku || '');
                     fd.append('items[' + i + '][qty]', it.qty);
+                    fd.append('items[' + i + '][name]', it.name || '');
+                    fd.append('items[' + i + '][description]', it.description || '');
                 });
                 if (this.poFile) fd.append('po_file', this.poFile);
                 const res = await fetch(this.cfg.storeUrl, {

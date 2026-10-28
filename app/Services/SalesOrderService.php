@@ -160,13 +160,17 @@ class SalesOrderService
             $qty = (float) ($item['qty'] ?? 0);
             $listPrice = (float) ($item['sell_exclude'] ?? $item['price'] ?? 0);
             $itemDiscount = (float) ($item['discount_exclude'] ?? $item['item_discount'] ?? 0);
-            $price = OpportunityProductPricing::effectiveSellExclude($listPrice, $itemDiscount);
-            $subtotal = $qty * $price;
+            $rawPrice = OpportunityProductPricing::effectiveSellExclude($listPrice, $itemDiscount);
+            // Bulatkan ke rupiah penuh dulu, baru × qty — supaya Price × Qty = Total di dokumen.
+            [$price, $subtotal] = $this->idrLineAmounts($qty, $rawPrice);
             $itemTotal += $subtotal;
             $mappedItems[] = [
                 'index' => (int) ($item['index'] ?? 0),
                 'sku' => trim((string) ($item['sku'] ?? '')),
                 'name' => (string) ($item['name'] ?? 'Item'),
+                'name_custom' => ! empty($item['name_custom']),
+                'description' => (string) ($item['description'] ?? ''),
+                'description_custom' => ! empty($item['description_custom']),
                 'brand' => trim((string) ($item['brand'] ?? '')),
                 'category' => trim((string) ($item['category'] ?? '')),
                 'qty' => $qty,
@@ -179,7 +183,7 @@ class SalesOrderService
         }
 
         $ppnPercent = OpportunityProductPricing::ppnPercent();
-        $ppnAmount = round($itemTotal * ($ppnPercent / 100), 2);
+        $ppnAmount = round($itemTotal * ($ppnPercent / 100), 0);
         $shippingPrice = 0.0;
         $grandTotal = $itemTotal + $ppnAmount + $shippingPrice;
         $courier = trim((string) ($data['shipping_method'] ?? ''));
@@ -236,21 +240,24 @@ class SalesOrderService
                 continue;
             }
             $qty = (float) ($item['qty'] ?? $item['quantity'] ?? 0);
-            $price = (float) ($item['price'] ?? $item['sell_exclude'] ?? $item['unit_price'] ?? 0);
-            $subtotal = (float) ($item['subtotal'] ?? $item['amount_display'] ?? ($qty * $price));
+            $rawPrice = (float) ($item['price_display'] ?? $item['price'] ?? $item['sell_exclude'] ?? $item['unit_price'] ?? 0);
+            // Jangan pakai amount_display tersimpan bila beda dari qty × harga (selisih pembulatan).
+            [$price, $subtotal] = $this->idrLineAmounts($qty, $rawPrice);
             $mappedItems[] = [
                 'sku' => (string) ($item['sku'] ?? ''),
                 'name' => (string) ($item['name'] ?? 'Item'),
+                'name_custom' => ! empty($item['name_custom']),
+                'description_custom' => ! empty($item['description_custom']),
                 'brand' => trim((string) ($item['brand'] ?? '')),
                 'category' => trim((string) ($item['category'] ?? '')),
                 'qty' => $qty,
                 'unit' => trim((string) ($item['unit'] ?? 'Unit')) ?: 'Unit',
                 'price' => $price,
                 'subtotal' => $subtotal,
-                'price_display' => (float) ($item['price_display'] ?? $price),
-                'amount_display' => (float) ($item['amount_display'] ?? $subtotal),
+                'price_display' => $price,
+                'amount_display' => $subtotal,
                 'index' => (int) ($item['index'] ?? $item['qty_origin'] ?? count($mappedItems)),
-                'description' => '',
+                'description' => (string) ($item['description'] ?? ''),
                 'description_html' => '',
                 'image' => '',
                 'image_src' => null,
@@ -259,12 +266,12 @@ class SalesOrderService
 
         $mappedItems = $this->attachQuotationSpecs($mappedItems, $opportunity);
 
-        $itemTotal = (float) ($snap['total_price_item'] ?? collect($mappedItems)->sum('subtotal'));
+        $itemTotal = round((float) collect($mappedItems)->sum('subtotal'), 0);
         $ppnPercent = (float) ($snap['ppn_percent'] ?? OpportunityProductPricing::ppnPercent());
-        $ppnAmount = (float) ($snap['ppn_amount'] ?? round($itemTotal * ($ppnPercent / 100), 2));
-        $shippingPrice = (float) ($snap['shipping_price'] ?? 0);
-        $discountPrice = (float) ($snap['discount_price'] ?? 0);
-        $grandTotal = (float) ($snap['grand_total'] ?? ($itemTotal + $ppnAmount + $shippingPrice - $discountPrice));
+        $ppnAmount = round($itemTotal * ($ppnPercent / 100), 0);
+        $shippingPrice = round((float) ($snap['shipping_price'] ?? 0), 0);
+        $discountPrice = round((float) ($snap['discount_price'] ?? 0), 0);
+        $grandTotal = round($itemTotal + $ppnAmount + $shippingPrice - $discountPrice, 0);
 
         $billing = is_array($snap['billing'] ?? null) ? $snap['billing'] : $this->addressFromAccount($opportunity);
         $shipping = is_array($snap['shipping'] ?? null) ? $snap['shipping'] : $billing;
@@ -313,7 +320,7 @@ class SalesOrderService
             'grand_total' => $grandTotal,
             'ppn_percent' => $ppnPercent,
             'ppn_amount' => $ppnAmount,
-            'subtotal_display' => (float) ($snap['subtotal_display'] ?? $itemTotal),
+            'subtotal_display' => $itemTotal,
             'prices_include_tax' => (bool) ($snap['prices_include_tax'] ?? false),
             'unique_code' => null,
             'billing' => $billing,
@@ -323,6 +330,7 @@ class SalesOrderService
             'items' => $mappedItems,
             'so_date' => $snap['so_date'] ?? optional($salesOrder->created_at)->format('Y-m-d H:i:s'),
             'paid_date' => $snap['paid_date'] ?? $snap['settlement_dt'] ?? null,
+            'payment_proof' => $snap['payment_proof'] ?? null,
             'delivery_date' => $snap['delivery_dt'] ?? $snap['delivery_date'] ?? null,
             'completed_date' => $snap['completed_dt'] ?? $snap['completed_date'] ?? null,
             'updated_date' => optional($salesOrder->updated_at)->format('Y-m-d H:i:s'),
@@ -342,7 +350,8 @@ class SalesOrderService
     }
 
     /**
-     * Spek + gambar produk di SO diambil dari item Quotation (cocokkan nama, lalu index).
+     * Spek + gambar produk di SO diambil dari item Quotation berdasar urutan/index.
+     * Nama yang sama (mis. dua MacBook 16") tidak boleh memakai spek baris pertama.
      *
      * @param  list<array<string, mixed>>  $mappedItems
      * @return list<array<string, mixed>>
@@ -352,24 +361,34 @@ class SalesOrderService
         $opportunity->loadMissing(['quotation.items']);
         $qoItems = $opportunity->quotation?->items;
         if (! $qoItems || $qoItems->isEmpty()) {
-            return $mappedItems;
-        }
-
-        $byName = [];
-        foreach ($qoItems as $qi) {
-            $key = mb_strtolower(trim((string) $qi->name));
-            if ($key !== '' && ! isset($byName[$key])) {
-                $byName[$key] = $qi;
+            foreach ($mappedItems as $i => $item) {
+                $mappedItems[$i]['description_html'] = $this->sanitizeSpecHtml($item['description'] ?? '');
             }
+
+            return $mappedItems;
         }
 
         $qoList = $qoItems->values();
         $oppProducts = $opportunity->products->values();
+        $used = [];
 
         foreach ($mappedItems as $i => $item) {
-            $nameKey = mb_strtolower(trim((string) ($item['name'] ?? '')));
             $index = (int) ($item['index'] ?? $i);
-            $qo = $byName[$nameKey] ?? $qoList->get($index) ?? $qoList->get($i);
+            $qo = $this->pickQuotationItem($qoList, $index, $i, $used);
+            $customName = ! empty($item['name_custom']);
+            $customSpec = ! empty($item['description_custom']);
+
+            if ($qo && ! $customName && trim((string) $qo->name) !== '') {
+                $mappedItems[$i]['name'] = (string) $qo->name;
+            }
+
+            if ($qo && ! $customSpec) {
+                $mappedItems[$i]['description'] = (string) ($qo->description ?? '');
+                $mappedItems[$i]['description_html'] = $this->sanitizeSpecHtml($qo->description);
+            } else {
+                $mappedItems[$i]['description_html'] = $this->sanitizeSpecHtml($item['description'] ?? '');
+            }
+
             if (! $qo) {
                 continue;
             }
@@ -377,9 +396,6 @@ class SalesOrderService
             $oppRow = $oppProducts->get($index) ?? $oppProducts->get($i) ?? [];
             $oppImage = trim((string) (is_array($oppRow) ? ($oppRow['image'] ?? '') : ''));
             $image = trim((string) ($qo->image ?? '')) ?: $oppImage;
-
-            $mappedItems[$i]['description'] = (string) ($qo->description ?? '');
-            $mappedItems[$i]['description_html'] = $this->sanitizeSpecHtml($qo->description);
             $mappedItems[$i]['image'] = $image;
             $mappedItems[$i]['image_src'] = $this->productImageDataUri($image);
             if (($mappedItems[$i]['brand'] ?? '') === '') {
@@ -388,6 +404,123 @@ class SalesOrderService
         }
 
         return $mappedItems;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, mixed>  $qoList
+     * @param  array<int, true>  $used
+     */
+    protected function pickQuotationItem($qoList, int $index, int $fallback, array &$used): mixed
+    {
+        foreach ($qoList as $k => $candidate) {
+            if (isset($used[$k])) {
+                continue;
+            }
+            if ((int) ($candidate->sort_order ?? $k) === $index) {
+                $used[$k] = true;
+
+                return $candidate;
+            }
+        }
+
+        foreach ([$index, $fallback] as $pos) {
+            if ($qoList->has($pos) && ! isset($used[$pos])) {
+                $used[$pos] = true;
+
+                return $qoList->get($pos);
+            }
+        }
+
+        foreach ($qoList as $k => $candidate) {
+            if (isset($used[$k])) {
+                continue;
+            }
+            $used[$k] = true;
+
+            return $candidate;
+        }
+
+        return null;
+    }
+
+    /**
+     * Salin nama & spek terbaru dari QO ke SO yang masih pending.
+     */
+    public function syncPendingItemsFromQuotation(Opportunity $opportunity): void
+    {
+        $opportunity->loadMissing(['quotation.items', 'salesOrders']);
+        $qoItems = $opportunity->quotation?->items;
+        if (! $qoItems || $qoItems->isEmpty()) {
+            return;
+        }
+
+        $qoList = $qoItems->values();
+
+        foreach ($opportunity->salesOrders as $salesOrder) {
+            if (! $salesOrder->isFieldEditable()) {
+                continue;
+            }
+
+            $items = is_array($salesOrder->items) ? $salesOrder->items : [];
+            if ($items === [] && is_array($salesOrder->agc_payload['items'] ?? null)) {
+                $items = $salesOrder->agc_payload['items'];
+            }
+            if ($items === []) {
+                continue;
+            }
+
+            $used = [];
+            $changed = false;
+            foreach ($items as $i => $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+                $index = (int) ($item['index'] ?? $i);
+                $qo = $this->pickQuotationItem($qoList, $index, $i, $used);
+                if (! $qo) {
+                    continue;
+                }
+
+                $name = trim((string) $qo->name);
+                $description = (string) ($qo->description ?? '');
+                $brand = trim((string) ($qo->brand ?? ''));
+                if ($name !== '' && ($item['name'] ?? '') !== $name) {
+                    $items[$i]['name'] = $name;
+                    $changed = true;
+                }
+                if (($item['description'] ?? '') !== $description) {
+                    $items[$i]['description'] = $description;
+                    $changed = true;
+                }
+                if ($brand !== '' && ($item['brand'] ?? '') !== $brand) {
+                    $items[$i]['brand'] = $brand;
+                    $changed = true;
+                }
+                $items[$i]['name_custom'] = false;
+                $items[$i]['description_custom'] = false;
+            }
+
+            if (! $changed) {
+                continue;
+            }
+
+            $salesOrder->items = $items;
+            $payload = is_array($salesOrder->agc_payload) ? $salesOrder->agc_payload : [];
+            if (isset($payload['items']) && is_array($payload['items'])) {
+                foreach ($payload['items'] as $i => $payloadItem) {
+                    if (! is_array($payloadItem) || ! isset($items[$i])) {
+                        continue;
+                    }
+                    $payload['items'][$i]['name'] = $items[$i]['name'] ?? ($payloadItem['name'] ?? '');
+                    $payload['items'][$i]['description'] = $items[$i]['description'] ?? '';
+                    $payload['items'][$i]['brand'] = $items[$i]['brand'] ?? ($payloadItem['brand'] ?? '');
+                    $payload['items'][$i]['name_custom'] = false;
+                    $payload['items'][$i]['description_custom'] = false;
+                }
+                $salesOrder->agc_payload = $payload;
+            }
+            $salesOrder->save();
+        }
     }
 
     protected function sanitizeSpecHtml(?string $description): string
@@ -448,7 +581,7 @@ class SalesOrderService
     {
         $snap = is_array($salesOrder->agc_payload) ? $salesOrder->agc_payload : [];
         foreach ($payload as $key => $value) {
-            if ($value === null && in_array($key, ['po_file', 'faktur_pajak', 'foto_serah_terima', 'file_do'], true)) {
+            if ($value === null && in_array($key, ['po_file', 'faktur_pajak', 'foto_serah_terima', 'file_do', 'payment_proof'], true)) {
                 continue;
             }
             $snap[$key] = $value;
@@ -510,6 +643,7 @@ class SalesOrderService
             'invoice_no',
             'invoice_dt',
             'paid_date',
+            'payment_proof',
             'no_resi',
             'faktur_pajak',
             'foto_serah_terima',
@@ -541,6 +675,8 @@ class SalesOrderService
             $fresh['po_file'] = $data['po_file'];
         }
 
+        $previousPayment = (string) ($salesOrder->payment ?? '');
+
         $salesOrder->fill([
             'email' => $fresh['email'] ?? $salesOrder->email,
             'payment' => $fresh['payment'] ?? $salesOrder->payment,
@@ -554,7 +690,12 @@ class SalesOrderService
         ]);
         $salesOrder->save();
 
-        return $salesOrder->fresh();
+        $freshOrder = $salesOrder->fresh();
+        if ($freshOrder && (string) ($freshOrder->payment ?? '') !== $previousPayment) {
+            app(PurchaseOrderService::class)->syncReportTopFromSalesOrder($freshOrder);
+        }
+
+        return $freshOrder;
     }
 
     /**
@@ -734,6 +875,21 @@ class SalesOrderService
         $path = $file->store('sales-orders/'.$salesOrder->id.'/'.$kind, 'public');
 
         return $path ? asset('storage/'.$path) : null;
+    }
+
+    /**
+     * Harga satuan & total baris dalam rupiah penuh.
+     * Dokumen SO menampilkan tanpa sen; total harus = qty × harga tampilan
+     * (hindari selisih seperti 4 × 82.340 → 329.362).
+     *
+     * @return array{0: float, 1: float} [unitPrice, lineTotal]
+     */
+    protected function idrLineAmounts(float $qty, float $unitPrice): array
+    {
+        $price = round($unitPrice, 0);
+        $total = round($qty * $price, 0);
+
+        return [$price, $total];
     }
 
     /**

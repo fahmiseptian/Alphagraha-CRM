@@ -64,16 +64,7 @@ class NotificationController extends Controller
         match ($status) {
             'unread' => $query->whereNull('read_at'),
             'read' => $query->whereNotNull('read_at'),
-            'action' => $query->whereNull('read_at')->whereIn('type', [
-                CrmNotification::TYPE_DISCOUNT_REQUESTED,
-                CrmNotification::TYPE_MARGIN_REQUESTED,
-                CrmNotification::TYPE_ACTIVITY_DUE,
-                CrmNotification::TYPE_EVENT_APPROVAL_REQUESTED,
-                CrmNotification::TYPE_OPPORTUNITY_DEADLINE,
-                CrmNotification::TYPE_SALES_ORDER_CREATED,
-                CrmNotification::TYPE_SALES_ORDER_CANCEL_REQUESTED,
-                CrmNotification::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED,
-            ]),
+            'action' => $query->whereNull('read_at')->whereIn('type', CrmNotification::actionTypes()),
             default => null,
         };
 
