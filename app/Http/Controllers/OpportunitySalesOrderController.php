@@ -16,6 +16,7 @@ use App\Services\OpportunityLogService;
 use App\Services\SalesOrderService;
 use App\Support\AccountReceivableExcel;
 use App\Support\CustomerTop;
+use App\Support\SalesOrderExcel;
 use App\Support\OpportunityProductPricing;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -26,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class OpportunitySalesOrderController extends Controller
 {
@@ -109,6 +111,30 @@ class OpportunitySalesOrderController extends Controller
             'canFilterSales' => $canFilterSales,
             'companies' => Opportunity::COMPANIES,
         ]);
+    }
+
+    public function export(Request $request): StreamedResponse
+    {
+        /** @var \App\Models\User|null $user */
+        $user = auth()->user();
+
+        if (! $user?->canViewSalesOrders()) {
+            abort(403);
+        }
+
+        $context = $this->salesOrderIndexContext($request);
+        $salesOrders = $context['query']
+            ->with(['opportunity.account', 'opportunity.assignedUser', 'creator', 'assignedUser'])
+            ->withCount('purchaseOrders')
+            ->orderByDesc('created_at')
+            ->get();
+
+        return SalesOrderExcel::export($salesOrders, [
+            'canSeeInvoice' => $user->canEditSalesOrderInvoice(),
+            'showCommissionOwner' => ! $user->isEkspedisi() && ! $user->isSales(),
+            'showPoStatus' => ! $user->isEkspedisi(),
+            'canEditDelivery' => $user->canEditSalesOrderDelivery(),
+        ], 'sales-orders-'.now()->format('Y-m-d').'.xlsx');
     }
 
     public function accountReceivable(Request $request, AccountReceivableService $receivables)

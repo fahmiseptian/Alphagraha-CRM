@@ -93,7 +93,18 @@
     <div class="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <x-stat-card title="Gross Profit" :value="money_signed($summary['gp_total'])" icon="bi-graph-up-arrow" color="slate"
                      :sub="'By tgl invoice · '.number_format($summary['gp_order_count'] ?? 0).' SO'"
-                     :href="$detailUrl('gross-profit')" />
+                     :href="$detailUrl('gross-profit')">
+            <div class="mt-3 space-y-1 border-t border-slate-100 pt-2 text-xs">
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-slate-500">Invoice</span>
+                    <span class="font-medium tabular-nums text-slate-700">{{ money($summary['gp_invoice_total'] ?? 0) }}</span>
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-slate-500">HPP</span>
+                    <span class="font-medium tabular-nums text-slate-700">{{ money($summary['gp_hpp_total'] ?? 0) }}</span>
+                </div>
+            </div>
+        </x-stat-card>
         <x-stat-card title="Biaya Tambahan" :value="money($summary['entertainment_total'] + $summary['expense_total'])" icon="bi-cup-hot" color="amber"
                      :sub="'Entertainment '.money($summary['entertainment_total']).' + Biaya '.money($summary['expense_total'])"
                      :href="$detailUrl('biaya-tambahan')" />

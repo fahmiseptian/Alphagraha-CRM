@@ -648,10 +648,10 @@ class QuotationService
             .'<th style="'.$this->cellStyle('left', true).'">Description</th>'
             .'<th style="'.$this->cellStyle('center', true).'width:72px;">Qty</th>'
             .'<th style="'.$this->cellStyle('right', true).'width:120px;">Unit Price</th>'
-            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Amount</th>'
+            .'<th style="'.$this->cellStyle('right', true).'width:120px;">Total Price</th>'
             .'</tr></thead><tbody>'
             .$this->renderItemsRows($quotation)
-            .$this->renderItemsTableSummary($quotation, 3)
+            .$this->renderItemsTableSummary($quotation, 3, true)
             .'</tbody></table>';
     }
 
@@ -683,11 +683,13 @@ class QuotationService
         return $rows;
     }
 
-    protected function renderItemsTableSummary(Quotation $quotation, int $labelColspan): string
+    protected function renderItemsTableSummary(Quotation $quotation, int $labelColspan, bool $english = false): string
     {
         $currency = $quotation->currency;
         $labelStyle = $this->cellStyle('right', true);
         $valueStyle = $this->cellStyle('right', true);
+        $discountLabel = $english ? 'Discount' : 'Diskon';
+        $taxName = $english ? 'VAT' : 'PPn';
 
         $rows = '<tr>'
             .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
@@ -698,13 +700,13 @@ class QuotationService
         if ((float) $quotation->discount > 0) {
             $rows .= '<tr>'
                 .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
-                .'<td style="'.$labelStyle.'">Diskon</td>'
+                .'<td style="'.$labelStyle.'">'.$discountLabel.'</td>'
                 .'<td style="'.$valueStyle.'">-'.money($quotation->discount, $currency).'</td>'
                 .'</tr>';
         }
 
         if ((float) $quotation->tax_percent > 0) {
-            $taxLabel = 'PPn '.rtrim(rtrim(number_format((float) $quotation->tax_percent, 2), '0'), '.').'%';
+            $taxLabel = $taxName.' '.rtrim(rtrim(number_format((float) $quotation->tax_percent, 2), '0'), '.').'%';
             $rows .= '<tr>'
                 .'<td colspan="'.$labelColspan.'" style="border:none;">&nbsp;</td>'
                 .'<td style="'.$labelStyle.'">'.$taxLabel.'</td>'

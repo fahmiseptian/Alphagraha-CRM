@@ -222,9 +222,11 @@ class CommissionService
         $orderRows = [];
         $gpRows = [];
         $gpTotal = 0.0;
+        $gpInvoiceTotal = 0.0;
+        $gpHppTotal = 0.0;
         $soTotal = 0.0;
         $soCompleteMarginTotal = 0.0;
-        /** @var array<string, array{amount: float, margin: float}> $financialCache */
+        /** @var array<string, array{amount: float, margin: float, hpp: float}> $financialCache */
         $financialCache = [];
 
         foreach ($orders as $salesOrder) {
@@ -245,6 +247,8 @@ class CommissionService
                 continue;
             }
             $gpTotal += $row['margin'];
+            $gpInvoiceTotal += $row['amount'];
+            $gpHppTotal += $row['hpp'];
             if ($detailed) {
                 $gpRows[] = $row;
             }
@@ -364,6 +368,8 @@ class CommissionService
             'invoice_complete_count' => count($invoiceCompleteRows),
             'invoice_complete_total' => round($invoiceCompleteTotal, 2),
             'gp_total' => round($gpTotal, 2),
+            'gp_invoice_total' => round($gpInvoiceTotal, 2),
+            'gp_hpp_total' => round($gpHppTotal, 2),
             'entertainments' => $entertainments,
             'entertainments_pending' => $entertainmentsPending,
             'entertainment_pending_total' => round((float) $entertainmentsPending->sum('amount'), 2),
@@ -510,7 +516,7 @@ class CommissionService
      * Baris margin/GP untuk satu SO (dipakai SO Complete detail & Gross Profit).
      *
      * @param  array<string, float>  $linkedExpenseBySo
-     * @param  array<string, array{amount: float, margin: float}>  $financialCache
+     * @param  array<string, array{amount: float, margin: float, hpp: float}>  $financialCache
      * @return array<string, mixed>|null
      */
     protected function buildMarginRow(
@@ -530,6 +536,7 @@ class CommissionService
 
         $amount = $financialCache[$cacheKey]['amount'];
         $marginRaw = $financialCache[$cacheKey]['margin'];
+        $hpp = $financialCache[$cacheKey]['hpp'];
         $linkedExpense = round((float) ($linkedExpenseBySo[(string) $salesOrder->id] ?? 0), 2);
         $margin = round($marginRaw - $linkedExpense, 2);
 
@@ -545,6 +552,7 @@ class CommissionService
             'paid_at' => $this->paidAt($salesOrder),
             'completed_at' => $this->completedAt($salesOrder),
             'amount' => $amount,
+            'hpp' => $hpp,
             'margin_raw' => $marginRaw,
             'linked_expense' => $linkedExpense,
             'margin' => $margin,
@@ -552,7 +560,7 @@ class CommissionService
     }
 
     /**
-     * @param  array<string, array{amount: float, margin: float}>  $financialCache
+     * @param  array<string, array{amount: float, margin: float, hpp: float}>  $financialCache
      * @return array<string, mixed>|null
      */
     protected function buildSalesOrderListRow(OpportunitySalesOrder $salesOrder, array &$financialCache): ?array
@@ -757,9 +765,9 @@ class CommissionService
     }
 
     /**
-     * Nilai jual SO + margin/keuntungan setelah modal, diskon tambahan, PPh, dll.
+     * Nilai jual SO, HPP (modal), dan margin setelah modal, diskon tambahan, PPh, dll.
      *
-     * @return array{amount: float, margin: float}
+     * @return array{amount: float, margin: float, hpp: float}
      */
     protected function salesOrderFinancials(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): array
     {
@@ -779,6 +787,7 @@ class CommissionService
                 return [
                     'amount' => $amount,
                     'margin' => $this->profitFromSummary($summary),
+                    'hpp' => $this->hppFromSummary($summary),
                 ];
             }
 
@@ -787,6 +796,7 @@ class CommissionService
             $overall = $this->poReports->build($opportunity, null);
             $overallSummary = $overall['summary'] ?? [];
             $overallProfit = $this->profitFromSummary($overallSummary);
+            $overallHpp = $this->hppFromSummary($overallSummary);
             $salesOrders = $opportunity->relationLoaded('salesOrders')
                 ? $opportunity->salesOrders
                 : $opportunity->salesOrders()->get();
@@ -795,6 +805,7 @@ class CommissionService
                 return [
                     'amount' => $amount,
                     'margin' => $overallProfit,
+                    'hpp' => $overallHpp,
                 ];
             }
 
@@ -812,13 +823,15 @@ class CommissionService
                 $totalWeight += $weights[(string) $so->id];
             }
 
-            $share = $totalWeight > 0
-                ? round($overallProfit * ($weights[(string) $salesOrder->id] / $totalWeight), 2)
-                : round($overallProfit / max(1, $salesOrders->count()), 2);
+            $weight = $weights[(string) $salesOrder->id] ?? 0.0;
+            $ratio = $totalWeight > 0
+                ? ($weight / $totalWeight)
+                : (1 / max(1, $salesOrders->count()));
 
             return [
                 'amount' => $amount,
-                'margin' => $share,
+                'margin' => round($overallProfit * $ratio, 2),
+                'hpp' => round($overallHpp * $ratio, 2),
             ];
         } catch (\Throwable) {
             // fallback di bawah
@@ -835,7 +848,23 @@ class CommissionService
         return [
             'amount' => $amount,
             'margin' => $margin,
+            'hpp' => 0.0,
         ];
+    }
+
+    /**
+     * HPP = modal barang (excl. PPN). Jika excl kosong, pakai modal incl.
+     *
+     * @param  array<string, mixed>  $summary
+     */
+    protected function hppFromSummary(array $summary): float
+    {
+        $excl = (float) ($summary['modal_excl'] ?? 0);
+        if ($excl > 0) {
+            return round($excl, 2);
+        }
+
+        return round((float) ($summary['modal_incl'] ?? 0), 2);
     }
 
     /**

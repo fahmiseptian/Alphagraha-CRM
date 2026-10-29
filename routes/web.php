@@ -164,6 +164,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
     Route::get('/sales-orders', [OpportunitySalesOrderController::class, 'index'])->name('sales-orders.index');
+    Route::get('/sales-orders/export', [OpportunitySalesOrderController::class, 'export'])->name('sales-orders.export');
     Route::get('/sales-orders/account-receivable', [OpportunitySalesOrderController::class, 'accountReceivable'])->name('sales-orders.account-receivable');
     Route::get('/opportunities/{opportunity}/sales-orders/create', [OpportunitySalesOrderController::class, 'create'])->name('opportunities.sales-orders.create');
     Route::get('/opportunities/{opportunity}/sales-orders/{salesOrder}/edit', [OpportunitySalesOrderController::class, 'edit'])->name('opportunities.sales-orders.edit')->whereNumber('salesOrder');

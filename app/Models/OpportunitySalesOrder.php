@@ -210,6 +210,18 @@ class OpportunitySalesOrder extends Model
         return trim((string) ($payload['nomor_ref'] ?? ''));
     }
 
+    public function displayPoNumber(): string
+    {
+        $po = trim((string) $this->po_number);
+        if ($po !== '') {
+            return $po;
+        }
+
+        $payload = is_array($this->agc_payload) ? $this->agc_payload : [];
+
+        return trim((string) ($payload['po_number'] ?? ''));
+    }
+
     public function displayPsoNumber(): string
     {
         $payload = is_array($this->agc_payload) ? $this->agc_payload : [];

@@ -36,6 +36,7 @@
             @if ($sub)
                 <p class="mt-1 text-xs text-slate-400">{{ $sub }}</p>
             @endif
+            {{ $slot }}
         </div>
         <span class="flex h-11 min-w-[2.75rem] items-center justify-center rounded-lg px-1.5 {{ $palette }}">
             @if ($iconText !== null && $iconText !== '')

@@ -130,6 +130,9 @@
                                formaction="{{ route('sales-orders.account-receivable') }}" formtarget="_blank"
                                title="Account Receivable: invoice belum dibayar sesuai filter">AR</x-btn>
                     @endif
+                    <x-btn type="submit" variant="secondary" icon="bi-file-earmark-excel"
+                           formaction="{{ route('sales-orders.export') }}"
+                           title="Ekspor Sales Order sesuai filter yang sedang dipakai">Export Excel</x-btn>
                     @if ($hasFilters)
                         <x-btn href="{{ route('sales-orders.index') }}" variant="ghost">Reset</x-btn>
                     @endif
@@ -148,6 +151,7 @@
                 <thead>
                     <tr>
                         <th>No. SO / PSO</th>
+                        <th>PO Customer</th>
                         @if ($canSeeInvoice)
                             <th>Invoice</th>
                             <th>Status bayar</th>
@@ -193,6 +197,13 @@
                                     @endif
                                     {{ $so->paymentLabel() }}
                                 </div>
+                            </td>
+                            <td>
+                                @if ($so->displayPoNumber() !== '')
+                                    <span class="font-medium text-slate-800">{{ $so->displayPoNumber() }}</span>
+                                @else
+                                    <span class="text-slate-300">—</span>
+                                @endif
                             </td>
                             @if ($canSeeInvoice)
                                 @php
@@ -313,7 +324,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="{{ 4 + (int) $showPoStatus + (int) ($showCommissionOwner && ($canFilterSales ?? false)) + ((int) $canSeeInvoice * 2) + ((int) $canEditDelivery * 4) }}" class="py-10 text-center text-slate-500">
+                            <td colspan="{{ 5 + (int) $showPoStatus + (int) ($showCommissionOwner && ($canFilterSales ?? false)) + ((int) $canSeeInvoice * 2) + ((int) $canEditDelivery * 4) }}" class="py-10 text-center text-slate-500">
                                 @if ($hasFilters)
                                     Tidak ada Sales Order sesuai filter.
                                     <a href="{{ route('sales-orders.index') }}" class="ml-1 text-brand-600 hover:underline">Reset</a>
