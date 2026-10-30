@@ -156,14 +156,16 @@ class SalesOrderService
 
         $mappedItems = [];
         $itemTotal = 0.0;
+        $includeTotal = 0.0;
         foreach ($items as $item) {
             $qty = (float) ($item['qty'] ?? 0);
             $listPrice = (float) ($item['sell_exclude'] ?? $item['price'] ?? 0);
             $itemDiscount = (float) ($item['discount_exclude'] ?? $item['item_discount'] ?? 0);
             $rawPrice = OpportunityProductPricing::effectiveSellExclude($listPrice, $itemDiscount);
-            // Bulatkan ke rupiah penuh dulu, baru × qty — supaya Price × Qty = Total di dokumen.
-            [$price, $subtotal] = $this->idrLineAmounts($qty, $rawPrice);
+            // Total include = exclude × (1+PPN) agar sama dengan subtotal Jual Incl di Opportunity.
+            [$price, $subtotal, $lineInclude] = $this->idrLineAmounts($qty, $rawPrice);
             $itemTotal += $subtotal;
+            $includeTotal += $lineInclude;
             $mappedItems[] = [
                 'index' => (int) ($item['index'] ?? 0),
                 'sku' => trim((string) ($item['sku'] ?? '')),
@@ -175,17 +177,25 @@ class SalesOrderService
                 'category' => trim((string) ($item['category'] ?? '')),
                 'qty' => $qty,
                 'unit' => 'Unit',
+                // Simpan exclude asli (bisa ada sen) agar present() bisa hitung include sama seperti Opp.
+                'sell_exclude' => $rawPrice,
                 'price' => $price,
                 'subtotal' => $subtotal,
                 'price_display' => $price,
                 'amount_display' => $subtotal,
+                'amount_include' => $lineInclude,
             ];
         }
 
         $ppnPercent = OpportunityProductPricing::ppnPercent();
-        $ppnAmount = round($itemTotal * ($ppnPercent / 100), 0);
         $shippingPrice = 0.0;
-        $grandTotal = $itemTotal + $ppnAmount + $shippingPrice;
+        // PPN = sisa agar Exclude + PPN = Total Include Opp (hindari 32.799.998 vs 32.800.000).
+        $ppnAmount = round($includeTotal - $itemTotal, 0);
+        if ($ppnAmount < 0) {
+            $ppnAmount = round($itemTotal * ($ppnPercent / 100), 0);
+            $includeTotal = $itemTotal + $ppnAmount;
+        }
+        $grandTotal = $includeTotal + $shippingPrice;
         $courier = trim((string) ($data['shipping_method'] ?? ''));
 
         return [
@@ -234,15 +244,19 @@ class SalesOrderService
             $items = [];
         }
 
+        $oppProducts = $opportunity->products->values();
         $mappedItems = [];
+        $includeTotal = 0.0;
         foreach ($items as $item) {
             if (! is_array($item)) {
                 continue;
             }
             $qty = (float) ($item['qty'] ?? $item['quantity'] ?? 0);
-            $rawPrice = (float) ($item['price_display'] ?? $item['price'] ?? $item['sell_exclude'] ?? $item['unit_price'] ?? 0);
+            $index = (int) ($item['index'] ?? $item['qty_origin'] ?? count($mappedItems));
+            $rawPrice = $this->resolveSalesOrderUnitExclude($item, $oppProducts->get($index) ?? null);
             // Jangan pakai amount_display tersimpan bila beda dari qty × harga (selisih pembulatan).
-            [$price, $subtotal] = $this->idrLineAmounts($qty, $rawPrice);
+            [$price, $subtotal, $lineInclude] = $this->idrLineAmounts($qty, $rawPrice);
+            $includeTotal += $lineInclude;
             $mappedItems[] = [
                 'sku' => (string) ($item['sku'] ?? ''),
                 'name' => (string) ($item['name'] ?? 'Item'),
@@ -256,7 +270,9 @@ class SalesOrderService
                 'subtotal' => $subtotal,
                 'price_display' => $price,
                 'amount_display' => $subtotal,
-                'index' => (int) ($item['index'] ?? $item['qty_origin'] ?? count($mappedItems)),
+                'amount_include' => $lineInclude,
+                'sell_exclude' => $rawPrice,
+                'index' => $index,
                 'description' => (string) ($item['description'] ?? ''),
                 'description_html' => '',
                 'image' => '',
@@ -267,11 +283,16 @@ class SalesOrderService
         $mappedItems = $this->attachQuotationSpecs($mappedItems, $opportunity);
 
         $itemTotal = round((float) collect($mappedItems)->sum('subtotal'), 0);
+        $includeTotal = round($includeTotal, 0);
         $ppnPercent = (float) ($snap['ppn_percent'] ?? OpportunityProductPricing::ppnPercent());
-        $ppnAmount = round($itemTotal * ($ppnPercent / 100), 0);
         $shippingPrice = round((float) ($snap['shipping_price'] ?? 0), 0);
         $discountPrice = round((float) ($snap['discount_price'] ?? 0), 0);
-        $grandTotal = round($itemTotal + $ppnAmount + $shippingPrice - $discountPrice, 0);
+        $ppnAmount = round($includeTotal - $itemTotal, 0);
+        if ($ppnAmount < 0) {
+            $ppnAmount = round($itemTotal * ($ppnPercent / 100), 0);
+            $includeTotal = $itemTotal + $ppnAmount;
+        }
+        $grandTotal = round($includeTotal + $shippingPrice - $discountPrice, 0);
 
         $billing = is_array($snap['billing'] ?? null) ? $snap['billing'] : $this->addressFromAccount($opportunity);
         $shipping = is_array($snap['shipping'] ?? null) ? $snap['shipping'] : $billing;
@@ -878,18 +899,57 @@ class SalesOrderService
     }
 
     /**
-     * Harga satuan & total baris dalam rupiah penuh.
-     * Dokumen SO menampilkan tanpa sen; total harus = qty × harga tampilan
-     * (hindari selisih seperti 4 × 82.340 → 329.362).
+     * Harga satuan exclude untuk hitung ulang SO.
+     * Prioritas: sell_exclude tersimpan (presisi Opp) → produk Opp → harga tampilan SO.
      *
-     * @return array{0: float, 1: float} [unitPrice, lineTotal]
+     * @param  array<string, mixed>  $item
+     * @param  array<string, mixed>|null  $oppProduct
      */
-    protected function idrLineAmounts(float $qty, float $unitPrice): array
+    protected function resolveSalesOrderUnitExclude(array $item, ?array $oppProduct): float
     {
-        $price = round($unitPrice, 0);
-        $total = round($qty * $price, 0);
+        if (isset($item['sell_exclude']) && is_numeric($item['sell_exclude']) && (float) $item['sell_exclude'] > 0) {
+            $stored = (float) $item['sell_exclude'];
+            $display = (float) ($item['price_display'] ?? $item['price'] ?? 0);
+            // Pakai yang tersimpan bila masih punya sen / beda dari harga tampilan bulat.
+            if ($display <= 0 || abs($stored - $display) > 0.001) {
+                return $stored;
+            }
+        }
 
-        return [$price, $total];
+        if (is_array($oppProduct) && $oppProduct !== []) {
+            $fromOpp = OpportunityProductPricing::effectiveSellExclude(
+                (float) ($oppProduct['sell_exclude'] ?? 0),
+                (float) ($oppProduct['discount_exclude'] ?? $oppProduct['item_discount'] ?? 0)
+            );
+            if ($fromOpp > 0) {
+                return $fromOpp;
+            }
+        }
+
+        return (float) ($item['price_display'] ?? $item['price'] ?? $item['unit_price'] ?? 0);
+    }
+
+    /**
+     * Harga satuan & total baris dalam rupiah penuh.
+     * Dokumen SO menampilkan tanpa sen; total exclude = qty × harga.
+     * Total include mengikuti rumus Jual Incl Opportunity (round(exclude×PPN)×qty)
+     * supaya grand total sama (hindari 32.799.998 vs 32.800.000).
+     *
+     * @return array{0: float, 1: float, 2: float} [unitExclude, lineExclude, lineInclude]
+     */
+    protected function idrLineAmounts(float $qty, float $unitExclude): array
+    {
+        $unitInclude = OpportunityProductPricing::includeFromExclude($unitExclude);
+        $lineInclude = round($qty * $unitInclude, 0);
+
+        $unitPrice = round($unitExclude, 0);
+        $lineExclude = round($qty * $unitPrice, 0);
+
+        if ($lineInclude < $lineExclude) {
+            $lineInclude = round($lineExclude * OpportunityProductPricing::ppnMultiplier(), 0);
+        }
+
+        return [$unitPrice, $lineExclude, $lineInclude];
     }
 
     /**
