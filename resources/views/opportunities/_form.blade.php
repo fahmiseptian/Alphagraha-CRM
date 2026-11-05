@@ -538,9 +538,9 @@
                                             <td class="py-2 pr-3 font-medium text-slate-600">Harga Jual</td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" inputmode="decimal"
-                                                       x-effect="if (editingField !== `sell-${i}`) $el.value = formatId(p.sell_exclude)"
+                                                       x-effect="if (editingField !== `sell-${i}`) $el.value = formatIdWhole(p.sell_exclude)"
                                                        @focus="editingField = `sell-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(p.sell_exclude)"
+                                                       @blur="editingField = null; $el.value = formatIdWhole(p.sell_exclude)"
                                                        @input="p.sell_exclude = parseId($event.target.value); onSellChange(p)"
                                                        class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
                                                 <input type="hidden" :name="`products[${i}][sell_exclude]`" :value="p.sell_exclude">
@@ -800,7 +800,7 @@
                                             </td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly
-                                                       :value="formatId(marginUnitAmount(p))"
+                                                       :value="formatIdWhole(marginUnitAmount(p))"
                                                        class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
                                                        title="Margin per satuan">
                                             </td>
@@ -819,7 +819,7 @@
                                             </td>
                                             <td class="py-2 pr-3">
                                                 <input type="text" readonly
-                                                       :value="formatId(marginAmount(p))"
+                                                       :value="formatIdWhole(marginAmount(p))"
                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-semibold text-green-700"
                                                        title="Margin total baris">
                                             </td>
@@ -856,7 +856,7 @@
                             <span class="font-semibold text-amber-700" x-show="products.some(p => appliesZinit(p))" x-cloak x-text="formatMoney(zinitDealFees().success_fee)"></span>
                             <span class="mx-2 text-slate-300">·</span>
                             <span class="text-slate-500">Total Margin:&nbsp;</span>
-                            <span class="font-semibold text-green-700" x-text="formatMoney(productsMarginTotal)"></span>
+                            <span class="font-semibold text-green-700" x-text="'Rp ' + formatIdWhole(productsMarginTotal)"></span>
                         </div>
                     </div>
                     <p class="mt-2 text-xs text-slate-400" x-show="!purchasingMode">
@@ -1425,7 +1425,7 @@
                 return Math.floor(n / 1000) * 1000;
             },
             onSellIncludeChange(p, includeValue) {
-                p.sell_exclude = this.ceilThousand(this.excludeFromInclude(includeValue));
+                p.sell_exclude = this.excludeFromInclude(includeValue);
                 this.onSellChange(p);
             },
             onDiscountIncludeChange(p, includeValue) {
@@ -1817,6 +1817,11 @@
                 if (window.CrmNumber) return window.CrmNumber.format(value, decimals);
                 const n = Number(value) || 0;
                 return n.toLocaleString('id-ID', { maximumFractionDigits: decimals });
+            },
+            formatIdWhole(value) {
+                const n = Number(value) || 0;
+                const whole = n < 0 ? Math.ceil(n - 1e-8) : Math.floor(n + 1e-8);
+                return this.formatId(whole, 0);
             },
             parseId(str) {
                 if (window.CrmNumber) return window.CrmNumber.parse(str);
