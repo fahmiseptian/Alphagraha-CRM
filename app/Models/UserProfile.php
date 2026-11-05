@@ -131,7 +131,7 @@ class UserProfile extends Model
      * - 3 bulan → 4 periode (Q1–Q4)
      * - 1 bulan → 12 periode
      *
-     * @return list<array{key: string, index: int, label: string, start: Carbon, end: Carbon}>
+     * @return list<array{key: string, index: int, label: string, start: Carbon, end: Carbon, yearly?: bool}>
      */
     public function commissionQuarters(int $year): array
     {
@@ -161,6 +161,17 @@ class UserProfile extends Model
                 'end' => $end,
             ];
             $index++;
+        }
+
+        if ($months < 12 && $quarters !== []) {
+            $quarters[] = [
+                'key' => sprintf('%d-Y', $year),
+                'index' => 0,
+                'label' => 'All',
+                'start' => Carbon::create($year, 1, 1)->startOfDay(),
+                'end' => Carbon::create($year, 12, 1)->endOfMonth()->endOfDay(),
+                'yearly' => true,
+            ];
         }
 
         return $quarters;

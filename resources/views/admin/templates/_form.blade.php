@@ -5,10 +5,12 @@
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div class="lg:col-span-2 space-y-4">
             <x-card title="Template Content">
-                {{-- Insert placeholder toolbar --}}
+                @php
+                    $placeholders = $placeholders ?? ['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','items_table_idr_image','items_table_idr_include','items_table_diskon_item','total_price','sales_name','sales_job_position','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'];
+                @endphp
                 <div class="mb-3 flex flex-wrap gap-1.5">
                     <span class="mr-1 self-center text-xs text-slate-400">Insert:</span>
-                    @foreach (['customer_name','company_name','customer_address','contact_person','quotation_number','quotation_ref','quotation_date','quotation_place_date','valid_until','items_table','items_table_idr','items_table_idr_image','items_table_idr_include','items_table_diskon_item','total_price','sales_name','sales_job_position','sales_title','sales_signature','company_legal_name','company_address','company_phone','company_email','terms','notes'] as $ph)
+                    @foreach ($placeholders as $ph)
                         @php $placeholderTag = '{'.'{ '.$ph.' }'.'}'; @endphp
                         <button type="button" onclick="insertPlaceholder('{{ $ph }}')"
                                 class="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-brand-700 hover:bg-brand-50">
@@ -44,7 +46,7 @@
                                 <option value="{{ $category }}" @selected(old('category', $template->category) === $category)>{{ $category }}</option>
                             @endforeach
                         </select>
-                        <p class="mt-1 text-xs text-slate-400">Template hanya muncul di QO opportunity dengan company yang sama.</p>
+                        <p class="mt-1 text-xs text-slate-400">{{ $categoryHint ?? 'Template hanya muncul di QO opportunity dengan company yang sama.' }}</p>
                     </div>
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-slate-700">Description</label>
@@ -58,7 +60,7 @@
                     </label>
                 </div>
                 <button type="submit" class="mt-5 w-full rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"><i class="bi bi-save"></i> Save Template</button>
-                <a href="{{ route('templates.index') }}" class="mt-2 block w-full rounded-lg border border-slate-300 py-2.5 text-center text-sm text-slate-600 hover:bg-slate-50">Cancel</a>
+                <a href="{{ $cancelUrl ?? route('templates.index') }}" class="mt-2 block w-full rounded-lg border border-slate-300 py-2.5 text-center text-sm text-slate-600 hover:bg-slate-50">Cancel</a>
             </x-card>
         </div>
     </div>

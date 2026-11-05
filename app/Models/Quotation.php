@@ -376,7 +376,7 @@ class Quotation extends Model
 
         $pricingChanged = $pricingBefore !== $opportunity->productsPricingFingerprint();
         $notifyDiscount = $opportunity->reopenDiscountApprovalIfPricingChanged($pricingChanged);
-        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
+        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false, pricingChanged: $pricingChanged);
         $opportunity->modified_at = now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();

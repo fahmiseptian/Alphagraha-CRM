@@ -87,7 +87,7 @@
 
                 @if ($showCommissionOwner && ($canFilterSales ?? false))
                     <div class="crm-opp-filters__field">
-                        <label class="crm-label">Pemilik komisi</label>
+                        <label class="crm-label">Sales</label>
                         <select name="assigned_user_id" class="select2 select2-search w-full" data-placeholder="Semua sales">
                             <option value="">Semua sales</option>
                             @foreach ($salesUsers as $user)
@@ -315,7 +315,7 @@
                                           onsubmit="return confirm('Sales Order akan diarsipkan ke Log SO, tidak dihapus permanen. Lanjutkan?')">
                                         @csrf
                                         @method('DELETE')
-                                        <button class="crm-icon-btn text-red-500 hover:bg-red-50" title="Arsipkan SO" type="submit">
+                                        <button class="crm-icon-btn text-red-500 hover:bg-red-50" title="Pembatalan / Arsipkan SO" type="submit">
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </form>

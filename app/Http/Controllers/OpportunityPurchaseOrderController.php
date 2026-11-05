@@ -4,12 +4,17 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Espo\Opportunity;
+use App\Models\OpportunityLog;
+use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
+use App\Models\SalesOrderLog;
 use App\Models\VendorStock;
 use App\Support\CustomerTop;
 use App\Support\OpportunityProductPricing;
+use App\Services\OpportunityLogService;
 use App\Services\PurchaseOrderReportService;
 use App\Services\PurchaseOrderService;
+use App\Services\SalesOrderService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -82,6 +87,25 @@ class OpportunityPurchaseOrderController extends Controller
         return Pdf::loadView('opportunities.purchase-orders.pdf', compact('opportunity', 'report', 'salesOrder'))
             ->setPaper('a4', 'landscape')
             ->download($filename);
+    }
+
+    public function document(Opportunity $opportunity, PurchaseOrder $purchaseOrder)
+    {
+        $this->authorizeView($opportunity);
+        $this->ensureBelongsToOpportunity($opportunity, $purchaseOrder);
+
+        $purchaseOrder->load([
+            'items.vendorQuotes',
+            'vendor.pics',
+            'creator',
+            'approver',
+            'salesOrder',
+        ]);
+
+        $html = app(\App\Services\PurchaseOrderDocumentService::class)
+            ->render($opportunity, $purchaseOrder);
+
+        return view('opportunities.purchase-orders.document', compact('opportunity', 'purchaseOrder', 'html'));
     }
 
     protected function resolveReportSalesOrder(Request $request, Opportunity $opportunity): ?\App\Models\OpportunitySalesOrder
@@ -249,25 +273,67 @@ class OpportunityPurchaseOrderController extends Controller
     }
 
     /**
-     * Simpan ongkir opportunity (1 opp = 1 ongkir), dari area PO.
+     * Simpan modal ongkir. Satu Sales Order satu ongkir.
+     * Bila opportunity belum punya SO, nilai tetap di opportunity.
      */
     public function updateShipping(Request $request, Opportunity $opportunity)
     {
         $this->authorizeManage($opportunity);
 
         $data = $request->validate([
+            'sales_order_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('crm_opportunity_sales_orders', 'id')->where(
+                    fn ($q) => $q->where('opportunity_id', $opportunity->id)->whereNull('deleted_at')
+                ),
+            ],
+            'shipping_cost' => ['nullable', 'numeric', 'min:0'],
             'crm_shipping_cost' => ['nullable', 'numeric', 'min:0'],
         ]);
 
+        if (! empty($data['sales_order_id'])) {
+            $salesOrder = OpportunitySalesOrder::query()
+                ->where('opportunity_id', $opportunity->id)
+                ->findOrFail($data['sales_order_id']);
+
+            $raw = $data['shipping_cost'] ?? null;
+            $salesOrders = app(SalesOrderService::class);
+            $before = $salesOrders->captureForDiff($salesOrder);
+            $salesOrder->shipping_cost = ($raw === null || $raw === '' || (float) $raw <= 0)
+                ? null
+                : round((float) $raw, 2);
+            $salesOrder->save();
+
+            $diff = $salesOrders->diffForOpportunityLog($before, $salesOrders->captureForDiff($salesOrder));
+            if ($salesOrders->diffHasChanges($diff)) {
+                $summary = $salesOrders->summarizeDiff($salesOrder->displayNumber(), $diff);
+                $diff['summary'] = $summary;
+                $salesOrders->recordLog($salesOrder, SalesOrderLog::ACTION_UPDATED, $diff);
+                app(OpportunityLogService::class)->record(
+                    $opportunity,
+                    OpportunityLog::ACTION_SHIPPING_UPDATED,
+                    null,
+                    [
+                        'force' => true,
+                        'summary' => $summary,
+                        'changes' => $diff,
+                    ]
+                );
+            }
+
+            return back()->with('success', 'Ongkir '.$salesOrder->displayNumber().' berhasil disimpan.');
+        }
+
         $raw = $data['crm_shipping_cost'] ?? null;
-        $before = app(\App\Services\OpportunityLogService::class)->capture($opportunity);
-        $opportunity->crm_shipping_cost = ($raw === null || $raw === '')
+        $before = app(OpportunityLogService::class)->capture($opportunity);
+        $opportunity->crm_shipping_cost = ($raw === null || $raw === '' || (float) $raw <= 0)
             ? null
             : round((float) $raw, 2);
         $opportunity->save();
-        app(\App\Services\OpportunityLogService::class)->record(
+        app(OpportunityLogService::class)->record(
             $opportunity,
-            \App\Models\OpportunityLog::ACTION_SHIPPING_UPDATED,
+            OpportunityLog::ACTION_SHIPPING_UPDATED,
             $before
         );
 

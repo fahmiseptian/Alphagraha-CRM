@@ -43,12 +43,15 @@ class PurchaseOrderReportService
             $purchaseOrders = $opportunity->purchaseOrders
                 ->where('sales_order_id', $salesOrder->id)
                 ->values();
-            // Ongkir tetap opportunity-level (hanya di laporan keseluruhan).
-            // Diskon tambahan dialokasikan proporsional ke tiap SO agar muncul di dokumen.
-            $modalOngkirExcl = null;
-            $modalOngkirIncl = null;
-            $jualOngkirExcl = null;
-            $jualOngkirIncl = null;
+            // Modal ongkir milik SO ini. Jual ongkir opportunity hanya ikut bila SO-nya satu.
+            $modalOngkirExcl = $this->salesOrderModalShippingExclude($opportunity, $salesOrder);
+            $modalOngkirIncl = $modalOngkirExcl !== null
+                ? OpportunityProductPricing::includeFromExclude($modalOngkirExcl)
+                : null;
+            $jualOngkirExcl = $this->salesOrderSellShippingExclude($opportunity, $salesOrder);
+            $jualOngkirIncl = $jualOngkirExcl !== null
+                ? OpportunityProductPricing::includeFromExclude($jualOngkirExcl)
+                : null;
             $diskonAmount = $this->allocateDiscountToSalesOrder($opportunity, $salesOrder);
         } else {
             $products = $opportunity->products;
@@ -62,9 +65,7 @@ class PurchaseOrderReportService
                 fn (array $p) => (float) ($p['pph'] ?? 0)
             ), 2);
             $purchaseOrders = $opportunity->purchaseOrders;
-            $modalOngkirExcl = $opportunity->crm_shipping_cost !== null
-                ? round((float) $opportunity->crm_shipping_cost, 2)
-                : null;
+            $modalOngkirExcl = $this->opportunityModalShippingExclude($opportunity);
             $modalOngkirIncl = $modalOngkirExcl !== null
                 ? OpportunityProductPricing::includeFromExclude($modalOngkirExcl)
                 : null;
@@ -253,6 +254,153 @@ class PurchaseOrderReportService
         }
 
         return round((float) $opportunity->crm_discount_amount, 2);
+    }
+
+    /**
+     * Modal ongkir exclude milik satu SO.
+     * Nilai lama di opportunity (sebelum per-SO) menempel utuh ke SO terbaru.
+     */
+    public function salesOrderModalShippingExclude(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): ?float
+    {
+        if ($salesOrder->shipping_cost !== null && (float) $salesOrder->shipping_cost > 0) {
+            return round((float) $salesOrder->shipping_cost, 2);
+        }
+
+        if (! $this->usesLegacyOpportunityShipping($opportunity)) {
+            return null;
+        }
+
+        $newest = $this->newestBillableSalesOrder($opportunity);
+
+        if ($newest && (string) $newest->id === (string) $salesOrder->id) {
+            return round((float) $opportunity->crm_shipping_cost, 2);
+        }
+
+        return null;
+    }
+
+    /**
+     * Jumlah modal ongkir exclude seluruh SO. Fallback ke nilai opportunity bila belum ada yang diisi per SO.
+     */
+    public function opportunityModalShippingExclude(Opportunity $opportunity): ?float
+    {
+        $opportunity->loadMissing('salesOrders');
+        $sum = 0.0;
+        $any = false;
+        foreach ($opportunity->salesOrders as $so) {
+            if ($so->shipping_cost === null || (float) $so->shipping_cost <= 0) {
+                continue;
+            }
+            $any = true;
+            $sum += (float) $so->shipping_cost;
+        }
+
+        if ($any) {
+            return round($sum, 2);
+        }
+
+        if ($opportunity->crm_shipping_cost !== null && (float) $opportunity->crm_shipping_cost > 0) {
+            return round((float) $opportunity->crm_shipping_cost, 2);
+        }
+
+        return null;
+    }
+
+    /**
+     * Profit ongkir opportunity (jual ongkir incl − jumlah modal ongkir incl).
+     * Negatif bila hanya ada modal ongkir.
+     */
+    public function opportunityShippingProfit(Opportunity $opportunity): float
+    {
+        $modalExcl = $this->opportunityModalShippingExclude($opportunity);
+        $modalOngkirIncl = $modalExcl !== null
+            ? OpportunityProductPricing::includeFromExclude($modalExcl)
+            : 0.0;
+
+        $jualOngkirIncl = 0.0;
+        if ($opportunity->crm_has_shipping_charge && (float) ($opportunity->crm_shipping_sell ?? 0) > 0) {
+            $jualOngkirIncl = OpportunityProductPricing::includeFromExclude(
+                round((float) $opportunity->crm_shipping_sell, 2)
+            );
+        }
+
+        return round($jualOngkirIncl - $modalOngkirIncl, 2);
+    }
+
+    /**
+     * Profit ongkir satu SO: hanya ongkir yang tercatat di SO itu.
+     */
+    public function allocatedShippingProfit(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): float
+    {
+        $modalExcl = $this->salesOrderModalShippingExclude($opportunity, $salesOrder);
+        $modalIncl = $modalExcl !== null
+            ? OpportunityProductPricing::includeFromExclude($modalExcl)
+            : 0.0;
+
+        $jualExcl = $this->salesOrderSellShippingExclude($opportunity, $salesOrder);
+        $jualIncl = $jualExcl !== null
+            ? OpportunityProductPricing::includeFromExclude($jualExcl)
+            : 0.0;
+
+        return round($jualIncl - $modalIncl, 2);
+    }
+
+    /**
+     * Jual ongkir ke customer tetap di opportunity. Ikut laporan per SO hanya bila opportunity punya satu SO aktif,
+     * supaya tidak dibagi diam-diam ke beberapa SO.
+     */
+    protected function salesOrderSellShippingExclude(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): ?float
+    {
+        if (! $opportunity->crm_has_shipping_charge || (float) ($opportunity->crm_shipping_sell ?? 0) <= 0) {
+            return null;
+        }
+
+        $opportunity->loadMissing('salesOrders');
+        $active = $opportunity->salesOrders
+            ->filter(fn (OpportunitySalesOrder $so) => ! $so->isCancelled())
+            ->values();
+
+        if ($active->count() !== 1 || (string) $active->first()->id !== (string) $salesOrder->id) {
+            return null;
+        }
+
+        return round((float) $opportunity->crm_shipping_sell, 2);
+    }
+
+    protected function usesLegacyOpportunityShipping(Opportunity $opportunity): bool
+    {
+        if ($opportunity->crm_shipping_cost === null || (float) $opportunity->crm_shipping_cost <= 0) {
+            return false;
+        }
+
+        $opportunity->loadMissing('salesOrders');
+        foreach ($opportunity->salesOrders as $so) {
+            if ($so->shipping_cost !== null && (float) $so->shipping_cost > 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * SO terbaru yang masih aktif. Bila semua batal, pakai SO terbaru yang ada.
+     */
+    public function newestBillableSalesOrder(Opportunity $opportunity): ?OpportunitySalesOrder
+    {
+        $opportunity->loadMissing('salesOrders');
+        $orders = $opportunity->salesOrders->filter(fn (OpportunitySalesOrder $so) => ! $so->isCancelled());
+        if ($orders->isEmpty()) {
+            $orders = $opportunity->salesOrders;
+        }
+
+        return $orders
+            ->sortByDesc(fn (OpportunitySalesOrder $so) => sprintf(
+                '%s-%010d',
+                optional($so->created_at)->format('Y-m-d H:i:s') ?? '',
+                (int) $so->id
+            ))
+            ->first();
     }
 
     /**

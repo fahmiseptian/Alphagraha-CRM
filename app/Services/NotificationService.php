@@ -1235,6 +1235,84 @@ class NotificationService
     }
 
     /**
+     * Notifikasi ke Purchasing saat Sales Order diubah (spek, qty, alamat, dll).
+     *
+     * @param  array{fields?: list<array<string, mixed>>, products?: array<string, mixed>}  $diff
+     */
+    public function notifySalesOrderUpdated(
+        OpportunitySalesOrder $salesOrder,
+        Opportunity $opportunity,
+        array $diff = [],
+        ?string $summary = null
+    ): void {
+        $actor = auth()->user();
+        $actorName = $actor?->display_name ?: 'User';
+        $soNumber = $salesOrder->displayNumber();
+        $oppName = $opportunity->name ?: $opportunity->id;
+
+        $detailBits = [];
+        foreach (array_slice($diff['fields'] ?? [], 0, 4) as $field) {
+            $label = (string) ($field['label'] ?? $field['field'] ?? 'Field');
+            $from = (string) ($field['from_display'] ?? '—');
+            $to = (string) ($field['to_display'] ?? '—');
+            $detailBits[] = $label.': '.$from.' → '.$to;
+        }
+        foreach (array_slice($diff['products']['changed'] ?? [], 0, 3) as $item) {
+            $name = (string) ($item['name'] ?? 'Item');
+            $parts = [];
+            foreach (array_slice($item['changes'] ?? [], 0, 2) as $change) {
+                $parts[] = ((string) ($change['label'] ?? 'Field')).': '
+                    .((string) ($change['from_display'] ?? '—')).' → '
+                    .((string) ($change['to_display'] ?? '—'));
+            }
+            $detailBits[] = $name.($parts !== [] ? ' ('.implode('; ', $parts).')' : ' diubah');
+        }
+        if (($diff['products']['added'] ?? []) !== []) {
+            $detailBits[] = count($diff['products']['added']).' item ditambah';
+        }
+        if (($diff['products']['removed'] ?? []) !== []) {
+            $detailBits[] = count($diff['products']['removed']).' item dihapus';
+        }
+
+        $changeText = $summary !== null && trim($summary) !== ''
+            ? trim($summary)
+            : ($detailBits !== [] ? implode(' · ', $detailBits) : 'Ada perubahan pada Sales Order');
+
+        $title = 'Sales Order diubah';
+        $body = $actorName.' mengubah SO '.$soNumber.' (Opportunity "'.$oppName.'"). '.$changeText;
+        $link = route('opportunities.sales-orders.show', [$opportunity, $salesOrder]);
+        $uniqueKey = 'sales_order_updated:'.$salesOrder->id.':'.uniqid('', true);
+
+        $recipientIds = User::query()
+            ->where('deleted', 0)
+            ->where('is_active', 1)
+            ->whereHas('profile', fn ($q) => $q->where('app_role', User::ROLE_PURCHASING))
+            ->pluck('id')
+            ->filter(fn ($id) => (string) $id !== (string) ($actor?->id ?? ''))
+            ->values();
+
+        foreach ($recipientIds as $userId) {
+            $this->notify(
+                $userId,
+                CrmNotification::TYPE_SALES_ORDER_UPDATED,
+                $title,
+                $body,
+                $link,
+                showPopup: true,
+                uniqueKey: $uniqueKey.':'.$userId,
+                data: [
+                    'opportunity_id' => $opportunity->id,
+                    'sales_order_id' => $salesOrder->id,
+                    'sales_order_number' => $soNumber,
+                    'updated_by' => $actor?->id,
+                    'updated_by_name' => $actorName,
+                    'change_summary' => $changeText,
+                ],
+            );
+        }
+    }
+
+    /**
      * Popup + lonceng ke Superadmin saat Purchasing membuat PO (menunggu approval).
      */
     public function notifyPurchaseOrderApprovalRequested(PurchaseOrder $purchaseOrder, Opportunity $opportunity): void

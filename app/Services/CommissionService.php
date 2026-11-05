@@ -201,11 +201,14 @@ class CommissionService
             ? $this->salesOrdersInPeriod($sales->id, $quarter['start'], $quarter['end'])
             : collect();
 
-        $expenses = CommissionExpense::query()
+        $expenseQuery = CommissionExpense::query()
             ->with(['account:id,name', 'category:id,name'])
             ->where('user_id', $sales->id)
-            ->where('year', $year)
-            ->where('period_key', $quarter['key'])
+            ->where('year', $year);
+        if (empty($quarter['yearly'])) {
+            $expenseQuery->where('period_key', $quarter['key']);
+        }
+        $expenses = $expenseQuery
             ->orderByDesc('expense_date')
             ->orderByDesc('id')
             ->get();
@@ -327,7 +330,11 @@ class CommissionService
         // Biaya terikat SO sudah dipotong di margin SO (gp_total).
         $deductionTotal = round($entertainmentTotal + $expenseUnlinkedTotal, 2);
         $netGp = round($gpTotal - $deductionTotal, 2);
-        $target = $profile->resolvedSalesTarget();
+        $isYearly = ! empty($quarter['yearly']);
+        $periodMonths = UserProfile::periodLengthMonths($profile->resolvedSalesTargetPeriod());
+        $segments = $isYearly ? max(1, intdiv(12, $periodMonths)) : 1;
+        $target = round($profile->resolvedSalesTarget() * $segments, 2);
+        $targetPeriodLabel = $isYearly ? 'All' : $profile->salesTargetPeriodLabel();
         $targetProgress = $target > 0
             ? round(($netGp / $target) * 100, 1)
             : 0.0;
@@ -341,8 +348,8 @@ class CommissionService
             'quarters' => $profile->commissionQuarters($year),
             'quarter' => $quarter,
             'target' => $target,
-            'target_period' => $profile->resolvedSalesTargetPeriod(),
-            'target_period_label' => $profile->salesTargetPeriodLabel(),
+            'target_period' => $isYearly ? 'yearly' : $profile->resolvedSalesTargetPeriod(),
+            'target_period_label' => $targetPeriodLabel,
             'target_progress' => $targetProgress,
             'target_met' => $targetMet,
             'sales_orders' => $orderRows,
@@ -786,7 +793,7 @@ class CommissionService
             if ($hasLinkedPo) {
                 return [
                     'amount' => $amount,
-                    'margin' => $this->profitFromSummary($summary),
+                    'margin' => $this->marginIncludingShipping($opportunity, $salesOrder, $summary),
                     'hpp' => $this->hppFromSummary($summary),
                 ];
             }
@@ -865,6 +872,27 @@ class CommissionService
         }
 
         return round((float) ($summary['modal_incl'] ?? 0), 2);
+    }
+
+    /**
+     * Gross profit komisi = profit barang SO ini + profit ongkir SO ini.
+     * Ongkir tidak dibagi ke SO lain.
+     *
+     * @param  array<string, mixed>  $summary
+     */
+    protected function marginIncludingShipping(
+        Opportunity $opportunity,
+        OpportunitySalesOrder $salesOrder,
+        array $summary
+    ): float {
+        $margin = $this->profitFromSummary($summary);
+        $ongkirAlreadyIncluded = ($summary['modal_ongkir_incl'] ?? null) !== null
+            || ($summary['jual_ongkir_incl'] ?? null) !== null;
+        if ($ongkirAlreadyIncluded) {
+            return $margin;
+        }
+
+        return round($margin + $this->poReports->allocatedShippingProfit($opportunity, $salesOrder), 2);
     }
 
     /**

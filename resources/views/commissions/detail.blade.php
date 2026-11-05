@@ -400,7 +400,7 @@
 @elseif ($section === 'gross-profit')
     <x-card title="Rincian Gross Profit per SO" :padding="false">
         <p class="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-            Margin setelah modal &amp; diskon. Periodisasi ikut <span class="font-semibold">tanggal invoice</span>.
+            Margin setelah modal, modal ongkir, dan diskon. Periodisasi ikut <span class="font-semibold">tanggal invoice</span>.
         </p>
         <div class="overflow-x-auto">
             <table class="min-w-full text-sm">

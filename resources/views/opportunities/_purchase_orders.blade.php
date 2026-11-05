@@ -286,6 +286,7 @@
     foreach ($poTreeBySalesOrder as $soKey => &$soNode) {
         $soNode['margin'] = null;
         $soNode['margin_percent'] = null;
+        $soNode['shipping_include'] = null;
         $soId = $soNode['sales_order_id'] ?? null;
         if (! $soId) {
             continue;
@@ -297,6 +298,10 @@
         $summary = $poReportService->build($opportunity, $soModel)['summary'] ?? [];
         $soNode['margin'] = isset($summary['total_profit']) ? (float) $summary['total_profit'] : null;
         $soNode['margin_percent'] = isset($summary['margin_percent']) ? (float) $summary['margin_percent'] : null;
+        $shipExcl = $poReportService->salesOrderModalShippingExclude($opportunity, $soModel);
+        $soNode['shipping_include'] = $shipExcl !== null
+            ? \App\Support\OpportunityProductPricing::includeFromExclude($shipExcl)
+            : null;
     }
     unset($soNode);
 @endphp
@@ -328,8 +333,6 @@
             surchargeTop: @js($poSurchargeTop),
             vendorOptions: @js($poVendorOptions),
             vendorStocks: @js($poVendorStocks),
-            shippingEditing: @js(old('crm_shipping_cost') !== null),
-            shippingExclude: @js((float) old('crm_shipping_cost', $opportunity->crm_shipping_cost ?? 0)),
             brandOptions: @js($poBrandOptions),
             opportunityProducts: @js($poOppProducts),
             salesOrders: @js($poSalesOrders),
@@ -1176,15 +1179,6 @@
                 if (quote.is_selected) this.applySelectedPrice(item);
                 this.touchPlanDrafts();
             },
-            shippingInclude() {
-                return this.includeFromExclude(this.shippingExclude);
-            },
-            onShippingExcludeChange(value) {
-                this.shippingExclude = Number(value) || 0;
-            },
-            onShippingIncludeChange(value) {
-                this.shippingExclude = this.excludeFromInclude(value);
-            },
             findItemByUid(uid) {
                 for (const group of (this.groups || [])) {
                     const found = (group.items || []).find((row) => String(row._uid) === String(uid));
@@ -1398,79 +1392,211 @@
             </div>
         </div>
 
-        {{-- Ongkir: 1 opportunity = 1 ongkir --}}
-        <div class="mx-5 mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5">
-            @if ($canManagePo)
-            <form method="POST" action="{{ route('opportunities.shipping-cost.update', $opportunity) }}"
-                  class="flex flex-wrap items-end gap-x-3 gap-y-2">
-                @csrf
-                @method('PUT')
-                <span class="shrink-0 self-center text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
-                <template x-if="!shippingEditing">
-                    <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums text-slate-800">
-                        <span x-show="Number(shippingExclude) > 0">
-                            <span class="text-xs text-slate-400">Include</span>
-                            <span class="font-semibold" x-text="formatMoney(shippingInclude())"></span>
-                        </span>
-                        <span x-show="!(Number(shippingExclude) > 0)" class="font-normal text-slate-400">Belum diisi</span>
-                    </div>
-                </template>
-                <template x-if="shippingEditing">
-                    <div class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
-                        <div>
-                            <label class="crm-label text-[10px] text-slate-400">Include</label>
-                            <input type="text" inputmode="decimal"
-                                   x-effect="if (editingField !== 'ship-inc') $el.value = formatId(shippingInclude())"
-                                   @focus="editingField = 'ship-inc'"
-                                   @blur="editingField = null; $el.value = formatId(shippingInclude())"
-                                   @input="onShippingIncludeChange(parseId($event.target.value))"
-                                   placeholder="0"
-                                   class="crm-field w-full min-w-[7rem] text-right tabular-nums">
+        {{-- Ongkir: 1 Sales Order = 1 ongkir --}}
+        @php
+            $poShippingOrders = ($opportunity->salesOrders ?? collect())
+                ->sortBy(fn ($so) => $so->displayNumber(), SORT_NATURAL)
+                ->values();
+            $poShippingReport = app(\App\Services\PurchaseOrderReportService::class);
+        @endphp
+        @if ($poShippingOrders->isEmpty())
+            <div class="mx-5 mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5">
+                @if ($canManagePo)
+                <form method="POST" action="{{ route('opportunities.shipping-cost.update', $opportunity) }}"
+                      x-data="{
+                          editing: @js(old('crm_shipping_cost') !== null),
+                          exclude: @js((float) old('crm_shipping_cost', $opportunity->crm_shipping_cost ?? 0)),
+                          ppn: @js($ppnMultiplier),
+                          field: null,
+                          include() { return Math.round((Number(this.exclude) || 0) * (Number(this.ppn) || 1) * 100) / 100 },
+                          onInclude(value) {
+                              const m = Number(this.ppn) || 1;
+                              this.exclude = m <= 1 ? (Number(value) || 0) : Math.round((Number(value) || 0) / m * 100) / 100;
+                          },
+                          formatId(value) {
+                              if (window.CrmNumber) return window.CrmNumber.format(value, 0);
+                              return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 });
+                          },
+                          parseId(str) {
+                              if (window.CrmNumber) return window.CrmNumber.parse(str);
+                              return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+                          },
+                          formatMoney(amount) { return 'Rp ' + this.formatId(Math.round(Number(amount) || 0)) }
+                      }"
+                      class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    @csrf
+                    @method('PUT')
+                    <input type="hidden" name="crm_shipping_cost" :value="exclude">
+                    <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
+                    <template x-if="!editing">
+                        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums text-slate-800">
+                            <span x-show="Number(exclude) > 0">
+                                <span class="text-xs text-slate-400">Include</span>
+                                <span class="font-semibold" x-text="formatMoney(include())"></span>
+                            </span>
+                            <span x-show="!(Number(exclude) > 0)" class="font-normal text-slate-400">Belum diisi</span>
                         </div>
-                        <input type="hidden" name="crm_shipping_cost" :value="shippingExclude">
-                    </div>
-                </template>
-                <div class="flex items-center gap-1.5">
-                    <template x-if="!shippingEditing">
-                        <button type="button" @click="shippingEditing = true"
-                                class="rounded p-1.5 text-slate-500 hover:bg-white hover:text-brand-600"
-                                title="Edit ongkir">
-                            <i class="bi bi-pencil text-sm"></i>
-                        </button>
                     </template>
-                    <template x-if="shippingEditing">
-                        <div class="flex items-center gap-1.5">
-                            <button type="button" @click="shippingEditing = false"
-                                    class="text-xs text-slate-500 hover:text-slate-700">Batal</button>
-                            <button type="submit"
-                                    class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
-                                <i class="bi bi-check-lg"></i> Simpan
+                    <template x-if="editing">
+                        <div class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                            <div>
+                                <label class="crm-label text-[10px] text-slate-400">Include</label>
+                                <input type="text" inputmode="decimal"
+                                       x-effect="if (field !== 'ship') $el.value = formatId(include())"
+                                       @focus="field = 'ship'"
+                                       @blur="field = null; $el.value = formatId(include())"
+                                       @input="onInclude(parseId($event.target.value))"
+                                       placeholder="0"
+                                       class="crm-field w-full min-w-[7rem] text-right tabular-nums">
+                            </div>
+                        </div>
+                    </template>
+                    <div class="flex items-center gap-1.5">
+                        <template x-if="!editing">
+                            <button type="button" @click="editing = true"
+                                    class="rounded p-1.5 text-slate-500 hover:bg-white hover:text-brand-600"
+                                    title="Edit ongkir">
+                                <i class="bi bi-pencil text-sm"></i>
                             </button>
-                        </div>
-                    </template>
-                </div>
-            </form>
-            @else
-            @php
-                $shipExcl = (float) ($opportunity->crm_shipping_cost ?? 0);
-                $shipIncl = $shipExcl > 0 ? \App\Support\OpportunityProductPricing::includeFromExclude($shipExcl) : 0;
-            @endphp
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
-                @if ($shipExcl > 0)
-                    <span class="text-sm tabular-nums text-slate-800">
-                        <span class="text-xs text-slate-400">Include</span>
-                        <span class="font-semibold">{{ money($shipIncl, $poCurrency) }}</span>
-                    </span>
+                        </template>
+                        <template x-if="editing">
+                            <div class="flex items-center gap-1.5">
+                                <button type="button" @click="editing = false"
+                                        class="text-xs text-slate-500 hover:text-slate-700">Batal</button>
+                                <button type="submit"
+                                        class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
+                                    <i class="bi bi-check-lg"></i> Simpan
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </form>
                 @else
-                    <span class="text-sm font-normal text-slate-400">Belum diisi</span>
+                @php
+                    $shipExcl = (float) ($opportunity->crm_shipping_cost ?? 0);
+                    $shipIncl = $shipExcl > 0 ? \App\Support\OpportunityProductPricing::includeFromExclude($shipExcl) : 0;
+                @endphp
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
+                    @if ($shipExcl > 0)
+                        <span class="text-sm tabular-nums text-slate-800">
+                            <span class="text-xs text-slate-400">Include</span>
+                            <span class="font-semibold">{{ money($shipIncl, $poCurrency) }}</span>
+                        </span>
+                    @else
+                        <span class="text-sm font-normal text-slate-400">Belum diisi</span>
+                    @endif
+                </div>
                 @endif
+                @error('crm_shipping_cost')
+                    <p class="mt-1.5 text-xs text-red-600">{{ $message }}</p>
+                @enderror
             </div>
-            @endif
-            @error('crm_shipping_cost')
-                <p class="mt-1.5 text-xs text-red-600">{{ $message }}</p>
-            @enderror
-        </div>
+        @else
+            <div class="mx-5 mt-3 space-y-2">
+                @foreach ($poShippingOrders as $shipSo)
+                    @php
+                        $postedForThis = (string) old('sales_order_id') === (string) $shipSo->id;
+                        $shipExcl = $postedForThis
+                            ? (float) old('shipping_cost', 0)
+                            : (float) ($poShippingReport->salesOrderModalShippingExclude($opportunity, $shipSo) ?? 0);
+                    @endphp
+                    <div class="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5">
+                        @if ($canManagePo)
+                        <form method="POST" action="{{ route('opportunities.shipping-cost.update', $opportunity) }}"
+                              x-data="{
+                                  editing: @js($postedForThis),
+                                  exclude: @js($shipExcl),
+                                  ppn: @js($ppnMultiplier),
+                                  field: null,
+                                  include() { return Math.round((Number(this.exclude) || 0) * (Number(this.ppn) || 1) * 100) / 100 },
+                                  onInclude(value) {
+                                      const m = Number(this.ppn) || 1;
+                                      this.exclude = m <= 1 ? (Number(value) || 0) : Math.round((Number(value) || 0) / m * 100) / 100;
+                                  },
+                                  formatId(value) {
+                                      if (window.CrmNumber) return window.CrmNumber.format(value, 0);
+                                      return (Number(value) || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 });
+                                  },
+                                  parseId(str) {
+                                      if (window.CrmNumber) return window.CrmNumber.parse(str);
+                                      return Number(String(str).replace(/\./g, '').replace(',', '.')) || 0;
+                                  },
+                                  formatMoney(amount) { return 'Rp ' + this.formatId(Math.round(Number(amount) || 0)) }
+                              }"
+                              class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                            @csrf
+                            @method('PUT')
+                            <input type="hidden" name="sales_order_id" value="{{ $shipSo->id }}">
+                            <input type="hidden" name="shipping_cost" :value="exclude">
+                            <span class="shrink-0 text-xs font-semibold text-slate-700">{{ $shipSo->displayNumber() }}</span>
+                            <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
+                            <template x-if="!editing">
+                                <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums text-slate-800">
+                                    <span x-show="Number(exclude) > 0">
+                                        <span class="text-xs text-slate-400">Include</span>
+                                        <span class="font-semibold" x-text="formatMoney(include())"></span>
+                                    </span>
+                                    <span x-show="!(Number(exclude) > 0)" class="font-normal text-slate-400">Belum diisi</span>
+                                </div>
+                            </template>
+                            <template x-if="editing">
+                                <div class="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                                    <div>
+                                        <label class="crm-label text-[10px] text-slate-400">Include</label>
+                                        <input type="text" inputmode="decimal"
+                                               x-effect="if (field !== 'ship') $el.value = formatId(include())"
+                                               @focus="field = 'ship'"
+                                               @blur="field = null; $el.value = formatId(include())"
+                                               @input="onInclude(parseId($event.target.value))"
+                                               placeholder="0"
+                                               class="crm-field w-full min-w-[7rem] text-right tabular-nums">
+                                    </div>
+                                </div>
+                            </template>
+                            <div class="flex items-center gap-1.5">
+                                <template x-if="!editing">
+                                    <button type="button" @click="editing = true"
+                                            class="rounded p-1.5 text-slate-500 hover:bg-white hover:text-brand-600"
+                                            title="Edit ongkir {{ $shipSo->displayNumber() }}">
+                                        <i class="bi bi-pencil text-sm"></i>
+                                    </button>
+                                </template>
+                                <template x-if="editing">
+                                    <div class="flex items-center gap-1.5">
+                                        <button type="button" @click="editing = false"
+                                                class="text-xs text-slate-500 hover:text-slate-700">Batal</button>
+                                        <button type="submit"
+                                                class="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
+                                            <i class="bi bi-check-lg"></i> Simpan
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
+                        </form>
+                        @else
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span class="shrink-0 text-xs font-semibold text-slate-700">{{ $shipSo->displayNumber() }}</span>
+                            <span class="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Ongkir</span>
+                            @if ($shipExcl > 0)
+                                <span class="text-sm tabular-nums text-slate-800">
+                                    <span class="text-xs text-slate-400">Include</span>
+                                    <span class="font-semibold">{{ money(\App\Support\OpportunityProductPricing::includeFromExclude($shipExcl), $poCurrency) }}</span>
+                                </span>
+                            @else
+                                <span class="text-sm font-normal text-slate-400">Belum diisi</span>
+                            @endif
+                        </div>
+                        @endif
+                        @if ($postedForThis)
+                            @error('shipping_cost')
+                                <p class="mt-1.5 text-xs text-red-600">{{ $message }}</p>
+                            @enderror
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+        @endif
 
         @if ($canManagePo)
         @error('number')
@@ -2660,6 +2786,10 @@
                                     {{ (int) $soNode['item_count'] }} item
                                     &middot;
                                     Modal {{ money($soNode['total_modal'], $poCurrency) }}
+                                    @if (! empty($soNode['shipping_include']))
+                                        &middot;
+                                        Ongkir {{ money($soNode['shipping_include'], $poCurrency) }}
+                                    @endif
                                     @if ($soNode['margin'] !== null)
                                         &middot;
                                         <span @class([
@@ -2772,6 +2902,12 @@
                                             @endif
                                         </div>
                                         <div class="flex shrink-0 items-center gap-1">
+                                            <a href="{{ route('opportunities.purchase-orders.document', [$opportunity, $po]) }}"
+                                               target="_blank"
+                                               class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
+                                               title="Preview dokumen PO">
+                                                <i class="bi bi-file-earmark-text text-sm"></i>
+                                            </a>
                                             <button type="button"
                                                     @click="previewPoId = {{ (int) $po->id }}"
                                                     class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
@@ -2911,6 +3047,9 @@
                                 </p>
                                 <p class="text-xs text-slate-400">
                                     {{ (int) $soNode['po_count'] }} PO · Modal {{ money($soNode['total_modal'], $poCurrency) }}
+                                    @if (! empty($soNode['shipping_include']))
+                                        · Ongkir {{ money($soNode['shipping_include'], $poCurrency) }}
+                                    @endif
                                     @if ($soNode['margin'] !== null)
                                         ·
                                         <span @class([
@@ -3011,6 +3150,12 @@
                                             @endif
                                         </div>
                                         <div class="flex shrink-0 items-center gap-1">
+                                            <a href="{{ route('opportunities.purchase-orders.document', [$opportunity, $po]) }}"
+                                               target="_blank"
+                                               class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"
+                                               title="Preview dokumen PO">
+                                                <i class="bi bi-file-earmark-text text-sm"></i>
+                                            </a>
                                             <button type="button"
                                                     @click="previewPoId = {{ (int) $po->id }}"
                                                     class="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-600"

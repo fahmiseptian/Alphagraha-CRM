@@ -12,6 +12,7 @@ use App\Models\SalesOrderLog;
 use App\Models\User;
 use App\Services\AccountReceivableService;
 use App\Services\CustomerAddressService;
+use App\Services\NotificationService;
 use App\Services\OpportunityLogService;
 use App\Services\SalesOrderService;
 use App\Support\AccountReceivableExcel;
@@ -702,6 +703,7 @@ class OpportunitySalesOrderController extends Controller
         ]);
 
         $itemsSnapshot = $this->mapPostedSalesOrderItems($opportunity, $data['items']);
+        $beforeDiff = $this->salesOrders->captureForDiff($salesOrder);
 
         try {
             $record = DB::transaction(function () use ($request, $opportunity, $salesOrder, $data, $itemsSnapshot) {
@@ -726,20 +728,7 @@ class OpportunitySalesOrderController extends Controller
             return back()->withInput()->with('error', $e->getMessage());
         }
 
-        $this->salesOrders->recordLog(
-            $record,
-            SalesOrderLog::ACTION_UPDATED,
-            ['payment', 'billing_address_id', 'shipping_address_id', 'po_number', 'items', 'note', 'required_delivery']
-        );
-        app(OpportunityLogService::class)->record(
-            $opportunity,
-            OpportunityLog::ACTION_SALES_ORDER_UPDATED,
-            null,
-            [
-                'force' => true,
-                'summary' => 'Sales Order diubah: '.$record->displayNumber(),
-            ]
-        );
+        $this->recordSalesOrderOpportunityUpdate($opportunity, $record, $beforeDiff);
 
         $message = 'Sales Order berhasil diperbarui ('.$record->displayNumber().').';
         if ($request->expectsJson()) {
@@ -829,6 +818,9 @@ class OpportunitySalesOrderController extends Controller
                 'fakturPajak' => (string) ($detail['faktur_pajak'] ?? ''),
                 'fotoSerahTerima' => (string) ($detail['foto_serah_terima'] ?? ''),
                 'note' => (string) ($detail['note'] ?? ''),
+                'paidDate' => ! empty($detail['paid_date'])
+                    ? Carbon::parse($detail['paid_date'])->format('Y-m-d')
+                    : '',
             ],
         ]);
     }
@@ -859,21 +851,12 @@ class OpportunitySalesOrderController extends Controller
             return back()->with('success', 'Kepemilikan komisi tidak berubah.');
         }
 
+        $beforeDiff = $this->salesOrders->captureForDiff($salesOrder);
         $salesOrder->assigned_user_id = $newId;
         $salesOrder->save();
         $salesOrder->load(['assignedUser', 'opportunity.assignedUser']);
 
-        $fromName = $oldId
-            ? (User::query()->find($oldId)?->display_name ?: $oldId)
-            : 'pemilik opportunity';
-        $toName = $newId
-            ? ($salesOrder->assignedUser?->display_name ?: $newId)
-            : 'pemilik opportunity ('.$salesOrder->opportunity?->assignedUser?->display_name.')';
-
-        $this->salesOrders->recordLog($salesOrder, SalesOrderLog::ACTION_UPDATED, [
-            'assigned_user_id' => ['from' => $oldId, 'to' => $newId],
-            'summary' => 'Kepemilikan komisi diubah dari '.$fromName.' ke '.$toName,
-        ], $user);
+        $this->recordSalesOrderOpportunityUpdate($opportunity, $salesOrder, $beforeDiff, $user);
 
         return back()->with('success', 'Kepemilikan komisi diperbarui. Margin SO ini masuk ke '.$salesOrder->commissionOwnerName().'.');
     }
@@ -939,7 +922,8 @@ class OpportunitySalesOrderController extends Controller
             'file_do_file' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:5120'],
             'mark_complete' => ['nullable', 'boolean'],
             'mark_paid' => ['nullable', 'boolean'],
-            'paid_date' => ['nullable', 'required_if:mark_paid,1', 'date', 'before_or_equal:today'],
+            'edit_paid_date' => ['nullable', 'boolean'],
+            'paid_date' => ['nullable', 'required_if:mark_paid,1', 'required_if:edit_paid_date,1', 'date', 'before_or_equal:today'],
             'payment_proof_file' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:5120'],
             'mark_so_complete' => ['nullable', 'boolean'],
             'nomor_ref' => ['nullable', 'string', 'max:100'],
@@ -1019,14 +1003,34 @@ class OpportunitySalesOrderController extends Controller
 
         $markComplete = $request->boolean('mark_complete') || filled($payload['file_do'] ?? null);
         $markPaid = $request->boolean('mark_paid');
+        $editPaidDate = $request->boolean('edit_paid_date');
         $markSoComplete = $request->boolean('mark_so_complete');
         $fillingResi = array_key_exists('no_resi', $payload) && filled($payload['no_resi']);
 
-        if ($markPaid) {
-            $payload['payment_status'] = 'paid';
+        if ($editPaidDate && ! ($user?->canEditSalesOrderInvoice() ?? false)) {
+            abort(403, 'Anda tidak boleh mengubah tanggal pelunasan.');
+        }
+        if ($editPaidDate && $salesOrder->isCancelPending()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tanggal pelunasan tidak bisa diubah selama pembatalan menunggu approval.',
+            ], 422);
+        }
+        if ($editPaidDate && ! in_array($currentPaymentStatus, ['paid', 'settlement'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tanggal pelunasan hanya bisa diubah setelah pembayaran lunas.',
+            ], 422);
+        }
+
+        if ($markPaid || $editPaidDate) {
+            if ($markPaid) {
+                $payload['payment_status'] = 'paid';
+            }
             $payload['paid_date'] = filled($data['paid_date'] ?? null)
                 ? Carbon::parse($data['paid_date'])->format('Y-m-d 00:00:00')
                 : now()->format('Y-m-d H:i:s');
+            $payload['settlement_dt'] = $payload['paid_date'];
             if ($request->hasFile('payment_proof_file')) {
                 $payload['payment_proof'] = $this->salesOrders->storeDocument($request->file('payment_proof_file'), $salesOrder, 'payment');
             }
@@ -1076,22 +1080,11 @@ class OpportunitySalesOrderController extends Controller
             ], 422);
         }
 
+        $beforeDiff = $this->salesOrders->captureForDiff($salesOrder);
         $this->salesOrders->mergeSnapshot($salesOrder, $payload);
-        $this->salesOrders->recordLog(
-            $salesOrder->fresh(),
-            SalesOrderLog::ACTION_UPDATED,
-            array_keys($payload)
-        );
-        app(OpportunityLogService::class)->record(
-            $opportunity,
-            OpportunityLog::ACTION_SALES_ORDER_UPDATED,
-            null,
-            [
-                'force' => true,
-                'summary' => 'Sales Order diubah: '.$salesOrder->displayNumber(),
-            ]
-        );
-        $detail = $this->salesOrders->present($salesOrder->fresh(), $opportunity);
+        $fresh = $salesOrder->fresh();
+        $this->recordSalesOrderOpportunityUpdate($opportunity, $fresh, $beforeDiff);
+        $detail = $this->salesOrders->present($fresh, $opportunity);
 
         if ($request->expectsJson()) {
             return response()->json([
@@ -1603,5 +1596,52 @@ class OpportunitySalesOrderController extends Controller
         $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
 
         return trim($text);
+    }
+
+    /**
+     * Catat detail before/after ke Log SO + log Opportunity, lalu notifikasi Purchasing.
+     *
+     * @param  array<string, mixed>  $beforeDiff
+     */
+    protected function recordSalesOrderOpportunityUpdate(
+        Opportunity $opportunity,
+        OpportunitySalesOrder $salesOrder,
+        array $beforeDiff,
+        ?User $actor = null
+    ): void {
+        $afterDiff = $this->salesOrders->captureForDiff($salesOrder);
+        $diff = $this->salesOrders->diffForOpportunityLog($beforeDiff, $afterDiff);
+        if (! $this->salesOrders->diffHasChanges($diff)) {
+            return;
+        }
+
+        $summary = $this->salesOrders->summarizeDiff($salesOrder->displayNumber(), $diff);
+        $diff['summary'] = $summary;
+
+        $this->salesOrders->recordLog(
+            $salesOrder,
+            SalesOrderLog::ACTION_UPDATED,
+            $diff,
+            $actor
+        );
+
+        app(OpportunityLogService::class)->record(
+            $opportunity,
+            OpportunityLog::ACTION_SALES_ORDER_UPDATED,
+            null,
+            [
+                'force' => true,
+                'summary' => $summary,
+                'changes' => $diff,
+                'actor' => $actor,
+            ]
+        );
+
+        app(NotificationService::class)->notifySalesOrderUpdated(
+            $salesOrder,
+            $opportunity,
+            $diff,
+            $summary
+        );
     }
 }

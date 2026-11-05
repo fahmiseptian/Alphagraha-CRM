@@ -123,7 +123,7 @@ class OpportunityLogService
      * Catat aksi ke log opportunity.
      *
      * @param  array<string, mixed>|null  $before
-     * @param  array<string, mixed>  $meta  summary, note, force, actor
+     * @param  array<string, mixed>  $meta  summary, note, force, actor, changes (override detail field/product)
      */
     public function record(
         Opportunity $opportunity,
@@ -135,6 +135,24 @@ class OpportunityLogService
         $changes = $before === null
             ? ['fields' => [], 'products' => ['added' => [], 'removed' => [], 'changed' => []]]
             : $this->diff($before, $after);
+
+        if (isset($meta['changes']) && is_array($meta['changes'])) {
+            $override = $meta['changes'];
+            $changes = [
+                'fields' => array_values(is_array($override['fields'] ?? null) ? $override['fields'] : ($changes['fields'] ?? [])),
+                'products' => [
+                    'added' => array_values(is_array($override['products']['added'] ?? null)
+                        ? $override['products']['added']
+                        : ($changes['products']['added'] ?? [])),
+                    'removed' => array_values(is_array($override['products']['removed'] ?? null)
+                        ? $override['products']['removed']
+                        : ($changes['products']['removed'] ?? [])),
+                    'changed' => array_values(is_array($override['products']['changed'] ?? null)
+                        ? $override['products']['changed']
+                        : ($changes['products']['changed'] ?? [])),
+                ],
+            ];
+        }
 
         $force = (bool) ($meta['force'] ?? false)
             || in_array($action, self::ALWAYS_RECORD, true);

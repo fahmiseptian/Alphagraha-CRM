@@ -37,11 +37,13 @@ class OpportunitySalesOrder extends Model
         'agc_payload',
         'created_by',
         'assigned_user_id',
+        'shipping_cost',
         'deleted_by',
     ];
 
     protected $casts = [
         'required_delivery' => 'date',
+        'shipping_cost' => 'float',
         'items' => 'array',
         'agc_payload' => 'array',
         'billing_address_id' => 'integer',

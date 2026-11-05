@@ -37,6 +37,8 @@ class CrmNotification extends Model
 
     public const TYPE_SALES_ORDER_CREATED = 'sales_order_created';
 
+    public const TYPE_SALES_ORDER_UPDATED = 'sales_order_updated';
+
     public const TYPE_SALES_ORDER_CANCEL_REQUESTED = 'sales_order_cancel_requested';
 
     public const TYPE_SALES_ORDER_CANCEL_APPROVED = 'sales_order_cancel_approved';
@@ -135,7 +137,7 @@ class CrmNotification extends Model
             self::TYPE_ACTIVITY_DUE => 'bi-calendar-event',
             self::TYPE_EVENT_APPROVAL_REQUESTED, self::TYPE_EVENT_APPROVED, self::TYPE_EVENT_REJECTED => 'bi-calendar-event',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bi-briefcase',
-            self::TYPE_SALES_ORDER_CREATED => 'bi-receipt',
+            self::TYPE_SALES_ORDER_CREATED, self::TYPE_SALES_ORDER_UPDATED => 'bi-receipt',
             self::TYPE_SALES_ORDER_CANCEL_REQUESTED, self::TYPE_SALES_ORDER_CANCEL_APPROVED, self::TYPE_SALES_ORDER_CANCEL_REJECTED => 'bi-x-octagon',
             self::TYPE_PURCHASE_ORDER_APPROVAL_REQUESTED, self::TYPE_PURCHASE_ORDER_APPROVED, self::TYPE_PURCHASE_ORDER_REJECTED => 'bi-cart-check',
             self::TYPE_OPPORTUNITY_ASSIGNED => 'bi-person-check',
@@ -164,6 +166,7 @@ class CrmNotification extends Model
             self::TYPE_EVENT_APPROVAL_REQUESTED => 'bg-amber-50 text-amber-600',
             self::TYPE_OPPORTUNITY_DEADLINE => 'bg-rose-50 text-rose-600',
             self::TYPE_SALES_ORDER_CREATED => 'bg-indigo-50 text-indigo-600',
+            self::TYPE_SALES_ORDER_UPDATED => 'bg-blue-50 text-blue-600',
             self::TYPE_SALES_ORDER_CANCEL_REQUESTED => 'bg-rose-50 text-rose-600',
             self::TYPE_SALES_ORDER_CANCEL_APPROVED => 'bg-red-50 text-red-600',
             self::TYPE_SALES_ORDER_CANCEL_REJECTED => 'bg-amber-50 text-amber-600',

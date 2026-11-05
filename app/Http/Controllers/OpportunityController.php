@@ -613,7 +613,7 @@ class OpportunityController extends Controller
         $opportunity->loadMissing('quotation');
         $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
             || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
-        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
+        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false, pricingChanged: $pricingChanged);
         $wasTopPending = $opportunity->getOriginal('crm_top_status') === Opportunity::TOP_PENDING;
         $notifyTop = $opportunity->refreshTopApprovalState();
         $opportunity->clearPendingApprovalsForLost();
@@ -1095,7 +1095,7 @@ class OpportunityController extends Controller
         $opportunity->loadMissing('quotation');
         $wasMarginPending = $opportunity->crm_margin_status === Opportunity::MARGIN_PENDING
             || $opportunity->quotation?->crm_margin_status === Opportunity::MARGIN_PENDING;
-        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false);
+        $notifyMargin = $opportunity->refreshMarginApprovalState(isNew: false, pricingChanged: $pricingChanged);
         $opportunity->modified_at = Carbon::now()->format('Y-m-d H:i:s');
         $opportunity->modified_by_id = auth()->id();
         $opportunity->save();
@@ -1123,6 +1123,9 @@ class OpportunityController extends Controller
         }
         if ($opportunity->discountNeedsAttention()) {
             $message .= ' Diskon menunggu approval Superadmin.';
+        }
+        if ($opportunity->marginNeedsApproval()) {
+            $message .= ' Margin di bawah minimal — menunggu approval Superadmin.';
         }
 
         return redirect()->route('opportunities.show', $opportunity)

@@ -1361,8 +1361,12 @@ class Opportunity extends Model implements HasMedia
 
     /**
      * Evaluasi % + nominal vs threshold. Return true jika baru masuk pending.
+     *
+     * Harga yang diedit di Proposal ke atas (termasuk Closed Won) dan hasilnya
+     * masih di bawah / di luar threshold wajib approval ulang, meski sebelumnya
+     * sudah disetujui. Tanpa perubahan harga, approval yang sudah ada tetap.
      */
-    public function refreshMarginApprovalState(bool $isNew = false): bool
+    public function refreshMarginApprovalState(bool $isNew = false, bool $pricingChanged = false): bool
     {
         $this->loadMissing('account');
 
@@ -1419,13 +1423,17 @@ class Opportunity extends Model implements HasMedia
             return false;
         }
 
-        if (! $isNew && $wasApproved) {
+        $reopened = ! $isNew && $wasApproved && $pricingChanged;
+        if (! $isNew && $wasApproved && ! $pricingChanged) {
             return false;
         }
 
         $this->crm_margin_status = self::MARGIN_PENDING;
-        if (! $this->crm_margin_requested_at || ! $wasPending) {
+        if (! $this->crm_margin_requested_at || ! $wasPending || $reopened) {
             $this->crm_margin_requested_at = now();
+        }
+        if ($reopened) {
+            $this->crm_margin_note = null;
         }
         $this->crm_margin_reviewed_by = null;
         $this->crm_margin_reviewed_at = null;
@@ -1672,6 +1680,7 @@ class Opportunity extends Model implements HasMedia
             $this->products->map(fn (array $p) => [
                 'name' => (string) ($p['name'] ?? ''),
                 'sell_exclude' => round((float) ($p['sell_exclude'] ?? 0), 2),
+                'discount_exclude' => round((float) ($p['discount_exclude'] ?? 0), 2),
                 'cost_exclude' => round((float) ($p['cost_exclude'] ?? 0), 2),
                 'shipping_exclude' => round((float) ($p['shipping_exclude'] ?? 0), 2),
             ])->values()->all()

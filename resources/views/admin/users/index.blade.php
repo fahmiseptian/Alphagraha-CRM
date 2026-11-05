@@ -2,8 +2,16 @@
 @section('title', $roleLabel.' Users')
 
 @section('content')
+@php $isSales = $role === \App\Models\User::ROLE_SALES; @endphp
+<div @if ($isSales) x-data="{ showTarget: localStorage.getItem('crm_show_sales_target') === '1' }" x-effect="localStorage.setItem('crm_show_sales_target', showTarget ? '1' : '0')" @endif>
 <x-page-header :title="$roleLabel" description="Kelola akun dengan role {{ $roleLabel }}">
     <x-slot:actions>
+        @if ($isSales)
+            <label class="inline-flex h-9 cursor-pointer select-none items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600">
+                <input type="checkbox" x-model="showTarget" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                Sales Target
+            </label>
+        @endif
         <form method="GET" class="flex items-center gap-2">
             <input type="hidden" name="role" value="{{ $role }}">
             <div class="crm-search w-full sm:w-56">
@@ -23,9 +31,9 @@
                 <tr>
                     <th>Name</th>
                     <th>Username</th>
-                    @if ($role === \App\Models\User::ROLE_SALES)
+                    @if ($isSales)
                         <th>Sales Code</th>
-                        <th>Sales Target</th>
+                        <th x-show="showTarget" x-cloak>Sales Target</th>
                         <th>Periode</th>
                         <th>Tenggat</th>
                     @endif
@@ -44,9 +52,9 @@
                             </div>
                         </td>
                         <td class="text-slate-600">{{ $user->user_name }}</td>
-                        @if ($role === \App\Models\User::ROLE_SALES)
+                        @if ($isSales)
                             <td class="font-mono text-sm text-slate-700">{{ $user->profile?->sales_code ?: '—' }}</td>
-                            <td class="text-sm text-slate-700">{{ money($user->profile?->resolvedSalesTarget() ?? 0) }}</td>
+                            <td x-show="showTarget" x-cloak class="text-sm text-slate-700">{{ money($user->profile?->resolvedSalesTarget() ?? 0) }}</td>
                             <td class="text-sm text-slate-700">{{ $user->profile?->salesTargetPeriodLabel() ?? '—' }}</td>
                             <td class="text-sm text-slate-700">
                                 @php $autoDeadline = $user->profile?->resolvedSalesTargetDeadline(); @endphp
@@ -75,7 +83,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="{{ $role === \App\Models\User::ROLE_SALES ? 9 : 5 }}" class="py-12 text-center text-slate-400">
+                        <td colspan="{{ $isSales ? 9 : 5 }}" class="py-12 text-center text-slate-400">
                             Belum ada user dengan role {{ $roleLabel }}.
                         </td>
                     </tr>
@@ -85,4 +93,5 @@
     </div>
     <div class="crm-table-footer">{{ $users->links() }}</div>
 </x-card>
+</div>
 @endsection

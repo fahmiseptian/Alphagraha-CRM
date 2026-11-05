@@ -1,8 +1,8 @@
 @extends('layouts.app')
-@section('title', 'Komisi Sales')
+@section('title', 'Performance Sales')
 
 @section('content')
-<x-page-header title="Komisi Sales" description="Perhitungan GP komisi per periode target (Q)">
+<x-page-header title="Performance Sales" description="Perhitungan GP komisi per periode target (Q)">
     <x-slot:actions>
         <form method="GET" action="{{ route('commissions.index') }}" class="flex flex-wrap items-center gap-2">
             <div class="crm-search min-w-[220px]">

@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\IndustryController;
 use App\Http\Controllers\Admin\OpportunityLogController;
 use App\Http\Controllers\Admin\SalesOrderLogController;
 use App\Http\Controllers\Admin\SettingController;
+use App\Http\Controllers\Admin\PurchaseOrderTemplateController;
 use App\Http\Controllers\Admin\TemplateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\VendorController;
@@ -147,6 +148,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'index'])->name('opportunities.purchase-orders.index');
     Route::get('/opportunities/{opportunity}/purchase-orders/preview', [OpportunityPurchaseOrderController::class, 'preview'])->name('opportunities.purchase-orders.preview');
     Route::get('/opportunities/{opportunity}/purchase-orders/pdf', [OpportunityPurchaseOrderController::class, 'pdf'])->name('opportunities.purchase-orders.pdf');
+    Route::get('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}/document', [OpportunityPurchaseOrderController::class, 'document'])->name('opportunities.purchase-orders.document');
     Route::post('/opportunities/{opportunity}/purchase-orders', [OpportunityPurchaseOrderController::class, 'store'])->name('opportunities.purchase-orders.store');
     Route::put('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}', [OpportunityPurchaseOrderController::class, 'update'])->name('opportunities.purchase-orders.update');
     Route::put('/opportunities/{opportunity}/purchase-orders/{purchaseOrder}/sales-order', [OpportunityPurchaseOrderController::class, 'attachSalesOrder'])->name('opportunities.purchase-orders.attach-sales-order');
@@ -215,6 +217,8 @@ Route::middleware('auth')->group(function () {
         Route::post('/industries/import', [IndustryController::class, 'import'])->name('industries.import');
         Route::resource('industries', IndustryController::class)->except(['show']);
         Route::resource('templates', TemplateController::class);
+        Route::resource('po-templates', PurchaseOrderTemplateController::class)
+            ->parameters(['po-templates' => 'poTemplate']);
         Route::resource('users', UserController::class)->except(['show']);
         Route::get('/settings', [SettingController::class, 'edit'])->name('settings.edit');
         Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');

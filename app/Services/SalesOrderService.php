@@ -1159,4 +1159,321 @@ class SalesOrderService
 
         return $count;
     }
+
+    /**
+     * Snapshot SO untuk dibandingkan saat edit (log Opportunity + notifikasi).
+     *
+     * @return array<string, mixed>
+     */
+    public function captureForDiff(OpportunitySalesOrder $salesOrder): array
+    {
+        $salesOrder->loadMissing(['assignedUser', 'opportunity.assignedUser']);
+        $payload = is_array($salesOrder->agc_payload) ? $salesOrder->agc_payload : [];
+        $status = $salesOrder->statusSnapshot();
+        $itemsRaw = is_array($salesOrder->items) ? $salesOrder->items : ($payload['items'] ?? []);
+        if (! is_array($itemsRaw)) {
+            $itemsRaw = [];
+        }
+
+        $items = [];
+        foreach (array_values($itemsRaw) as $i => $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $items[] = [
+                'index' => (int) ($item['index'] ?? $i),
+                'sku' => trim((string) ($item['sku'] ?? '')),
+                'name' => trim((string) ($item['name'] ?? 'Item')),
+                'description' => trim(strip_tags((string) ($item['description'] ?? ''))),
+                'qty' => (float) ($item['qty'] ?? $item['quantity'] ?? 0),
+                'brand' => trim((string) ($item['brand'] ?? '')),
+                'category' => trim((string) ($item['category'] ?? '')),
+                'price' => (float) ($item['price'] ?? $item['price_display'] ?? $item['sell_exclude'] ?? 0),
+            ];
+        }
+
+        $fileLabel = static function (?string $url): string {
+            $url = trim((string) $url);
+            if ($url === '') {
+                return '—';
+            }
+
+            return 'Ada file';
+        };
+
+        return [
+            'number' => $salesOrder->displayNumber(),
+            'email' => trim((string) ($salesOrder->email ?: ($payload['email'] ?? ''))),
+            'payment' => $salesOrder->paymentLabel(),
+            'po_number' => trim((string) ($salesOrder->po_number ?: ($payload['po_number'] ?? ''))),
+            'po_agc' => trim((string) ($payload['po_agc'] ?? '')),
+            'nomor_ref' => $salesOrder->displayRefNumber(),
+            'required_delivery' => optional($salesOrder->required_delivery)->toDateString()
+                ?: trim((string) ($payload['required_delivery'] ?? '')),
+            'note' => trim((string) ($salesOrder->note ?: ($payload['note'] ?? ''))),
+            'billing_address' => $this->formatAddressLine(is_array($payload['billing'] ?? null) ? $payload['billing'] : null)
+                ?: trim((string) ($payload['billing_address'] ?? '')),
+            'shipping_address' => $this->formatAddressLine(is_array($payload['shipping'] ?? null) ? $payload['shipping'] : null)
+                ?: trim((string) ($payload['shipping_address'] ?? '')),
+            'shipping_method' => trim((string) ($payload['courier_name'] ?? $payload['shipping_name'] ?? '')),
+            'no_resi' => trim((string) ($payload['no_resi'] ?? $payload['resi'] ?? '')),
+            'invoice_no' => trim((string) ($payload['invoice_no'] ?? '')),
+            'invoice_dt' => trim((string) ($payload['invoice_dt'] ?? $payload['invoiced_dt'] ?? '')),
+            'paid_date' => trim((string) ($payload['paid_date'] ?? $payload['settlement_dt'] ?? '')),
+            'so_status' => (string) ($status['so_status'] ?? ''),
+            'payment_status' => (string) ($status['payment_status'] ?? ''),
+            'delivery_status' => (string) ($status['delivery_status'] ?? ''),
+            'commission_owner' => $salesOrder->commissionOwnerName(),
+            'shipping_cost' => ($salesOrder->shipping_cost !== null && (float) $salesOrder->shipping_cost > 0)
+                ? 'Rp '.number_format(
+                    \App\Support\OpportunityProductPricing::includeFromExclude((float) $salesOrder->shipping_cost),
+                    0,
+                    ',',
+                    '.'
+                )
+                : '',
+            'po_file' => $fileLabel($payload['po_file'] ?? null),
+            'file_do' => $fileLabel($payload['file_do'] ?? null),
+            'foto_serah_terima' => $fileLabel($payload['foto_serah_terima'] ?? null),
+            'faktur_pajak' => $fileLabel($payload['faktur_pajak'] ?? null),
+            'payment_proof' => $fileLabel($payload['payment_proof'] ?? null),
+            'items' => $items,
+        ];
+    }
+
+    /**
+     * Bandingkan snapshot SO → format changes OpportunityLog (fields + products).
+     *
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array{fields: list<array<string, mixed>>, products: array{added: list<array<string, mixed>>, removed: list<array<string, mixed>>, changed: list<array<string, mixed>>}}
+     */
+    public function diffForOpportunityLog(array $before, array $after): array
+    {
+        $labels = [
+            'email' => 'Email',
+            'payment' => 'Pembayaran / TOP',
+            'po_number' => 'No. PO customer',
+            'po_agc' => 'No. PO AGC',
+            'nomor_ref' => 'No. referensi',
+            'required_delivery' => 'Tanggal kirim diminta',
+            'note' => 'Catatan',
+            'billing_address' => 'Alamat billing',
+            'shipping_address' => 'Alamat shipping',
+            'shipping_method' => 'Metode pengiriman',
+            'no_resi' => 'No. resi',
+            'invoice_no' => 'No. invoice',
+            'invoice_dt' => 'Tanggal invoice',
+            'paid_date' => 'Tanggal pelunasan',
+            'so_status' => 'Status SO',
+            'payment_status' => 'Status bayar',
+            'delivery_status' => 'Status pengiriman',
+            'commission_owner' => 'Pemilik komisi',
+            'shipping_cost' => 'Ongkir',
+            'po_file' => 'File PO',
+            'file_do' => 'File DO',
+            'foto_serah_terima' => 'File BAST',
+            'faktur_pajak' => 'Faktur pajak',
+            'payment_proof' => 'Bukti bayar',
+        ];
+
+        $fields = [];
+        foreach ($labels as $key => $label) {
+            $from = $this->stringifyDiffValue($before[$key] ?? '');
+            $to = $this->stringifyDiffValue($after[$key] ?? '');
+            if ($from === $to) {
+                continue;
+            }
+            $fields[] = [
+                'field' => 'so_'.$key,
+                'label' => $label,
+                'from' => $from,
+                'to' => $to,
+                'from_display' => $from !== '' ? $from : '—',
+                'to_display' => $to !== '' ? $to : '—',
+            ];
+        }
+
+        return [
+            'fields' => $fields,
+            'products' => $this->diffSalesOrderItems(
+                is_array($before['items'] ?? null) ? $before['items'] : [],
+                is_array($after['items'] ?? null) ? $after['items'] : []
+            ),
+        ];
+    }
+
+    /**
+     * @param  array{fields?: list<array<string, mixed>>, products?: array<string, mixed>}  $diff
+     */
+    public function diffHasChanges(array $diff): bool
+    {
+        if (($diff['fields'] ?? []) !== []) {
+            return true;
+        }
+
+        $products = $diff['products'] ?? [];
+
+        return ($products['added'] ?? []) !== []
+            || ($products['removed'] ?? []) !== []
+            || ($products['changed'] ?? []) !== [];
+    }
+
+    /**
+     * Ringkasan singkat untuk header log / notifikasi.
+     *
+     * @param  array{fields?: list<array<string, mixed>>, products?: array<string, mixed>}  $diff
+     */
+    public function summarizeDiff(string $soNumber, array $diff): string
+    {
+        $bits = [];
+        foreach (array_slice($diff['fields'] ?? [], 0, 5) as $field) {
+            $label = (string) ($field['label'] ?? 'Field');
+            $from = (string) ($field['from_display'] ?? '—');
+            $to = (string) ($field['to_display'] ?? '—');
+            $bits[] = $label.' '.$from.' → '.$to;
+        }
+
+        foreach (array_slice($diff['products']['changed'] ?? [], 0, 3) as $item) {
+            $name = (string) ($item['name'] ?? 'Item');
+            $parts = [];
+            foreach (array_slice($item['changes'] ?? [], 0, 2) as $change) {
+                $parts[] = ((string) ($change['label'] ?? 'Field')).' '
+                    .((string) ($change['from_display'] ?? '—')).' → '
+                    .((string) ($change['to_display'] ?? '—'));
+            }
+            $bits[] = $name.($parts !== [] ? ': '.implode('; ', $parts) : ' diubah');
+        }
+        if (($diff['products']['added'] ?? []) !== []) {
+            $bits[] = count($diff['products']['added']).' item ditambah';
+        }
+        if (($diff['products']['removed'] ?? []) !== []) {
+            $bits[] = count($diff['products']['removed']).' item dihapus';
+        }
+
+        $detail = $bits !== [] ? implode(' · ', $bits) : 'ada perubahan';
+
+        return mb_substr('SO '.$soNumber.' diubah: '.$detail, 0, 500);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $before
+     * @param  list<array<string, mixed>>  $after
+     * @return array{added: list<array<string, mixed>>, removed: list<array<string, mixed>>, changed: list<array<string, mixed>>}
+     */
+    protected function diffSalesOrderItems(array $before, array $after): array
+    {
+        $itemLabels = [
+            'name' => 'Nama produk',
+            'description' => 'Spesifikasi',
+            'qty' => 'Qty',
+            'sku' => 'SKU',
+            'brand' => 'Brand',
+            'category' => 'Kategori',
+            'price' => 'Harga',
+        ];
+
+        $beforeByKey = [];
+        foreach ($before as $i => $row) {
+            $key = (string) ($row['index'] ?? $i);
+            $beforeByKey[$key] = $row;
+        }
+        $afterByKey = [];
+        foreach ($after as $i => $row) {
+            $key = (string) ($row['index'] ?? $i);
+            $afterByKey[$key] = $row;
+        }
+
+        $added = [];
+        $removed = [];
+        $changed = [];
+
+        foreach ($beforeByKey as $key => $old) {
+            if (! isset($afterByKey[$key])) {
+                $removed[] = [
+                    'name' => (string) ($old['name'] ?? 'Item'),
+                    'sku' => (string) ($old['sku'] ?? ''),
+                    'quantity' => $old['qty'] ?? null,
+                ];
+                continue;
+            }
+            $new = $afterByKey[$key];
+            $rowChanges = [];
+            foreach ($itemLabels as $field => $label) {
+                $from = $old[$field] ?? '';
+                $to = $new[$field] ?? '';
+                if ($field === 'qty' || $field === 'price') {
+                    if (round((float) $from, 4) === round((float) $to, 4)) {
+                        continue;
+                    }
+                    $fromDisplay = $field === 'price'
+                        ? money((float) $from)
+                        : rtrim(rtrim(number_format((float) $from, 2, ',', '.'), '0'), ',');
+                    $toDisplay = $field === 'price'
+                        ? money((float) $to)
+                        : rtrim(rtrim(number_format((float) $to, 2, ',', '.'), '0'), ',');
+                } else {
+                    $from = $this->stringifyDiffValue($from);
+                    $to = $this->stringifyDiffValue($to);
+                    if ($from === $to) {
+                        continue;
+                    }
+                    $fromDisplay = $from !== '' ? $this->truncateDiff($from) : '—';
+                    $toDisplay = $to !== '' ? $this->truncateDiff($to) : '—';
+                }
+                $rowChanges[] = [
+                    'field' => $field,
+                    'label' => $label,
+                    'from' => $from,
+                    'to' => $to,
+                    'from_display' => $fromDisplay,
+                    'to_display' => $toDisplay,
+                ];
+            }
+            if ($rowChanges !== []) {
+                $changed[] = [
+                    'name' => (string) ($new['name'] ?? $old['name'] ?? 'Item'),
+                    'changes' => $rowChanges,
+                ];
+            }
+        }
+
+        foreach ($afterByKey as $key => $new) {
+            if (isset($beforeByKey[$key])) {
+                continue;
+            }
+            $added[] = [
+                'name' => (string) ($new['name'] ?? 'Item'),
+                'sku' => (string) ($new['sku'] ?? ''),
+                'quantity' => $new['qty'] ?? null,
+            ];
+        }
+
+        return compact('added', 'removed', 'changed');
+    }
+
+    protected function stringifyDiffValue(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+        if (is_bool($value)) {
+            return $value ? 'Ya' : 'Tidak';
+        }
+        if (is_scalar($value)) {
+            return trim((string) $value);
+        }
+
+        return trim(strip_tags(json_encode($value, JSON_UNESCAPED_UNICODE) ?: ''));
+    }
+
+    protected function truncateDiff(string $value, int $limit = 180): string
+    {
+        $value = preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value);
+        if (mb_strlen($value) <= $limit) {
+            return $value;
+        }
+
+        return mb_substr($value, 0, $limit - 1).'…';
+    }
 }

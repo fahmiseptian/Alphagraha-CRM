@@ -43,7 +43,7 @@
             <i class="bi bi-cash-coin text-lg"></i>
         </span>
         <span>
-            <span class="block text-sm font-semibold text-slate-800">Komisi Sales</span>
+            <span class="block text-sm font-semibold text-slate-800">Performance Sales</span>
             <span class="block text-xs text-slate-500">
                 {{ number_format($salesUsersCount) }} sales · approve entertainment & biaya
             </span>
@@ -225,7 +225,7 @@
             @if ($entertainmentPendingCount > $entertainmentPending->count())
                 <div class="border-t border-slate-100 px-5 py-3">
                     <a href="{{ route('commissions.index') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
-                        Ada {{ number_format($entertainmentPendingCount - $entertainmentPending->count()) }} lagi — buka Komisi Sales
+                        Ada {{ number_format($entertainmentPendingCount - $entertainmentPending->count()) }} lagi — buka Performance Sales
                         <i class="bi bi-arrow-right"></i>
                     </a>
                 </div>

@@ -123,7 +123,7 @@
                 if ($user->canViewCommissions()) {
                     $nav[] = [
                         'commissions.index',
-                        $user->canManageCommissions() ? 'Komisi Sales' : 'Komisi Saya',
+                        $user->canManageCommissions() ? 'Performance Sales' : 'Komisi Saya',
                         'bi-cash-coin',
                     ];
                 }
@@ -237,6 +237,12 @@
                           {{ request()->routeIs('templates.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
                     <i class="bi bi-file-earmark-richtext shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Quotation Templates</span>
+                </a>
+                <a href="{{ route('po-templates.index') }}" title="PO Templates"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('po-templates.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-file-earmark-text shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">PO Templates</span>
                 </a>
 
                 {{-- Users: collapsed = direct link; expanded = submenu --}}
