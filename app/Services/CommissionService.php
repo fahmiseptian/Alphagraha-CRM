@@ -175,6 +175,65 @@ class CommissionService
     }
 
     /**
+     * Gross Profit sama dengan detail komisi: SO ber-invoice di rentang,
+     * margin setelah biaya yang terikat SO.
+     *
+     * @return array{total: float, invoice_total: float, hpp_total: float, count: int}
+     */
+    public function grossProfitForPeriod(
+        User $sales,
+        ?Carbon $start,
+        ?Carbon $end,
+        ?string $periodKey = null,
+        bool $yearly = false
+    ): array {
+        $from = ($start ?? Carbon::create(2000, 1, 1))->copy()->startOfDay();
+        $to = ($end ?? Carbon::now()->addYear())->copy()->endOfDay();
+        $orders = $this->invoicedSalesOrdersInPeriod($sales->id, $from, $to);
+
+        $expenseQuery = CommissionExpense::query()->where('user_id', $sales->id);
+        if ($periodKey !== null && ! $yearly) {
+            $expenseQuery->where('year', (int) $from->year)->where('period_key', $periodKey);
+        } elseif ($yearly) {
+            $expenseQuery->where('year', (int) $from->year);
+        } elseif ($start && $end) {
+            $expenseQuery->whereBetween('expense_date', [$from->toDateString(), $to->toDateString()]);
+        }
+        $linkedExpenseBySo = [];
+        foreach ($expenseQuery->get(['sales_order_id', 'amount']) as $expense) {
+            if ($expense->sales_order_id === null) {
+                continue;
+            }
+            $soId = (string) $expense->sales_order_id;
+            $linkedExpenseBySo[$soId] = ($linkedExpenseBySo[$soId] ?? 0) + (float) $expense->amount;
+        }
+
+        $total = 0.0;
+        $invoiceTotal = 0.0;
+        $hppTotal = 0.0;
+        $count = 0;
+        /** @var array<string, array{amount: float, margin: float, hpp: float}> $financialCache */
+        $financialCache = [];
+        foreach ($orders as $salesOrder) {
+            $row = $this->buildMarginRow($salesOrder, $linkedExpenseBySo, $financialCache);
+            if ($row === null) {
+                continue;
+            }
+            $count++;
+            $total += $row['margin'];
+            $invoiceTotal += $row['amount'];
+            $hppTotal += $row['hpp'];
+        }
+
+        return [
+            'total' => round($total, 2),
+            'invoice_total' => round($invoiceTotal, 2),
+            'hpp_total' => round($hppTotal, 2),
+            'count' => $count,
+        ];
+    }
+
+    /**
      * Ringkasan komisi satu sales untuk satu Q.
      *
      * @return array<string, mixed>
@@ -779,7 +838,7 @@ class CommissionService
     protected function salesOrderFinancials(Opportunity $opportunity, OpportunitySalesOrder $salesOrder): array
     {
         try {
-            $perSo = $this->poReports->build($opportunity, $salesOrder);
+            $perSo = $this->poReports->build($opportunity, $salesOrder, false);
             $summary = $perSo['summary'] ?? [];
             $amount = $this->nilaiJualFromSummary($summary);
             if ($amount <= 0) {
@@ -800,7 +859,7 @@ class CommissionService
 
             // PO opportunity belum ter-link ke SO: ambil profit laporan keseluruhan,
             // lalu alokasikan proporsional ke SO ini (1 SO = 100%).
-            $overall = $this->poReports->build($opportunity, null);
+            $overall = $this->poReports->build($opportunity, null, false);
             $overallSummary = $overall['summary'] ?? [];
             $overallProfit = $this->profitFromSummary($overallSummary);
             $overallHpp = $this->hppFromSummary($overallSummary);
@@ -821,7 +880,7 @@ class CommissionService
             foreach ($salesOrders as $so) {
                 $soReport = ((string) $so->id === (string) $salesOrder->id)
                     ? $perSo
-                    : $this->poReports->build($opportunity, $so);
+                    : $this->poReports->build($opportunity, $so, false);
                 $weight = $this->nilaiJualFromSummary($soReport['summary'] ?? []);
                 if ($weight <= 0) {
                     $weight = $this->salesOrderAmountFallback($opportunity, $so);

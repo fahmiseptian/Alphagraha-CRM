@@ -273,6 +273,7 @@
                                         'url' => $fileDo,
                                         'updateUrl' => $updateUrl,
                                         'locked' => $lockedDelivery,
+                                        'camera' => true,
                                     ])
                                 </td>
                                 <td class="align-top" style="min-width: 9.5rem;">
@@ -425,6 +426,34 @@
                 }
                 input.value = '';
             }
+        });
+    });
+
+    document.querySelectorAll('.so-delivery-camera').forEach((button) => {
+        button.addEventListener('click', () => {
+            const wrap = button.closest('.so-delivery-file');
+            if (!wrap?.dataset.soUrl || typeof window.CrmCamera === 'undefined') return;
+            window.CrmCamera.open({
+                title: 'Ambil foto DO',
+                onFile: async (file) => {
+                    const msg = wrap.querySelector('.so-delivery-msg');
+                    if (msg) {
+                        msg.textContent = 'Mengunggah...';
+                        msg.classList.remove('hidden', 'text-red-600');
+                        msg.classList.add('text-slate-400');
+                    }
+                    try {
+                        await save(wrap.dataset.soUrl, {}, wrap.dataset.soFileField, file);
+                        window.location.reload();
+                    } catch (error) {
+                        if (msg) {
+                            msg.textContent = error.message;
+                            msg.classList.remove('text-slate-400');
+                            msg.classList.add('text-red-600');
+                        }
+                    }
+                },
+            });
         });
     });
 })();

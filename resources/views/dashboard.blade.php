@@ -43,6 +43,9 @@
                 <option value="3months" @selected($period === '3months')>3 Bulan</option>
                 <option value="6months" @selected($period === '6months')>6 Bulan</option>
                 <option value="alltime" @selected($period === 'alltime')>All Time</option>
+                @foreach ($salesQuarterOptions ?? [] as $quarterOption)
+                    <option value="{{ $quarterOption['key'] }}" @selected($period === $quarterOption['key'])>{{ $quarterOption['label'] }}</option>
+                @endforeach
             </select>
         </form>
     </div>
@@ -185,7 +188,11 @@
 @endif
 
 {{-- Nominal angka --}}
-<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+<div @class([
+    'grid grid-cols-1 gap-4 sm:grid-cols-2',
+    'xl:grid-cols-5' => auth()->user()->isSales(),
+    'xl:grid-cols-4' => ! auth()->user()->isSales(),
+])>
     <x-stat-card title="Open Pipeline" :value="money($openPipeline)" icon="bi-kanban" color="brand"
                  :href="route('opportunities.index')" />
     <x-stat-card title="Active Quotation" :value="money($quotationsValue)" icon="bi-file-earmark-text" color="amber"
@@ -194,6 +201,11 @@
                  :href="route('opportunities.index')" />
     <x-stat-card title="Margin" :value="money($wonMargin)" icon="bi-graph-up-arrow" color="purple"
                  :href="route('opportunities.index')" />
+    @if (auth()->user()->isSales() && is_array($grossProfit))
+        <x-stat-card title="Gross Profit" :value="money_signed($grossProfit['total'])" icon="bi-graph-up" color="slate"
+                     :sub="'By tgl invoice · '.number_format($grossProfit['count']).' SO'"
+                     :href="$grossProfit['href']" />
+    @endif
 </div>
 
 <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">

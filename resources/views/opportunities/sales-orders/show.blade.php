@@ -960,8 +960,14 @@
                 <div x-show="focusField === 'file_do'">
                     <label class="crm-label">Upload file DO</label>
                     <input type="file" x-ref="doFileInput" @change="setFile($event, 'file_do_file')" accept=".pdf,.jpg,.jpeg,.png,.webp" class="crm-field">
-                    <p class="mt-1 text-xs text-slate-400">Wajib. Jika pembayaran sudah paid/settlement, pengiriman akan otomatis complete.</p>
+                    <button type="button" @click="openDoCamera()"
+                            class="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                        <i class="bi bi-camera"></i> Buka kamera
+                    </button>
+                    <p class="mt-1 text-xs text-slate-500" x-show="form.file_do_file" x-text="form.file_do_file ? form.file_do_file.name : ''"></p>
+                    <p class="mt-1 text-xs text-slate-400">Wajib. Upload file atau foto dari kamera. Jika pembayaran sudah paid/settlement, pengiriman akan otomatis complete.</p>
                 </div>
+                @include('partials.camera-capture')
 
                 @if ($canEdit)
                 <div x-show="focusField === 'all' || focusField === 'note'">
@@ -1040,6 +1046,20 @@ function salesOrderDetail(cfg) {
         setFile(event, key) {
             const file = event?.target?.files?.[0] || null;
             this.form[key] = file;
+        },
+
+        openDoCamera() {
+            if (typeof window.CrmCamera === 'undefined') {
+                this.editError = 'Kamera tidak tersedia di browser ini. Gunakan upload file.';
+                return;
+            }
+            window.CrmCamera.open({
+                title: 'Ambil foto DO',
+                onFile: (file) => {
+                    this.form.file_do_file = file;
+                    if (this.$refs.doFileInput) this.$refs.doFileInput.value = '';
+                },
+            });
         },
 
         buildPayload() {

@@ -18,7 +18,7 @@ class PurchaseOrderReportService
     /**
      * @return array<string, mixed>
      */
-    public function build(Opportunity $opportunity, ?OpportunitySalesOrder $salesOrder = null): array
+    public function build(Opportunity $opportunity, ?OpportunitySalesOrder $salesOrder = null, bool $useSalesCostWhenNoPo = true): array
     {
         $opportunity->loadMissing([
             'account',
@@ -84,6 +84,14 @@ class PurchaseOrderReportService
 
         $modalExcl = round((float) $poRows->sum('jumlah_exclude'), 2);
         $modalIncl = round((float) $poRows->sum('jumlah_include'), 2);
+        // Tabel PO di bawah tetap kosong bila belum ada PO. Modal di ringkasan memakai harga beli sales.
+        if ($useSalesCostWhenNoPo && $poRows->isEmpty()) {
+            $salesRows = $this->buildSalesCostRows($opportunity, $salesOrder);
+            if ($salesRows->isNotEmpty()) {
+                $modalExcl = round((float) $salesRows->sum('jumlah_exclude'), 2);
+                $modalIncl = round((float) $salesRows->sum('jumlah_include'), 2);
+            }
+        }
 
         if ($isWapu) {
             // WAPU / Inaproc:
@@ -187,8 +195,8 @@ class PurchaseOrderReportService
                 'net_profit' => $netProfit,
             ],
             'po_rows' => $poRows->all(),
-            'po_total_exclude' => $modalExcl,
-            'po_total_include' => $modalIncl,
+            'po_total_exclude' => round((float) $poRows->sum('jumlah_exclude'), 2),
+            'po_total_include' => round((float) $poRows->sum('jumlah_include'), 2),
         ];
     }
 
@@ -549,6 +557,90 @@ class PurchaseOrderReportService
     }
 
     /**
+     * Belum ada PO: modal memakai harga beli (exclude) yang diisi sales, dikelompokkan per vendor.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function buildSalesCostRows(Opportunity $opportunity, ?OpportunitySalesOrder $salesOrder): Collection
+    {
+        $buckets = [];
+
+        $add = function (string $vendor, float $qty, float $unitExclude) use (&$buckets): void {
+            if ($qty <= 0 || $unitExclude <= 0) {
+                return;
+            }
+
+            $vendor = trim($vendor);
+            $key = mb_strtolower($vendor);
+            if (! isset($buckets[$key])) {
+                $buckets[$key] = [
+                    'vendor' => $vendor,
+                    'exclude' => 0.0,
+                    'include' => 0.0,
+                ];
+            }
+
+            $buckets[$key]['exclude'] += $qty * $unitExclude;
+            $buckets[$key]['include'] += $qty * OpportunityProductPricing::includeFromExclude($unitExclude);
+        };
+
+        if ($salesOrder) {
+            $oppProducts = $opportunity->products->values();
+            $items = is_array($salesOrder->items) ? $salesOrder->items : [];
+            $payloadItems = data_get($salesOrder->agc_payload, 'items');
+            if ($items === [] && is_array($payloadItems)) {
+                $items = $payloadItems;
+            }
+
+            foreach ($items as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+
+                $qty = (float) ($item['qty'] ?? $item['quantity'] ?? 1);
+                $product = $this->matchOpportunityProduct($oppProducts, $item);
+                $unitExclude = (float) ($product['cost_exclude'] ?? 0);
+                $vendor = (string) ($product['vendor'] ?? $item['vendor'] ?? '');
+                $add($vendor, $qty, $unitExclude);
+            }
+        } else {
+            foreach ($opportunity->products as $product) {
+                if (! is_array($product)) {
+                    continue;
+                }
+
+                $qty = (float) ($product['quantity'] ?? 1);
+                $add(
+                    (string) ($product['vendor'] ?? ''),
+                    $qty,
+                    (float) ($product['cost_exclude'] ?? 0)
+                );
+            }
+        }
+
+        return collect($buckets)->values()->map(function (array $bucket, int $index) {
+            $exclude = round((float) $bucket['exclude'], 2);
+            $include = round((float) $bucket['include'], 2);
+
+            return [
+                'no' => $index + 1,
+                'number' => '—',
+                'vendor' => $bucket['vendor'] !== '' ? $bucket['vendor'] : '—',
+                'payment_term' => null,
+                'is_cash' => false,
+                'surcharge_percent' => 0,
+                'harga_exclude' => $exclude,
+                'extra_exclude' => 0.0,
+                'jumlah_exclude' => $exclude,
+                'harga_include' => $include,
+                'extra_include' => 0.0,
+                'jumlah_include' => $include,
+                'from_sales' => true,
+            ];
+        });
+    }
+
+    /**
      * @param  Collection<int, PurchaseOrder>  $purchaseOrders
      * @return Collection<int, array<string, mixed>>
      */
@@ -578,6 +670,7 @@ class PurchaseOrderReportService
             return [
                 'no' => $index + 1,
                 'number' => $po->number,
+                'from_sales' => false,
                 'vendor' => $po->displayVendorName(),
                 'payment_term' => $po->payment_term,
                 'is_cash' => $isCash,

@@ -27,16 +27,28 @@ class DashboardController extends Controller
 {
     use ScopesToUser;
 
-    public function __invoke(Request $request)
+    public function __invoke(Request $request, CommissionService $commissions)
     {
         $user = auth()->user();
 
-        $period = $request->get('period', 'year');
-        if (! in_array($period, ['year', 'month', '3months', '6months', 'alltime'], true)) {
+        $standardPeriods = ['year', 'month', '3months', '6months', 'alltime'];
+        $period = (string) $request->get('period', 'year');
+        $salesQuarterOptions = [];
+        $matchedQuarter = null;
+        if ($user->isSales()) {
+            $salesQuarterOptions = $this->salesDashboardQuarters($user);
+            $matchedQuarter = collect($salesQuarterOptions)->firstWhere('key', $period);
+        }
+        if (! $matchedQuarter && ! in_array($period, $standardPeriods, true)) {
             $period = 'year';
         }
-        $periodRange = $this->periodDateRange($period);
-        $periodLabel = $this->periodLabel($period);
+        if ($matchedQuarter) {
+            $periodRange = [$matchedQuarter['start']->copy(), $matchedQuarter['end']->copy()];
+            $periodLabel = $matchedQuarter['label'];
+        } else {
+            $periodRange = $this->periodDateRange($period);
+            $periodLabel = $this->periodLabel($period);
+        }
 
         if ($user->isPurchasing()) {
             return $this->purchasingDashboard($period, $periodRange, $periodLabel);
@@ -52,7 +64,7 @@ class DashboardController extends Controller
 
         $leaderboardPeriod = $request->get('leaderboard_period', $period);
         if (! in_array($leaderboardPeriod, ['alltime', 'month', 'year', '3months', '6months'], true)) {
-            $leaderboardPeriod = $period;
+            $leaderboardPeriod = in_array($period, $standardPeriods, true) ? $period : 'year';
         }
 
         $leaderboardSort = $request->get('leaderboard_sort', 'total');
@@ -208,6 +220,25 @@ class DashboardController extends Controller
             ? 'Sales Pipeline - '.$selectedSales->display_name
             : 'Sales Pipeline';
 
+        $grossProfit = null;
+        if ($user->isSales()) {
+            $grossProfit = $commissions->grossProfitForPeriod(
+                $user,
+                $periodRange[0] ?? null,
+                $periodRange[1] ?? null,
+                $matchedQuarter['commission_key'] ?? null,
+                false
+            );
+            $grossProfit['href'] = ! empty($matchedQuarter['commission_key'])
+                ? route('commissions.detail', [
+                    'user' => $user->id,
+                    'section' => 'gross-profit',
+                    'year' => $matchedQuarter['start']->year,
+                    'period' => $matchedQuarter['commission_key'],
+                ])
+                : route('commissions.show', $user);
+        }
+
         return view('dashboard', compact(
             'customersCount', 'leadsCount', 'quotationsCount', 'quotationsValue', 'quotationsMargin',
             'sentCount', 'openPipeline', 'wonThisMonth', 'wonTotal', 'wonMargin', 'stageDistribution',
@@ -215,7 +246,7 @@ class DashboardController extends Controller
             'recentQuotations', 'recentCustomers', 'deadlineAlerts', 'showDeadlinePopup',
             'salesLeaderboard', 'leaderboardPeriod', 'leaderboardSort',
             'brandLeaderboard', 'categoryLeaderboard', 'catalogSort',
-            'period', 'periodLabel',
+            'period', 'periodLabel', 'salesQuarterOptions', 'grossProfit',
             'selectedSalesId', 'selectedSales', 'pipelineTitle', 'pipelineDetails',
             'showDetail', 'detailStart', 'detailEnd', 'dailyRecap'
         ));
@@ -1152,6 +1183,40 @@ class DashboardController extends Controller
     protected function applyLeaderboardPeriodToCloseDate($query, string $period): void
     {
         $this->applyPeriodToDateColumn($query, 'close_date', $this->periodDateRange($period));
+    }
+
+    /**
+     * Q1–Q4 tahun berjalan untuk filter dashboard sales.
+     * Jika rentangnya sama dengan periode komisi, commission_key diisi agar Gross Profit ikut rumus detail komisi.
+     *
+     * @return list<array{key: string, label: string, start: Carbon, end: Carbon, commission_key: ?string}>
+     */
+    protected function salesDashboardQuarters(User $user): array
+    {
+        $profile = $user->profile ?: UserProfile::ensureForUser($user->id, true, User::ROLE_SALES);
+        $year = (int) now()->year;
+        $commission = collect($profile->commissionQuarters($year));
+        $options = [];
+
+        for ($i = 1; $i <= 4; $i++) {
+            $start = Carbon::create($year, (($i - 1) * 3) + 1, 1)->startOfDay();
+            $end = $start->copy()->addMonthsNoOverflow(2)->endOfMonth()->endOfDay();
+            $match = $commission->first(function (array $quarter) use ($start, $end) {
+                return empty($quarter['yearly'])
+                    && $quarter['start']->equalTo($start)
+                    && $quarter['end']->equalTo($end);
+            });
+
+            $options[] = [
+                'key' => sprintf('%d-Q%d', $year, $i),
+                'label' => 'Q'.$i.' '.$year.' ('.$start->translatedFormat('M').'–'.$end->translatedFormat('M').')',
+                'start' => $start,
+                'end' => $end,
+                'commission_key' => $match['key'] ?? null,
+            ];
+        }
+
+        return $options;
     }
 
     /**
