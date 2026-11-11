@@ -499,9 +499,14 @@ class QuotationController extends Controller
         $content = $this->service->prepareHtmlForPdf(
             $this->service->render($quotation, $template->body_html, $template)
         );
+        $fonts = $this->service->quotationPdfFontSetup();
 
-        $pdf = Pdf::loadView('quotations.pdf', ['content' => $content])
-            ->setPaper('a4');
+        $pdf = Pdf::loadView('quotations.pdf', [
+            'content' => $content,
+            'fontCss' => $fonts['css'],
+        ])->setPaper('a4');
+        $pdf->setOption('chroot', $fonts['chroot']);
+        $pdf->setOption('defaultFont', 'Arial');
 
         $filename = str_replace(['/', '\\'], '-', $quotation->number) . '.pdf';
 

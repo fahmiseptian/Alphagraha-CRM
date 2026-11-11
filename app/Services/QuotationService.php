@@ -374,7 +374,7 @@ class QuotationService
     {
         $html = $this->resolveImagesForPdf($html);
 
-        $fallback = 'DejaVu Sans, sans-serif';
+        $fallback = 'Arial, Helvetica, sans-serif';
 
         $html = preg_replace(
             '/font-family\s*:\s*([^;"\'}]+)([;"\'}])/i',
@@ -384,9 +384,157 @@ class QuotationService
 
         return preg_replace(
             '/face\s*=\s*("|\')[^"\']*(\1)/i',
-            'face="DejaVu Sans"',
+            'face="Arial"',
             $html
         ) ?? $html;
+    }
+
+    /**
+     * Font Arial untuk DomPDF. Pakai berkas Arial di sistem bila ada,
+     * kalau tidak ada pakai Liberation Sans yang metriknya sama dengan Arial.
+     *
+     * @return array{css: string, chroot: list<string>}
+     */
+    public function quotationPdfFontSetup(): array
+    {
+        $faces = $this->resolveQuotationArialFaces();
+        $css = '';
+
+        foreach (['Arial', 'Helvetica'] as $family) {
+            foreach ($faces as $face) {
+                $path = str_replace('\\', '/', $face['path']);
+                $css .= "@font-face{font-family:'{$family}';font-style:{$face['style']};font-weight:{$face['weight']};src:url('{$path}') format('truetype');}\n";
+            }
+        }
+
+        return [
+            'css' => $css,
+            'chroot' => array_values(array_unique(array_filter([
+                public_path(),
+                storage_path('fonts'),
+                resource_path('fonts'),
+            ]))),
+        ];
+    }
+
+    /**
+     * @return list<array{path: string, style: string, weight: string}>
+     */
+    protected function resolveQuotationArialFaces(): array
+    {
+        $cached = $this->cacheSystemArialFaces();
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $base = resource_path('fonts/liberation');
+
+        return [
+            ['path' => $base.'/LiberationSans-Regular.ttf', 'style' => 'normal', 'weight' => 'normal'],
+            ['path' => $base.'/LiberationSans-Bold.ttf', 'style' => 'normal', 'weight' => 'bold'],
+            ['path' => $base.'/LiberationSans-Italic.ttf', 'style' => 'italic', 'weight' => 'normal'],
+            ['path' => $base.'/LiberationSans-BoldItalic.ttf', 'style' => 'italic', 'weight' => 'bold'],
+        ];
+    }
+
+    /**
+     * Salin Arial sistem ke storage (tidak di-commit) supaya path-nya aman untuk DomPDF.
+     *
+     * @return list<array{path: string, style: string, weight: string}>|null
+     */
+    protected function cacheSystemArialFaces(): ?array
+    {
+        $sources = [
+            'regular' => [
+                '/System/Library/Fonts/Supplemental/Arial.ttf',
+                '/Library/Fonts/Arial.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/Arial.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/arial.ttf',
+                'C:\\Windows\\Fonts\\arial.ttf',
+            ],
+            'bold' => [
+                '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+                '/Library/Fonts/Arial Bold.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/arialbd.ttf',
+                'C:\\Windows\\Fonts\\arialbd.ttf',
+            ],
+            'italic' => [
+                '/System/Library/Fonts/Supplemental/Arial Italic.ttf',
+                '/Library/Fonts/Arial Italic.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/Arial_Italic.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/ariali.ttf',
+                'C:\\Windows\\Fonts\\ariali.ttf',
+            ],
+            'bold_italic' => [
+                '/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf',
+                '/Library/Fonts/Arial Bold Italic.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/Arial_Bold_Italic.ttf',
+                '/usr/share/fonts/truetype/msttcorefonts/arialbi.ttf',
+                'C:\\Windows\\Fonts\\arialbi.ttf',
+            ],
+        ];
+
+        $regular = $this->firstExistingFile($sources['regular']);
+        if ($regular === null) {
+            return null;
+        }
+
+        $picked = [
+            'regular' => $regular,
+            'bold' => $this->firstExistingFile($sources['bold']) ?? $regular,
+            'italic' => $this->firstExistingFile($sources['italic']) ?? $regular,
+            'bold_italic' => $this->firstExistingFile($sources['bold_italic']) ?? $regular,
+        ];
+
+        $dir = storage_path('fonts/quotation-arial');
+        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+            return null;
+        }
+
+        $names = [
+            'regular' => 'Arial-Regular.ttf',
+            'bold' => 'Arial-Bold.ttf',
+            'italic' => 'Arial-Italic.ttf',
+            'bold_italic' => 'Arial-BoldItalic.ttf',
+        ];
+        $styles = [
+            'regular' => ['normal', 'normal'],
+            'bold' => ['normal', 'bold'],
+            'italic' => ['italic', 'normal'],
+            'bold_italic' => ['italic', 'bold'],
+        ];
+
+        $faces = [];
+        foreach ($picked as $key => $source) {
+            $dest = $dir.'/'.$names[$key];
+            if (! is_file($dest) || filesize($dest) !== filesize($source)) {
+                if (! @copy($source, $dest)) {
+                    return null;
+                }
+            }
+            $faces[] = [
+                'path' => $dest,
+                'style' => $styles[$key][0],
+                'weight' => $styles[$key][1],
+            ];
+        }
+
+        return $faces;
+    }
+
+    /**
+     * @param  list<string>  $paths
+     */
+    protected function firstExistingFile(array $paths): ?string
+    {
+        foreach ($paths as $path) {
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     protected function resolveImagesForPdf(string $html): string
