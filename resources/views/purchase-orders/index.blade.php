@@ -14,6 +14,9 @@
 
     <x-page-header title="Purchase Orders" :description="$purchaseOrders->total().' PO · '.($periodLabel ?? 'tahun ini')">
         <x-slot:actions>
+            @if (auth()->user()?->canViewPurchaseOrderLogs())
+                <x-btn href="{{ route('purchase-order-logs.index') }}" variant="secondary" icon="bi-journal-check">Log Purchase Order</x-btn>
+            @endif
             <x-btn href="{{ route('opportunities.index') }}" icon="bi bi-briefcase">Lihat Opportunity</x-btn>
         </x-slot:actions>
     </x-page-header>

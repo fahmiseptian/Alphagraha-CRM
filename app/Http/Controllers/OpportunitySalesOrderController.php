@@ -311,7 +311,7 @@ class OpportunitySalesOrderController extends Controller
     {
         $queue = (string) $request->get('queue', '');
 
-        return in_array($queue, ['needs_invoice', 'unpaid', 'paid', 'delivery_pending'], true)
+        return in_array($queue, ['needs_invoice', 'invoiced', 'unpaid', 'paid', 'delivery_pending'], true)
             ? $queue
             : '';
     }
@@ -323,6 +323,8 @@ class OpportunitySalesOrderController extends Controller
                 $q->whereNull('agc_payload->invoice_no')
                     ->orWhere('agc_payload->invoice_no', '');
             }),
+            'invoiced' => $query->whereNotNull('agc_payload->invoice_no')
+                ->where('agc_payload->invoice_no', '!=', ''),
             'unpaid' => $query->where(function ($q) {
                 $q->whereNull('agc_payload->payment_status')
                     ->orWhere('agc_payload->payment_status', '')
@@ -728,7 +730,7 @@ class OpportunitySalesOrderController extends Controller
             return back()->withInput()->with('error', $e->getMessage());
         }
 
-        $this->recordSalesOrderOpportunityUpdate($opportunity, $record, $beforeDiff);
+        $this->recordSalesOrderOpportunityUpdate($opportunity, $record, $beforeDiff, null, true);
 
         $message = 'Sales Order berhasil diperbarui ('.$record->displayNumber().').';
         if ($request->expectsJson()) {
@@ -1607,12 +1609,17 @@ class OpportunitySalesOrderController extends Controller
         Opportunity $opportunity,
         OpportunitySalesOrder $salesOrder,
         array $beforeDiff,
-        ?User $actor = null
+        ?User $actor = null,
+        bool $markPurchasingRevision = false
     ): void {
         $afterDiff = $this->salesOrders->captureForDiff($salesOrder);
         $diff = $this->salesOrders->diffForOpportunityLog($beforeDiff, $afterDiff);
         if (! $this->salesOrders->diffHasChanges($diff)) {
             return;
+        }
+
+        if ($markPurchasingRevision) {
+            $this->salesOrders->markPurchasingRevision($salesOrder);
         }
 
         $summary = $this->salesOrders->summarizeDiff($salesOrder->displayNumber(), $diff);

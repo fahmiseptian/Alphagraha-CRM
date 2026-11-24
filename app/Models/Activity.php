@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Espo\Account;
+use App\Models\Espo\Contact;
 use App\Models\Espo\Lead;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -19,14 +20,16 @@ class Activity extends Model implements HasMedia
     protected $table = 'crm_activities';
 
     protected $fillable = [
-        'type', 'subject', 'description', 'account_id', 'lead_id', 'quotation_id',
-        'status', 'priority', 'due_at', 'reminder_at', 'completed_at',
+        'type', 'subject', 'description', 'account_id', 'contact_id', 'location', 'lead_id', 'quotation_id',
+        'status', 'priority', 'due_at', 'starts_at', 'ends_at', 'reminder_at', 'completed_at',
         'assigned_to', 'created_by',
         'approval_status', 'approved_by', 'approved_at', 'approval_note',
     ];
 
     protected $casts = [
         'due_at' => 'datetime',
+        'starts_at' => 'datetime',
+        'ends_at' => 'datetime',
         'reminder_at' => 'datetime',
         'completed_at' => 'datetime',
         'approved_at' => 'datetime',
@@ -80,6 +83,11 @@ class Activity extends Model implements HasMedia
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'account_id');
+    }
+
+    public function contact(): BelongsTo
+    {
+        return $this->belongsTo(Contact::class, 'contact_id');
     }
 
     public function lead(): BelongsTo

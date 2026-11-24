@@ -11,7 +11,7 @@ class SalesOrderLogController extends Controller
 {
     public function index(Request $request): View
     {
-        $this->authorizeSuperadmin();
+        $this->authorizeView();
 
         $action = (string) $request->get('action', 'all');
         if (! in_array($action, ['all', ...array_keys(SalesOrderLog::ACTIONS)], true)) {
@@ -51,17 +51,17 @@ class SalesOrderLogController extends Controller
 
     public function show(SalesOrderLog $log): View
     {
-        $this->authorizeSuperadmin();
+        $this->authorizeView();
 
         $log->load(['actor', 'salesOrder.opportunity.account', 'opportunity.account']);
 
         return view('admin.sales-order-logs.show', compact('log'));
     }
 
-    protected function authorizeSuperadmin(): void
+    protected function authorizeView(): void
     {
         if (! auth()->user()?->canViewSalesOrderLogs()) {
-            abort(403, 'Log Sales Order hanya untuk Superadmin.');
+            abort(403, 'Log Sales Order hanya untuk Superadmin dan Purchasing.');
         }
     }
 }

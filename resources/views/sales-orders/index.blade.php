@@ -7,6 +7,7 @@
         $canSeeInvoice = (bool) ($canSeeInvoice ?? false);
         $canEditDelivery = (bool) ($canEditDelivery ?? false);
         $showPoStatus = ! (auth()->user()?->isEkspedisi() ?? false);
+        $showSoLifecycle = auth()->user()?->isPurchasing() ?? false;
         $showCommissionOwner = ! (auth()->user()?->isEkspedisi() ?? false);
         $hasExtraFilters = ($search ?? '') !== ''
             || ($canSeeInvoice && ($invoiceSearch ?? '') !== '')
@@ -17,6 +18,7 @@
         $hasFilters = $hasExtraFilters || ($period ?? 'year') !== 'year';
         $queueLabels = [
             'needs_invoice' => 'Belum invoice',
+            'invoiced' => 'Sudah invoice',
             'unpaid' => 'Unpaid',
             'paid' => 'Sudah paid',
             'delivery_pending' => 'DO pending',
@@ -115,6 +117,9 @@
                     <select name="queue" class="select2 select2-compact w-full" data-placeholder="Semua antrian">
                         <option value="">Semua antrian</option>
                         <option value="needs_invoice" @selected(($queue ?? '') === 'needs_invoice')>Belum invoice</option>
+                        @if ($canSeeInvoice)
+                            <option value="invoiced" @selected(($queue ?? '') === 'invoiced')>Sudah invoice</option>
+                        @endif
                         <option value="unpaid" @selected(($queue ?? '') === 'unpaid')>Unpaid</option>
                         <option value="paid" @selected(($queue ?? '') === 'paid')>Sudah paid</option>
                         <option value="delivery_pending" @selected(($queue ?? '') === 'delivery_pending')>DO pending</option>
@@ -151,6 +156,9 @@
                 <thead>
                     <tr>
                         <th>No. SO / PSO</th>
+                        @if ($showSoLifecycle)
+                            <th>Status SO</th>
+                        @endif
                         <th>PO Customer</th>
                         @if ($canSeeInvoice)
                             <th>Invoice</th>
@@ -198,6 +206,17 @@
                                     {{ $so->paymentLabel() }}
                                 </div>
                             </td>
+                            @if ($showSoLifecycle)
+                                <td>
+                                    @if ($so->isCancelled())
+                                        <x-badge color="red">Batal</x-badge>
+                                    @elseif ($so->hasPurchasingRevision())
+                                        <x-badge color="amber" title="SO diubah setelah PO dibuat. Hilang setelah PO AGC disimpan ulang.">Revisi</x-badge>
+                                    @else
+                                        <span class="text-slate-300">—</span>
+                                    @endif
+                                </td>
+                            @endif
                             <td>
                                 @if ($so->displayPoNumber() !== '')
                                     <span class="font-medium text-slate-800">{{ $so->displayPoNumber() }}</span>
@@ -325,7 +344,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="{{ 5 + (int) $showPoStatus + (int) ($showCommissionOwner && ($canFilterSales ?? false)) + ((int) $canSeeInvoice * 2) + ((int) $canEditDelivery * 4) }}" class="py-10 text-center text-slate-500">
+                            <td colspan="{{ 5 + (int) $showSoLifecycle + (int) $showPoStatus + (int) ($showCommissionOwner && ($canFilterSales ?? false)) + ((int) $canSeeInvoice * 2) + ((int) $canEditDelivery * 4) }}" class="py-10 text-center text-slate-500">
                                 @if ($hasFilters)
                                     Tidak ada Sales Order sesuai filter.
                                     <a href="{{ route('sales-orders.index') }}" class="ml-1 text-brand-600 hover:underline">Reset</a>

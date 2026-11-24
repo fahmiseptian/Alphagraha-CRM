@@ -120,6 +120,12 @@
                 if ($user->canViewPurchaseOrders()) {
                     $nav[] = ['purchase-orders.index', 'Purchase Order', 'bi-cart-check'];
                 }
+                if ($user->canViewSalesOrderLogs() && ! $user->canAccessAdministration()) {
+                    $nav[] = ['sales-order-logs.index', 'Log Sales Order', 'bi-journal-text'];
+                }
+                if ($user->canViewPurchaseOrderLogs() && ! $user->canAccessAdministration()) {
+                    $nav[] = ['purchase-order-logs.index', 'Log Purchase Order', 'bi-journal-check'];
+                }
                 if ($user->canViewCommissions()) {
                     $nav[] = [
                         'commissions.index',
@@ -130,7 +136,7 @@
                 if ($user->canManageExpenseCategories()) {
                     $nav[] = ['expense-categories.index', 'Kategori Biaya', 'bi-tags'];
                 }
-                if ($user->canCreateOpportunity() || $user->isAdmin()) {
+                if ($user->canCreateOpportunity() || $user->isAdmin() || $user->isFinance()) {
                     $nav[] = ['activities.index', 'Activities', 'bi-calendar-check'];
                 }
                 if ($user->canCreateQuotation()) {
@@ -225,6 +231,12 @@
                           {{ request()->routeIs('sales-order-logs.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
                     <i class="bi bi-journal-text shrink-0 text-base"></i>
                     <span class="crm-sidebar-label truncate">Log Sales Order</span>
+                </a>
+                <a href="{{ route('purchase-order-logs.index') }}" title="Log Purchase Order"
+                   class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition
+                          {{ request()->routeIs('purchase-order-logs.*') ? 'bg-brand-600 text-white shadow' : 'hover:bg-white/5 hover:text-white' }}">
+                    <i class="bi bi-journal-check shrink-0 text-base"></i>
+                    <span class="crm-sidebar-label truncate">Log Purchase Order</span>
                 </a>
                 <a href="{{ route('opportunity-logs.index') }}" title="Log Opportunity"
                    class="crm-sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 transition

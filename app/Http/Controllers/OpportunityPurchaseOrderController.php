@@ -266,6 +266,9 @@ class OpportunityPurchaseOrderController extends Controller
         $this->authorizeManage($opportunity);
         $this->ensureBelongsToOpportunity($opportunity, $purchaseOrder);
 
+        $this->purchaseOrders->recordLog($purchaseOrder, \App\Models\PurchaseOrderLog::ACTION_DELETED, [
+            'summary' => 'PO '.$purchaseOrder->number.' dihapus',
+        ]);
         $purchaseOrder->delete();
         $this->purchaseOrders->syncOpportunityCostsFromPo($opportunity);
 
@@ -304,6 +307,11 @@ class OpportunityPurchaseOrderController extends Controller
                 ? null
                 : round((float) $raw, 2);
             $salesOrder->save();
+            OpportunitySalesOrder::query()
+                ->where('opportunity_id', $opportunity->id)
+                ->where('agc_payload->purchasing_revision_pending', true)
+                ->get()
+                ->each(fn (OpportunitySalesOrder $row) => $salesOrders->clearPurchasingRevision($row));
 
             $diff = $salesOrders->diffForOpportunityLog($before, $salesOrders->captureForDiff($salesOrder));
             if ($salesOrders->diffHasChanges($diff)) {

@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\BrandController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\IndustryController;
 use App\Http\Controllers\Admin\OpportunityLogController;
+use App\Http\Controllers\Admin\PurchaseOrderLogController;
 use App\Http\Controllers\Admin\SalesOrderLogController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\PurchaseOrderTemplateController;
@@ -184,6 +185,7 @@ Route::middleware('auth')->group(function () {
 
     // Aktivitas & Task
     Route::resource('activities', ActivityController::class)->except(['show']);
+    Route::get('/activities/{activity}', [ActivityController::class, 'show'])->name('activities.show');
     Route::patch('/activities/{activity}/complete', [ActivityController::class, 'complete'])->name('activities.complete');
     Route::post('/activities/{activity}/approve', [ActivityController::class, 'approve'])->name('activities.approve');
     Route::post('/activities/{activity}/reject', [ActivityController::class, 'reject'])->name('activities.reject');
@@ -206,10 +208,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/profile/signature', [ProfileController::class, 'uploadSignature'])->name('profile.signature.store');
     Route::delete('/profile/signature', [ProfileController::class, 'destroySignature'])->name('profile.signature.destroy');
 
-    // Area administrator (Superadmin only)
-    Route::middleware('role:superadmin')->group(function () {
+    // Log SO & PO: Superadmin + Purchasing
+    Route::middleware('role:superadmin,purchasing')->group(function () {
         Route::get('/sales-order-logs', [SalesOrderLogController::class, 'index'])->name('sales-order-logs.index');
         Route::get('/sales-order-logs/{log}', [SalesOrderLogController::class, 'show'])->name('sales-order-logs.show');
+        Route::get('/purchase-order-logs', [PurchaseOrderLogController::class, 'index'])->name('purchase-order-logs.index');
+        Route::get('/purchase-order-logs/{log}', [PurchaseOrderLogController::class, 'show'])->name('purchase-order-logs.show');
+    });
+
+    // Area administrator (Superadmin only)
+    Route::middleware('role:superadmin')->group(function () {
         Route::get('/opportunity-logs', [OpportunityLogController::class, 'index'])->name('opportunity-logs.index');
         Route::get('/opportunity-logs/{log}', [OpportunityLogController::class, 'show'])->name('opportunity-logs.show');
         Route::get('/industries/export', [IndustryController::class, 'export'])->name('industries.export');

@@ -629,6 +629,34 @@ class SalesOrderService
     }
 
     /**
+     * Tandai SO sebagai revisi untuk Purchasing bila sudah ada PO.
+     * Flag hilang saat PO AGC di opportunity yang sama disimpan ulang.
+     */
+    public function markPurchasingRevision(OpportunitySalesOrder $salesOrder): void
+    {
+        if ($salesOrder->isCancelled() || ! $salesOrder->purchaseOrders()->exists()) {
+            return;
+        }
+
+        $this->mergeSnapshot($salesOrder, [
+            'purchasing_revision_pending' => true,
+            'purchasing_revision_at' => now()->format('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function clearPurchasingRevision(OpportunitySalesOrder $salesOrder): void
+    {
+        if (! $salesOrder->hasPurchasingRevision()) {
+            return;
+        }
+
+        $this->mergeSnapshot($salesOrder, [
+            'purchasing_revision_pending' => false,
+            'purchasing_revision_cleared_at' => now()->format('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
      * Update field inti SO (payment, alamat, items, dll) saat masih pending.
      * Status proses (so/payment/delivery) dan dokumen lanjutan tetap dipertahankan.
      *

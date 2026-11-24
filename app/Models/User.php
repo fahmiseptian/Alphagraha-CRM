@@ -271,7 +271,12 @@ class User extends Authenticatable
 
     public function canViewSalesOrderLogs(): bool
     {
-        return $this->isSuperAdmin();
+        return $this->isSuperAdmin() || $this->isPurchasing();
+    }
+
+    public function canViewPurchaseOrderLogs(): bool
+    {
+        return $this->isSuperAdmin() || $this->isPurchasing();
     }
 
     public function canViewOpportunityLogs(): bool

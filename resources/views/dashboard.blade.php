@@ -190,8 +190,8 @@
 {{-- Nominal angka --}}
 <div @class([
     'grid grid-cols-1 gap-4 sm:grid-cols-2',
-    'xl:grid-cols-5' => auth()->user()->isSales(),
-    'xl:grid-cols-4' => ! auth()->user()->isSales(),
+    'xl:grid-cols-5' => is_array($grossProfit),
+    'xl:grid-cols-4' => ! is_array($grossProfit),
 ])>
     <x-stat-card title="Open Pipeline" :value="money($openPipeline)" icon="bi-kanban" color="brand"
                  :href="route('opportunities.index')" />
@@ -201,10 +201,14 @@
                  :href="route('opportunities.index')" />
     <x-stat-card title="Margin" :value="money($wonMargin)" icon="bi-graph-up-arrow" color="purple"
                  :href="route('opportunities.index')" />
-    @if (auth()->user()->isSales() && is_array($grossProfit))
+    @if (is_array($grossProfit))
         <x-stat-card title="Gross Profit" :value="money_signed($grossProfit['total'])" icon="bi-graph-up" color="slate"
                      :sub="'By tgl invoice · '.number_format($grossProfit['count']).' SO'"
-                     :href="$grossProfit['href']" />
+                     :href="$grossProfit['href'] ?? null">
+            @if (! empty($grossProfit['sales_name']))
+                <p class="mt-1 text-xs font-medium text-brand-700">{{ $grossProfit['sales_name'] }}</p>
+            @endif
+        </x-stat-card>
     @endif
 </div>
 
@@ -294,7 +298,7 @@
                                 @if (! auth()->user()->isSales())
                                     <a href="{{ $salesUrl }}"
                                        class="block truncate text-xs font-medium text-slate-800 hover:text-brand-700 hover:underline"
-                                       title="{{ $isSelected ? 'Tampilkan semua sales' : 'Lihat pipeline '.$entry['name'] }}">
+                                       title="{{ $isSelected ? 'Tampilkan semua sales' : 'Lihat Gross Profit '.$entry['name'] }}">
                                         {{ $entry['name'] }}
                                         @if ($entry['user_id'] === auth()->id())
                                             <span class="text-brand-600">· You</span>

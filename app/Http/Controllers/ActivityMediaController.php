@@ -14,6 +14,7 @@ class ActivityMediaController extends Controller
 
     public function store(Request $request, Activity $activity)
     {
+        $this->authorizeActivityManagement();
         $this->authorizeOwnership($activity);
 
         $request->validate([
@@ -30,6 +31,7 @@ class ActivityMediaController extends Controller
 
     public function destroy(Activity $activity, Media $media)
     {
+        $this->authorizeActivityManagement();
         $this->authorizeOwnership($activity);
 
         if ($media->model_type !== Activity::class || (string) $media->model_id !== (string) $activity->id) {
@@ -47,8 +49,13 @@ class ActivityMediaController extends Controller
 
     protected function authorizeOwnership(Activity $activity): void
     {
-        if (! $this->isAdmin() && $activity->assigned_to !== auth()->id() && $activity->created_by !== auth()->id()) {
+        if (! $this->isAdmin() && ! auth()->user()?->isFinance() && $activity->assigned_to !== auth()->id() && $activity->created_by !== auth()->id()) {
             abort(403, 'You do not have access to this activity.');
         }
+    }
+
+    protected function authorizeActivityManagement(): void
+    {
+        abort_if(auth()->user()?->isFinance(), 403, 'Finance hanya dapat melihat activity.');
     }
 }

@@ -33,7 +33,6 @@
             <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                     <th class="px-4 py-3">Sales</th>
-                    <th class="px-4 py-3">Target / Periode</th>
                     <th class="px-4 py-3">Q Aktif</th>
                     <th class="px-4 py-3 text-right">SO Complete</th>
                     <th class="px-4 py-3 text-right">Gross Profit</th>
@@ -49,10 +48,6 @@
                     @php $q = $row['quarter']; @endphp
                     <tr class="hover:bg-slate-50/80">
                         <td class="px-4 py-3 font-medium text-slate-800">{{ $row['sales']->display_name }}</td>
-                        <td class="px-4 py-3 text-slate-600">
-                            <div>{{ money($row['target']) }}</div>
-                            <div class="text-xs text-slate-400">{{ $row['target_period_label'] }}</div>
-                        </td>
                         <td class="px-4 py-3 text-slate-600">{{ $q['label'] ?? '—' }}</td>
                         <td class="px-4 py-3 text-right tabular-nums text-slate-700">{{ number_format($row['so_count']) }}</td>
                         <td class="px-4 py-3 text-right tabular-nums text-slate-700">{{ money_signed($row['gp_total']) }}</td>
@@ -77,7 +72,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="10" class="px-4 py-8 text-center text-slate-400">
+                        <td colspan="9" class="px-4 py-8 text-center text-slate-400">
                             @if (! empty($search))
                                 Tidak ada sales yang cocok dengan “{{ $search }}”.
                             @else

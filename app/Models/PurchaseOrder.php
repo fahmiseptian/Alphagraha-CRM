@@ -79,6 +79,47 @@ class PurchaseOrder extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+    public function logs(): HasMany
+    {
+        return $this->hasMany(PurchaseOrderLog::class, 'purchase_order_id')->orderByDesc('id');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toLogSnapshot(): array
+    {
+        $this->loadMissing(['opportunity.account', 'salesOrder', 'vendor', 'items', 'creator', 'approver']);
+
+        return [
+            'id' => $this->id,
+            'number' => $this->number,
+            'opportunity_id' => $this->opportunity_id,
+            'opportunity_name' => $this->opportunity?->name,
+            'customer' => $this->opportunity?->account?->name ?: $this->opportunity?->company,
+            'sales_order_id' => $this->sales_order_id,
+            'sales_order_number' => $this->salesOrder?->displayNumber(),
+            'vendor' => $this->displayVendorName(),
+            'payment_term' => $this->paymentTermLabel(),
+            'report_top' => $this->report_top,
+            'total' => (float) $this->total,
+            'currency' => $this->currency ?: 'IDR',
+            'approval_status' => $this->approvalLabel(),
+            'approval_note' => $this->approval_note,
+            'created_by_name' => $this->creator?->display_name,
+            'approved_by_name' => $this->approver?->display_name,
+            'items' => $this->items->map(fn (PurchaseOrderItem $item) => [
+                'name' => trim((string) ($item->product_name ?: $item->opportunity_product_name)) ?: 'Item',
+                'brand' => $item->brand,
+                'qty' => (float) $item->quantity,
+                'unit_price' => (float) $item->unit_price,
+                'line_total' => (float) $item->line_total,
+                'description' => $item->description,
+                'note' => $item->note,
+            ])->all(),
+        ];
+    }
+
     public function displayVendorName(): string
     {
         return $this->vendor?->name ?: ($this->vendor_name ?: '—');

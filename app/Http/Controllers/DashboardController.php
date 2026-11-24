@@ -221,22 +221,39 @@ class DashboardController extends Controller
             : 'Sales Pipeline';
 
         $grossProfit = null;
-        if ($user->isSales()) {
+        $grossProfitUser = $user->isSales()
+            ? $user
+            : ($selectedSalesId ? User::query()->find($selectedSalesId) : null);
+        if ($grossProfitUser) {
             $grossProfit = $commissions->grossProfitForPeriod(
-                $user,
+                $grossProfitUser,
                 $periodRange[0] ?? null,
                 $periodRange[1] ?? null,
-                $matchedQuarter['commission_key'] ?? null,
+                $user->isSales() ? ($matchedQuarter['commission_key'] ?? null) : null,
                 false
             );
-            $grossProfit['href'] = ! empty($matchedQuarter['commission_key'])
-                ? route('commissions.detail', [
-                    'user' => $user->id,
+            $performanceYear = (int) (($periodRange[0] ?? now())->year);
+            if ($period === 'alltime' || $performanceYear < 2000) {
+                $performanceYear = (int) now()->year;
+            }
+            $canOpenPerformance = $user->canManageCommissions()
+                || (string) $user->id === (string) $grossProfitUser->id;
+            if ($user->isSales() && ! empty($matchedQuarter['commission_key'])) {
+                $grossProfit['href'] = route('commissions.detail', [
+                    'user' => $grossProfitUser->id,
                     'section' => 'gross-profit',
                     'year' => $matchedQuarter['start']->year,
                     'period' => $matchedQuarter['commission_key'],
-                ])
-                : route('commissions.show', $user);
+                ]);
+            } elseif ($canOpenPerformance) {
+                $grossProfit['href'] = route('commissions.show', [
+                    'user' => $grossProfitUser->id,
+                    'year' => $performanceYear,
+                ]);
+            }
+            if (! $user->isSales()) {
+                $grossProfit['sales_name'] = $selectedSales?->display_name;
+            }
         }
 
         return view('dashboard', compact(

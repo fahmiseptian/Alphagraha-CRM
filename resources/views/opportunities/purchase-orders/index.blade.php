@@ -15,6 +15,9 @@
 
     <x-page-header title="Purchase Orders" :description="$description">
         <x-slot:actions>
+            @if (auth()->user()?->canViewPurchaseOrderLogs())
+                <x-btn href="{{ route('purchase-order-logs.index') }}" variant="secondary" icon="bi-journal-check">Log PO</x-btn>
+            @endif
             @if ($backUrl ?? null)
                 <x-btn :href="$backUrl" variant="secondary" icon="bi-arrow-left">Kembali ke SO</x-btn>
             @else

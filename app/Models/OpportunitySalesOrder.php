@@ -313,6 +313,16 @@ class OpportunitySalesOrder extends Model
         return $soStatus === 'cancelled' || $this->cancelStatus() === self::CANCEL_APPROVED;
     }
 
+    /**
+     * SO sudah diubah setelah ada PO, dan Purchasing belum menyimpan ulang PO AGC.
+     */
+    public function hasPurchasingRevision(): bool
+    {
+        $flag = $this->payloadValue('purchasing_revision_pending');
+
+        return $flag === true || $flag === 1 || $flag === '1';
+    }
+
     public function soStatus(): string
     {
         $status = strtolower(trim((string) ($this->statusSnapshot()['so_status'] ?? '')));

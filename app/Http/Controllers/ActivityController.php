@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ScopesToUser;
 use App\Models\Activity;
 use App\Models\Espo\Account;
+use App\Models\Espo\Contact;
+use App\Models\Espo\EspoUser;
 use App\Models\User;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
@@ -16,16 +18,47 @@ class ActivityController extends Controller
 
     public function index(Request $request)
     {
-        Activity::approvePastPendingEvents();
+        if (! auth()->user()?->isFinance()) {
+            Activity::approvePastPendingEvents();
+        }
 
         $filter = $request->get('filter', 'upcoming');
         $type = $request->get('type');
+        $filters = $request->validate([
+            'sales_id' => ['nullable', 'string'],
+            'account_id' => ['nullable', 'string'],
+            'from_date' => ['nullable', 'date_format:Y-m-d'],
+            'to_date' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from_date'],
+        ]);
+        $salesId = trim((string) ($filters['sales_id'] ?? ''));
+        $accountId = trim((string) ($filters['account_id'] ?? ''));
+        $fromDate = $filters['from_date'] ?? '';
+        $toDate = $filters['to_date'] ?? '';
 
-        $query = Activity::with(['account', 'lead', 'assignee']);
+        $query = Activity::with(['account', 'contact.emailAddresses', 'contact.phoneNumbers', 'lead', 'assignee']);
 
         // Sales hanya melihat aktivitas miliknya.
-        if (! $this->isAdmin()) {
+        if (! $this->isAdmin() && ! auth()->user()?->isFinance()) {
             $query->where('assigned_to', auth()->id());
+            $salesId = '';
+        } elseif ($salesId !== '' && EspoUser::query()->activeSales()->whereKey($salesId)->exists()) {
+            $query->where('assigned_to', $salesId);
+        } else {
+            $salesId = '';
+        }
+
+        $filterAccounts = $this->scopeAssigned(Account::query())->orderBy('name')->get(['id', 'name']);
+        if ($accountId !== '' && $filterAccounts->contains('id', $accountId)) {
+            $query->where('account_id', $accountId);
+        } else {
+            $accountId = '';
+        }
+
+        if ($fromDate !== '') {
+            $query->whereDate('starts_at', '>=', $fromDate);
+        }
+        if ($toDate !== '') {
+            $query->whereDate('starts_at', '<=', $toDate);
         }
 
         if ($type) {
@@ -50,11 +83,19 @@ class ActivityController extends Controller
             'filter' => $filter,
             'type' => $type,
             'types' => Activity::TYPES,
+            'salesId' => $salesId,
+            'salesUsers' => ($this->isAdmin() || auth()->user()?->isFinance()) ? EspoUser::query()->activeSales()->orderBy('name')->get(['id', 'name', 'first_name', 'last_name', 'user_name']) : collect(),
+            'filterAccounts' => $filterAccounts,
+            'accountId' => $accountId,
+            'fromDate' => $fromDate,
+            'toDate' => $toDate,
         ]);
     }
 
     public function create(Request $request)
     {
+        $this->authorizeActivityManagement();
+
         return view('activities.create', $this->formData() + [
             'activity' => new Activity(['type' => 'followup', 'priority' => 'normal', 'status' => 'planned']),
             'presetAccount' => $request->get('account_id'),
@@ -62,11 +103,26 @@ class ActivityController extends Controller
         ]);
     }
 
+    public function show(Activity $activity)
+    {
+        $this->authorizeOwnership($activity);
+        $activity->load(['account', 'contact.emailAddresses', 'contact.phoneNumbers', 'lead', 'assignee', 'creator', 'approver']);
+
+        return view('activities.show', [
+            'activity' => $activity,
+            'mediaByCollection' => collect(Activity::MEDIA_COLLECTIONS)
+                ->mapWithKeys(fn ($label, $key) => [$key => $activity->getMedia($key)]),
+        ]);
+    }
+
     public function store(Request $request)
     {
+        $this->authorizeActivityManagement();
+
         $data = $this->validateData($request);
         $data['created_by'] = auth()->id();
         $data['assigned_to'] = $data['assigned_to'] ?? auth()->id();
+        $data['due_at'] = $data['ends_at'] ?? null;
 
         $activity = new Activity($data);
         $activity->syncEventApproval(auth()->user());
@@ -95,6 +151,7 @@ class ActivityController extends Controller
 
     public function edit(Activity $activity)
     {
+        $this->authorizeActivityManagement();
         $this->authorizeOwnership($activity);
         Activity::approvePastPendingEvents();
         $activity->refresh();
@@ -109,9 +166,11 @@ class ActivityController extends Controller
 
     public function update(Request $request, Activity $activity)
     {
+        $this->authorizeActivityManagement();
         $this->authorizeOwnership($activity);
 
         $data = $this->validateData($request);
+        $data['due_at'] = $data['ends_at'] ?? null;
         $wasPending = $activity->isEventApprovalPending();
         $activity->fill($data);
         $activity->syncEventApproval(auth()->user());
@@ -131,6 +190,7 @@ class ActivityController extends Controller
 
     public function destroy(Activity $activity)
     {
+        $this->authorizeActivityManagement();
         $this->authorizeOwnership($activity);
         $activity->delete();
 
@@ -139,6 +199,7 @@ class ActivityController extends Controller
 
     public function complete(Activity $activity)
     {
+        $this->authorizeActivityManagement();
         $this->authorizeOwnership($activity);
         $activity->update(['status' => 'completed', 'completed_at' => now()]);
 
@@ -149,6 +210,7 @@ class ActivityController extends Controller
 
     public function approve(Request $request, Activity $activity)
     {
+        $this->authorizeActivityManagement();
         if (! auth()->user()?->canApproveEventTraining()) {
             abort(403);
         }
@@ -183,6 +245,7 @@ class ActivityController extends Controller
 
     public function reject(Request $request, Activity $activity)
     {
+        $this->authorizeActivityManagement();
         if (! auth()->user()?->canApproveEventTraining()) {
             abort(403);
         }
@@ -215,24 +278,51 @@ class ActivityController extends Controller
 
     protected function validateData(Request $request): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'type' => ['required', Rule::in(array_keys(Activity::TYPES))],
             'subject' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            'account_id' => ['nullable', 'string'],
+            'account_id' => ['required', 'string', Rule::exists('account', 'id')->where('deleted', 0)],
+            'contact_id' => [
+                'required', 'string',
+                Rule::exists('contact', 'id')->where('deleted', 0)->where('account_id', $request->input('account_id')),
+            ],
+            'location' => ['required', 'string', 'max:255'],
             'lead_id' => ['nullable', 'string'],
             'status' => ['required', Rule::in(array_keys(Activity::STATUSES))],
             'priority' => ['required', Rule::in(['low', 'normal', 'high'])],
             'due_at' => ['nullable', 'date'],
+            'starts_at' => ['required', 'date'],
+            'ends_at' => ['required', 'date', 'after_or_equal:starts_at'],
             'reminder_at' => ['nullable', 'date'],
             'assigned_to' => ['nullable', Rule::exists('user', 'id')->where('deleted', 0)],
         ]);
+
+        $accountQuery = Account::query()->whereKey($request->input('account_id'));
+        if ($this->isAdmin()) {
+            $accountQuery->where('assigned_user_id', $data['assigned_to'] ?? auth()->id());
+        } else {
+            $this->scopeAssigned($accountQuery);
+        }
+
+        if (! $accountQuery->exists()) {
+            abort(403, 'Anda tidak memiliki akses ke customer ini.');
+        }
+
+        return $data;
     }
 
     protected function formData(): array
     {
-        $accounts = $this->scopeAssigned(Account::query())
-            ->orderBy('name')->get(['id', 'name']);
+        $accountQuery = Account::query();
+        if (! $this->isAdmin()) {
+            $this->scopeAssigned($accountQuery);
+        }
+        $accounts = $accountQuery->orderBy('name')->get(['id', 'name', 'assigned_user_id']);
+        $contacts = Contact::query()
+            ->whereIn('account_id', $accounts->pluck('id'))
+            ->with(['emailAddresses', 'phoneNumbers'])
+            ->orderBy('first_name')->get(['id', 'account_id', 'first_name', 'last_name', 'name', 'job_role']);
 
         $users = $this->isAdmin()
             ? User::internalActive()->orderBy('name')->get(['id', 'name'])
@@ -240,7 +330,9 @@ class ActivityController extends Controller
 
         return [
             'accounts' => $accounts,
+            'contacts' => $contacts,
             'users' => $users,
+            'filterAccountsByAssignee' => $this->isAdmin(),
             'types' => Activity::TYPES,
             'statuses' => Activity::STATUSES,
         ];
@@ -248,9 +340,14 @@ class ActivityController extends Controller
 
     protected function authorizeOwnership(Activity $activity): void
     {
-        if (! $this->isAdmin() && $activity->assigned_to !== auth()->id() && $activity->created_by !== auth()->id()) {
+        if (! $this->isAdmin() && ! auth()->user()?->isFinance() && $activity->assigned_to !== auth()->id() && $activity->created_by !== auth()->id()) {
             abort(403, 'You do not have access to this activity.');
         }
+    }
+
+    protected function authorizeActivityManagement(): void
+    {
+        abort_if(auth()->user()?->isFinance(), 403, 'Finance hanya dapat melihat activity.');
     }
 
     protected function syncEventApprovalNotifications(Activity $activity, bool $wasPending = false): void

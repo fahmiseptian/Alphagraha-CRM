@@ -7,6 +7,7 @@ use App\Models\OpportunityLog;
 use App\Models\OpportunitySalesOrder;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
+use App\Models\PurchaseOrderLog;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorStock;
@@ -68,8 +69,10 @@ class PurchaseOrderService
                 ['opportunity_id' => $opportunity->id]
             );
 
-            $po = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'creator']);
+            $po = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'creator', 'opportunity.account']);
             $this->dispatchApprovalNotifications($po, $opportunity);
+            $this->recordLog($po, PurchaseOrderLog::ACTION_CREATED);
+            $this->clearPurchasingRevision($po);
 
             return $po;
         });
@@ -126,7 +129,9 @@ class PurchaseOrderService
                 ]);
 
                 $this->syncItems($po, $poData['items'] ?? [], $createdBy);
-                $created[] = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'creator']);
+                $freshPo = $po->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'creator', 'opportunity.account']);
+                $this->recordLog($freshPo, PurchaseOrderLog::ACTION_CREATED);
+                $created[] = $freshPo;
             }
 
             $this->syncOpportunityCostsFromPo($opportunity);
@@ -138,6 +143,7 @@ class PurchaseOrderService
 
             foreach ($created as $po) {
                 $this->dispatchApprovalNotifications($po, $opportunity);
+                $this->clearPurchasingRevision($po);
             }
 
             return $created;
@@ -211,6 +217,7 @@ class PurchaseOrderService
         ?string $reportTopSource = null
     ): PurchaseOrder {
         return DB::transaction(function () use ($purchaseOrder, $number, $items, $paymentTerm, $updatedBy, $vendorId, $vendorName, $salesOrderId, $reportTop, $reportTopSource) {
+            $before = $this->captureForDiff($purchaseOrder);
             [$vendorId, $vendorName] = $this->resolveVendor($vendorId, $vendorName);
 
             $payload = [
@@ -249,7 +256,8 @@ class PurchaseOrderService
                 $this->syncReportTopForSalesOrder(
                     $resolvedSalesOrderId,
                     $payload['report_top'] ?? null,
-                    $payload['report_top_source'] ?? null
+                    $payload['report_top_source'] ?? null,
+                    (int) $purchaseOrder->id
                 );
             }
 
@@ -262,7 +270,11 @@ class PurchaseOrderService
                 );
             }
 
-            return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
+            $fresh = $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'opportunity.account', 'creator', 'approver']);
+            $this->recordIfChanged($fresh, $before);
+            $this->clearPurchasingRevision($fresh);
+
+            return $fresh;
         });
     }
 
@@ -272,14 +284,31 @@ class PurchaseOrderService
     public function syncReportTopForSalesOrder(
         int $salesOrderId,
         ?string $reportTop,
-        ?string $reportTopSource
+        ?string $reportTopSource,
+        ?int $exceptPurchaseOrderId = null
     ): void {
+        $siblings = PurchaseOrder::query()
+            ->where('sales_order_id', $salesOrderId)
+            ->when($exceptPurchaseOrderId, fn ($q) => $q->where('id', '!=', $exceptPurchaseOrderId))
+            ->get();
+        $befores = [];
+        foreach ($siblings as $po) {
+            $befores[$po->id] = $this->captureForDiff($po);
+        }
+
         PurchaseOrder::query()
             ->where('sales_order_id', $salesOrderId)
             ->update([
                 'report_top' => $this->normalizeReportTop($reportTop),
                 'report_top_source' => $this->normalizeReportTopSource($reportTopSource),
             ]);
+
+        foreach ($siblings as $po) {
+            $fresh = $po->fresh(['items', 'vendor', 'salesOrder', 'opportunity.account', 'creator', 'approver']);
+            if ($fresh) {
+                $this->recordIfChanged($fresh, $befores[$po->id]);
+            }
+        }
     }
 
     /**
@@ -293,17 +322,35 @@ class PurchaseOrderService
             return;
         }
 
-        PurchaseOrder::query()
+        $affected = PurchaseOrder::query()
             ->where('sales_order_id', $salesOrder->id)
             ->where(function ($q) {
                 $q->where('report_top_source', PurchaseOrder::REPORT_TOP_FROM_SO)
                     ->orWhereNull('report_top_source')
                     ->orWhere('report_top_source', '');
             })
+            ->get();
+        if ($affected->isEmpty()) {
+            return;
+        }
+        $befores = [];
+        foreach ($affected as $po) {
+            $befores[$po->id] = $this->captureForDiff($po);
+        }
+
+        PurchaseOrder::query()
+            ->whereIn('id', $affected->pluck('id'))
             ->update([
                 'report_top' => $this->normalizeReportTop($label),
                 'report_top_source' => PurchaseOrder::REPORT_TOP_FROM_SO,
             ]);
+
+        foreach ($affected as $po) {
+            $fresh = $po->fresh(['items', 'vendor', 'salesOrder', 'opportunity.account', 'creator', 'approver']);
+            if ($fresh) {
+                $this->recordIfChanged($fresh, $befores[$po->id]);
+            }
+        }
     }
 
     /**
@@ -314,10 +361,14 @@ class PurchaseOrderService
         PurchaseOrder $purchaseOrder,
         int $salesOrderId
     ): PurchaseOrder {
+        $before = $this->captureForDiff($purchaseOrder);
         $salesOrderId = $this->resolveSalesOrderId($opportunity, $salesOrderId);
         $purchaseOrder->update(['sales_order_id' => $salesOrderId]);
 
-        return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder']);
+        $fresh = $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'opportunity.account', 'creator', 'approver']);
+        $this->recordIfChanged($fresh, $before);
+
+        return $fresh;
     }
 
     /**
@@ -735,6 +786,8 @@ class PurchaseOrderService
             abort(422, 'Purchase Order tidak dalam status menunggu approval.');
         }
 
+        $before = $this->captureForDiff($purchaseOrder);
+
         $purchaseOrder->forceFill([
             'approval_status' => PurchaseOrder::APPROVAL_APPROVED,
             'approved_by' => $approvedBy,
@@ -744,9 +797,11 @@ class PurchaseOrderService
 
         $notifications = app(NotificationService::class);
         $notifications->markPurchaseOrderApprovalActioned($purchaseOrder->id);
-        $notifications->notifyPurchaseOrderApproved($purchaseOrder->fresh(['salesOrder', 'vendor']), $opportunity, $note);
+        $fresh = $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'approver', 'opportunity.account', 'creator']);
+        $notifications->notifyPurchaseOrderApproved($fresh, $opportunity, $note);
+        $this->recordDecision($fresh, PurchaseOrderLog::ACTION_APPROVED, $before, $note);
 
-        return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'approver']);
+        return $fresh;
     }
 
     public function reject(PurchaseOrder $purchaseOrder, Opportunity $opportunity, string $rejectedBy, ?string $note = null): PurchaseOrder
@@ -754,6 +809,8 @@ class PurchaseOrderService
         if (! $purchaseOrder->isApprovalPending()) {
             abort(422, 'Purchase Order tidak dalam status menunggu approval.');
         }
+
+        $before = $this->captureForDiff($purchaseOrder);
 
         $purchaseOrder->forceFill([
             'approval_status' => PurchaseOrder::APPROVAL_REJECTED,
@@ -764,9 +821,11 @@ class PurchaseOrderService
 
         $notifications = app(NotificationService::class);
         $notifications->markPurchaseOrderApprovalActioned($purchaseOrder->id);
-        $notifications->notifyPurchaseOrderRejected($purchaseOrder->fresh(['salesOrder', 'vendor', 'creator']), $opportunity, $note);
+        $fresh = $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'approver', 'opportunity.account', 'creator']);
+        $notifications->notifyPurchaseOrderRejected($fresh, $opportunity, $note);
+        $this->recordDecision($fresh, PurchaseOrderLog::ACTION_REJECTED, $before, $note);
 
-        return $purchaseOrder->fresh(['items.vendorQuotes', 'vendor', 'salesOrder', 'approver']);
+        return $fresh;
     }
 
     protected function creatorIsSuperAdmin(?string $createdBy): bool
@@ -810,5 +869,331 @@ class PurchaseOrderService
         if ($purchaseOrder->isApproved()) {
             $notifications->notifyPurchaseOrderApproved($purchaseOrder, $opportunity);
         }
+    }
+
+    /**
+     * Update PO AGC menghapus status Revisi di SO terkait
+     * dan SO lain pada opportunity yang sama.
+     */
+    protected function clearPurchasingRevision(PurchaseOrder $purchaseOrder): void
+    {
+        $ids = collect();
+        $linkedId = (int) $purchaseOrder->sales_order_id;
+        if ($linkedId > 0) {
+            $ids->push($linkedId);
+        }
+
+        if (filled($purchaseOrder->opportunity_id)) {
+            $revisedIds = OpportunitySalesOrder::query()
+                ->where('opportunity_id', $purchaseOrder->opportunity_id)
+                ->where('agc_payload->purchasing_revision_pending', true)
+                ->pluck('id');
+            $ids = $ids->merge($revisedIds);
+        }
+
+        if ($ids->isEmpty()) {
+            return;
+        }
+
+        $service = app(SalesOrderService::class);
+        OpportunitySalesOrder::query()
+            ->whereIn('id', $ids->unique()->all())
+            ->get()
+            ->each(fn (OpportunitySalesOrder $salesOrder) => $service->clearPurchasingRevision($salesOrder));
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $changes
+     */
+    public function recordLog(PurchaseOrder $purchaseOrder, string $action, ?array $changes = null, ?User $actor = null): PurchaseOrderLog
+    {
+        $actor ??= auth()->user();
+
+        return PurchaseOrderLog::query()->create([
+            'purchase_order_id' => $purchaseOrder->id,
+            'opportunity_id' => $purchaseOrder->opportunity_id,
+            'action' => $action,
+            'number' => $purchaseOrder->number,
+            'actor_id' => $actor?->id,
+            'actor_name' => $actor?->display_name,
+            'snapshot' => $purchaseOrder->toLogSnapshot(),
+            'changes' => $changes,
+            'ip_address' => request()?->ip(),
+            'created_at' => now(),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function captureForDiff(PurchaseOrder $purchaseOrder): array
+    {
+        $purchaseOrder->loadMissing(['items', 'vendor', 'salesOrder']);
+
+        $items = [];
+        foreach ($purchaseOrder->items as $index => $item) {
+            $name = trim((string) ($item->product_name ?: $item->opportunity_product_name));
+            $items[] = [
+                'name' => $name !== '' ? $name : 'Item',
+                'brand' => trim((string) $item->brand),
+                'qty' => (float) $item->quantity,
+                'unit_price' => (float) $item->unit_price,
+                'line_total' => (float) $item->line_total,
+                'description' => trim(strip_tags((string) $item->description)),
+                'note' => trim((string) $item->note),
+                'index' => $index,
+            ];
+        }
+
+        $vendor = $purchaseOrder->displayVendorName();
+
+        return [
+            'number' => trim((string) $purchaseOrder->number),
+            'vendor' => $vendor === '—' ? '' : $vendor,
+            'payment_term' => $purchaseOrder->paymentTermLabel(),
+            'sales_order' => trim((string) ($purchaseOrder->salesOrder?->displayNumber() ?? '')),
+            'report_top' => trim((string) $purchaseOrder->report_top),
+            'approval' => $purchaseOrder->approvalLabel(),
+            'approval_note' => trim((string) $purchaseOrder->approval_note),
+            'total' => round((float) $purchaseOrder->total, 2),
+            'items' => $items,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     */
+    public function recordIfChanged(PurchaseOrder $purchaseOrder, array $before, ?User $actor = null): void
+    {
+        $diff = $this->diffPurchaseOrder($before, $this->captureForDiff($purchaseOrder));
+        if (! $this->diffHasChanges($diff)) {
+            return;
+        }
+
+        $diff['summary'] = $this->summarizeDiff((string) $purchaseOrder->number, $diff);
+        $this->recordLog($purchaseOrder, PurchaseOrderLog::ACTION_UPDATED, $diff, $actor);
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     */
+    protected function recordDecision(PurchaseOrder $purchaseOrder, string $action, array $before, ?string $note): void
+    {
+        $diff = $this->diffPurchaseOrder($before, $this->captureForDiff($purchaseOrder));
+        $verb = $action === PurchaseOrderLog::ACTION_APPROVED ? 'disetujui' : 'ditolak';
+        $diff['summary'] = 'PO '.$purchaseOrder->number.' '.$verb;
+        $this->recordLog($purchaseOrder, $action, $diff);
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array{fields: list<array<string, mixed>>, products: array{added: list<array<string, mixed>>, removed: list<array<string, mixed>>, changed: list<array<string, mixed>>}}
+     */
+    public function diffPurchaseOrder(array $before, array $after): array
+    {
+        $labels = [
+            'number' => 'No. PO',
+            'vendor' => 'Vendor',
+            'payment_term' => 'Kondisi',
+            'sales_order' => 'Sales Order',
+            'report_top' => 'TOP laporan',
+            'approval' => 'Status approval',
+            'approval_note' => 'Catatan approval',
+            'total' => 'Total exclude',
+        ];
+
+        $fields = [];
+        foreach ($labels as $key => $label) {
+            $fromRaw = $before[$key] ?? '';
+            $toRaw = $after[$key] ?? '';
+            $from = $key === 'total' ? $this->moneyLabel($fromRaw) : $this->stringifyDiffValue($fromRaw);
+            $to = $key === 'total' ? $this->moneyLabel($toRaw) : $this->stringifyDiffValue($toRaw);
+            if ($from === $to) {
+                continue;
+            }
+            $fields[] = [
+                'field' => 'po_'.$key,
+                'label' => $label,
+                'from' => $from,
+                'to' => $to,
+                'from_display' => $from !== '' ? $from : '—',
+                'to_display' => $to !== '' ? $to : '—',
+            ];
+        }
+
+        return [
+            'fields' => $fields,
+            'products' => $this->diffPurchaseOrderItems(
+                is_array($before['items'] ?? null) ? $before['items'] : [],
+                is_array($after['items'] ?? null) ? $after['items'] : []
+            ),
+        ];
+    }
+
+    /**
+     * @param  array{fields?: list<array<string, mixed>>, products?: array<string, mixed>}  $diff
+     */
+    public function diffHasChanges(array $diff): bool
+    {
+        if (($diff['fields'] ?? []) !== []) {
+            return true;
+        }
+
+        $products = $diff['products'] ?? [];
+
+        return ($products['added'] ?? []) !== []
+            || ($products['removed'] ?? []) !== []
+            || ($products['changed'] ?? []) !== [];
+    }
+
+    /**
+     * @param  array{fields?: list<array<string, mixed>>, products?: array<string, mixed>}  $diff
+     */
+    public function summarizeDiff(string $number, array $diff): string
+    {
+        $bits = [];
+        foreach (array_slice($diff['fields'] ?? [], 0, 5) as $field) {
+            $bits[] = ((string) ($field['label'] ?? 'Field')).' '
+                .((string) ($field['from_display'] ?? '—')).' → '
+                .((string) ($field['to_display'] ?? '—'));
+        }
+        if (($diff['products']['added'] ?? []) !== []) {
+            $bits[] = count($diff['products']['added']).' item ditambah';
+        }
+        if (($diff['products']['removed'] ?? []) !== []) {
+            $bits[] = count($diff['products']['removed']).' item dihapus';
+        }
+        if (($diff['products']['changed'] ?? []) !== []) {
+            $bits[] = count($diff['products']['changed']).' item diubah';
+        }
+
+        $detail = $bits !== [] ? implode(' · ', $bits) : 'ada perubahan';
+
+        return mb_substr('PO '.$number.' diubah: '.$detail, 0, 500);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $before
+     * @param  list<array<string, mixed>>  $after
+     * @return array{added: list<array<string, mixed>>, removed: list<array<string, mixed>>, changed: list<array<string, mixed>>}
+     */
+    protected function diffPurchaseOrderItems(array $before, array $after): array
+    {
+        $labels = [
+            'name' => 'Nama produk',
+            'brand' => 'Brand',
+            'qty' => 'Qty',
+            'unit_price' => 'Harga',
+            'line_total' => 'Jumlah',
+            'description' => 'Spesifikasi',
+            'note' => 'Catatan',
+        ];
+        $moneyKeys = ['unit_price', 'line_total'];
+
+        $beforeByKey = $this->indexPoItems($before);
+        $afterByKey = $this->indexPoItems($after);
+        $added = [];
+        $removed = [];
+        $changed = [];
+
+        foreach ($beforeByKey as $key => $old) {
+            if (! isset($afterByKey[$key])) {
+                $removed[] = [
+                    'name' => (string) ($old['name'] ?? 'Item'),
+                    'quantity' => $old['qty'] ?? null,
+                ];
+                continue;
+            }
+
+            $new = $afterByKey[$key];
+            $itemChanges = [];
+            foreach ($labels as $field => $label) {
+                $from = in_array($field, $moneyKeys, true)
+                    ? $this->moneyLabel($old[$field] ?? 0)
+                    : $this->stringifyDiffValue($old[$field] ?? '');
+                $to = in_array($field, $moneyKeys, true)
+                    ? $this->moneyLabel($new[$field] ?? 0)
+                    : $this->stringifyDiffValue($new[$field] ?? '');
+                if ($field === 'qty') {
+                    $from = $this->qtyLabel($old[$field] ?? '');
+                    $to = $this->qtyLabel($new[$field] ?? '');
+                }
+                if ($from === $to) {
+                    continue;
+                }
+                $itemChanges[] = [
+                    'field' => $field,
+                    'label' => $label,
+                    'from_display' => $from !== '' ? $from : '—',
+                    'to_display' => $to !== '' ? $to : '—',
+                ];
+            }
+
+            if ($itemChanges !== []) {
+                $changed[] = [
+                    'name' => (string) ($new['name'] ?? $old['name'] ?? 'Item'),
+                    'changes' => $itemChanges,
+                ];
+            }
+        }
+
+        foreach ($afterByKey as $key => $new) {
+            if (isset($beforeByKey[$key])) {
+                continue;
+            }
+            $added[] = [
+                'name' => (string) ($new['name'] ?? 'Item'),
+                'quantity' => $new['qty'] ?? null,
+            ];
+        }
+
+        return compact('added', 'removed', 'changed');
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @return array<string, array<string, mixed>>
+     */
+    protected function indexPoItems(array $items): array
+    {
+        $counts = [];
+        $indexed = [];
+        foreach ($items as $row) {
+            $name = mb_strtolower(trim((string) ($row['name'] ?? 'item')));
+            $counts[$name] = ($counts[$name] ?? 0) + 1;
+            $indexed[$name.'#'.$counts[$name]] = $row;
+        }
+
+        return $indexed;
+    }
+
+    protected function stringifyDiffValue(mixed $value): string
+    {
+        if (is_bool($value)) {
+            return $value ? 'Ya' : 'Tidak';
+        }
+        if (is_float($value) || is_int($value)) {
+            $text = rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
+
+            return $text === '' ? '0' : $text;
+        }
+
+        return trim((string) $value);
+    }
+
+    protected function moneyLabel(mixed $value): string
+    {
+        return 'Rp '.number_format((float) $value, 0, ',', '.');
+    }
+
+    protected function qtyLabel(mixed $value): string
+    {
+        $number = (float) $value;
+        if (abs($number - round($number)) < 0.001) {
+            return (string) (int) round($number);
+        }
+
+        return rtrim(rtrim(number_format($number, 2, '.', ''), '0'), '.');
     }
 }
