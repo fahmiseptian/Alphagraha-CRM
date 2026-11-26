@@ -40,7 +40,7 @@
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
                 <label class="crm-label">Customer <span class="text-red-500">*</span></label>
-                <select name="account_id" id="activity-account" required class="select2 w-full" data-filter-by-assignee="{{ $filterAccountsByAssignee ? 'true' : 'false' }}" data-placeholder="Pilih customer">
+                <select name="account_id" id="activity-account" required class="select2 w-full" data-placeholder="Pilih customer">
                     <option value="">Pilih customer dahulu</option>
                     @foreach ($accounts as $acc)
                         <option value="{{ $acc->id }}" data-assigned-sales="{{ $acc->assigned_user_id }}" @selected(old('account_id', $activity->account_id ?? ($presetAccount ?? null)) === $acc->id)>{{ $acc->name }}</option>
@@ -57,7 +57,7 @@
                         </a>
                     @endif
                 </div>
-                <select name="contact_id" id="activity-contact" required class="select2 w-full" disabled data-placeholder="Pilih customer terlebih dahulu">
+                <select name="contact_id" id="" required class="select2 w-full" data-placeholder="Pilih customer terlebih dahulu">
                     <option value="">Pilih customer terlebih dahulu</option>
                     @foreach ($contacts as $contact)
                         <option value="{{ $contact->id }}" data-account="{{ $contact->account_id }}"
@@ -144,52 +144,39 @@
 (function () {
     const account = document.getElementById('activity-account');
     const contact = document.getElementById('activity-contact');
-    const assignee = document.getElementById('activity-assigned-to');
     const addContact = document.getElementById('activity-add-contact');
     if (!account || !contact) return;
     const accountPlaceholder = account.options[0].cloneNode(true);
-    const accountOptions = Array.from(account.options).slice(1).map(option => option.cloneNode(true));
-    const contactPlaceholder = contact.options[0].cloneNode(true);
     const contactOptions = Array.from(contact.options).slice(1).map(option => option.cloneNode(true));
-
-    const syncAccounts = function () {
-        if (account.dataset.filterByAssignee !== 'true') return;
-        const assignedTo = assignee ? assignee.value : '';
-        const selectedAccountId = account.value;
-        account.replaceChildren(accountPlaceholder.cloneNode(true));
-        accountOptions
-            .filter(option => !!assignedTo && option.dataset.assignedSales === assignedTo)
-            .forEach(option => account.add(option.cloneNode(true)));
-        account.value = accountOptions.some(option => option.value === selectedAccountId && option.dataset.assignedSales === assignedTo)
-            ? selectedAccountId
-            : '';
-        if (window.jQuery) window.jQuery(account).trigger('change');
-        else account.dispatchEvent(new Event('change'));
-    };
 
     const syncContacts = function () {
         const accountId = account.value;
         const selectedContactId = contact.value;
         const availableContacts = contactOptions.filter(option => !!accountId && option.dataset.account === accountId);
-        contact.replaceChildren(contactPlaceholder.cloneNode(true), ...availableContacts.map(option => option.cloneNode(true)));
-        contact.value = availableContacts.some(option => option.value === selectedContactId) ? selectedContactId : '';
-        contact.disabled = !accountId;
-        contact.options[0].textContent = !accountId ? 'Pilih customer terlebih dahulu' : (availableContacts.length ? 'Pilih PIC customer' : 'Belum ada PIC untuk customer ini');
+        contact.disabled = false;
+        const placeholder = !accountId ? 'Pilih customer terlebih dahulu' : (availableContacts.length ? 'Pilih PIC customer' : 'Belum ada PIC untuk customer ini');
+        const selected = availableContacts.some(option => option.value === selectedContactId) ? selectedContactId : '';
         if (addContact) {
             addContact.href = @json(route('contacts.create')) + (accountId ? '?account_id=' + encodeURIComponent(accountId) : '');
             addContact.classList.toggle('hidden', !accountId);
         }
-        if (window.jQuery && window.jQuery.fn.select2) window.jQuery(contact).trigger('change.select2');
+        if (window.CrmSelect2) {
+            window.CrmSelect2.setOptions(contact, availableContacts.map(option => ({
+                id: option.value,
+                text: option.textContent.trim(),
+            })), selected, placeholder);
+        } else {
+            const placeholderOption = new Option(placeholder, '', false, false);
+            contact.replaceChildren(placeholderOption, ...availableContacts.map(option => option.cloneNode(true)));
+            contact.value = selected;
+        }
     };
 
     if (window.jQuery) {
         window.jQuery(account).on('change', syncContacts);
-        if (assignee) window.jQuery(assignee).on('change', syncAccounts);
     } else {
         account.addEventListener('change', syncContacts);
-        if (assignee) assignee.addEventListener('change', syncAccounts);
     }
-    syncAccounts();
     syncContacts();
 })();
 </script>
