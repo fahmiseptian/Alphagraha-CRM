@@ -2,6 +2,7 @@
 
 namespace App\Models\Espo;
 
+use App\Models\CustomerAddress;
 use App\Models\Espo\Concerns\EspoEntity;
 use App\Models\OpportunityEntertainment;
 use App\Models\OpportunityLog;
@@ -52,6 +53,7 @@ class Opportunity extends Model implements HasMedia
         'crm_margin_requested_at', 'crm_margin_reviewed_by', 'crm_margin_reviewed_at', 'crm_margin_note',
         'crm_top_status', 'crm_top_customer', 'crm_top_requested_by', 'crm_top_requested_at',
         'crm_top_reviewed_by', 'crm_top_reviewed_at', 'crm_top_note',
+        'crm_shipping_address_id',
     ];
 
     protected $casts = [
@@ -93,6 +95,7 @@ class Opportunity extends Model implements HasMedia
         'crm_margin_nominal_threshold' => 'float',
         'crm_margin_requested_at' => 'datetime',
         'crm_margin_reviewed_at' => 'datetime',
+        'crm_shipping_address_id' => 'integer',
     ];
 
     public const DISCOUNT_PENDING = 'pending';
@@ -336,6 +339,11 @@ class Opportunity extends Model implements HasMedia
         return $this->belongsTo(Contact::class, 'contact_id');
     }
 
+    public function shippingAddress(): BelongsTo
+    {
+        return $this->belongsTo(CustomerAddress::class, 'crm_shipping_address_id');
+    }
+
     /**
      * Email pelanggan untuk API AGC: Account, Contact opportunity, lalu PIC account.
      */
@@ -530,7 +538,7 @@ class Opportunity extends Model implements HasMedia
             $this->unsetRelation('contact');
         }
 
-        $this->loadMissing(['account', 'assignedUser', 'contact']);
+        $this->loadMissing(['account', 'assignedUser', 'contact', 'shippingAddress']);
 
         $products = $this->products->values()->map(function (array $p) {
             return [
@@ -574,6 +582,8 @@ class Opportunity extends Model implements HasMedia
             'account_name' => $this->account?->name,
             'contact_id' => $this->contact_id,
             'contact_name' => $this->contact?->full_name ?? $this->contact?->name,
+            'crm_shipping_address_id' => $this->crm_shipping_address_id,
+            'shipping_address_label' => $this->shippingAddress?->label,
             'crm_lost_reason' => (string) ($this->crm_lost_reason ?? ''),
             'crm_has_discount' => (bool) $this->crm_has_discount,
             'crm_discount_amount' => $this->crm_discount_amount !== null ? round((float) $this->crm_discount_amount, 2) : null,

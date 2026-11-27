@@ -4,12 +4,18 @@
 @section('content')
     @php
         $poCount = $opportunity->purchaseOrders->count();
-        $poTotal = round((float) $opportunity->purchaseOrders->sum(fn ($po) => $po->totalInclude()), 2);
         $currency = $opportunity->amount_currency ?: 'IDR';
         $customerName = $opportunity->account?->name;
         $description = collect([$opportunity->name, $customerName])->filter()->implode(' · ');
+        $totalTransaksi = $opportunity->salesOrders->sum(function ($so) {
+            $payload = is_string($so->agc_payload) 
+                ? json_decode($so->agc_payload, true) 
+                : ($so->agc_payload ?? []);
+
+            return (float) ($payload['grand_total'] ?? 0);
+        });
         if ($poCount > 0) {
-            $description .= ' · '.$poCount.' PO · '.money($poTotal, $currency).' modal';
+            $description .= ' · '.$poCount.' PO · '.money($totalTransaksi, $currency).' Sales Order';
         }
     @endphp
 

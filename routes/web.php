@@ -124,6 +124,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/opportunities', [OpportunityController::class, 'index'])->name('opportunities.index');
     Route::get('/opportunities/account-receivable', [OpportunityController::class, 'accountReceivable'])->name('opportunities.account-receivable');
     Route::get('/opportunities/create', [OpportunityController::class, 'create'])->name('opportunities.create');
+    Route::get('/opportunities/customer-addresses', [OpportunityController::class, 'customerAddresses'])->name('opportunities.customer-addresses');
     Route::get('/opportunities/products/template', [OpportunityController::class, 'downloadProductTemplate'])->name('opportunities.products.template');
     Route::post('/opportunities', [OpportunityController::class, 'store'])->name('opportunities.store');
     Route::get('/opportunities/{opportunity}', [OpportunityController::class, 'show'])->name('opportunities.show');

@@ -667,6 +667,16 @@ class DashboardController extends Controller
         $column = $type === 'brand' ? 'crm_item_brand' : 'crm_item_category';
         $like = '%'.addcslashes($needle, '%_\\').'%';
 
+        // Kategori tersedia: seluruh kategori master + kategori legacy dari transaksi.
+        $availableCategories = $type === 'brand'
+            ? $this->brandAvailableCategories($displayName, $like)
+            : collect();
+
+        $selectedCategories = $this->resolveSelectedCategories($request, $availableCategories);
+        $selectedLower = $selectedCategories
+            ->map(fn (string $label) => mb_strtolower($label))
+            ->all();
+
         $periodRange = $this->periodDateRange($period);
 
         // Semua opportunity di periode (created_at) + Closed Won by close_date → tabel + status
@@ -689,10 +699,29 @@ class DashboardController extends Controller
         $this->applySalesFilter($query, $selectedSalesId);
         $query->whereRaw('LOWER(COALESCE('.$column.', "")) LIKE ?', [$like]);
 
+        // Sempitkan kandidat di level query bila filter kategori aktif.
+        if ($selectedLower !== []) {
+            $query->where(function ($q) use ($selectedLower) {
+                foreach ($selectedLower as $label) {
+                    $q->orWhereRaw(
+                        'LOWER(COALESCE(crm_item_category, "")) LIKE ?',
+                        ['%'.addcslashes($label, '%_\\').'%']
+                    );
+                }
+            });
+        }
+
         $deals = collect();
         foreach ($query->orderByDesc('close_date')->orderByDesc('created_at')->orderByDesc('id')->get() as $opportunity) {
             $matched = $opportunity->products
                 ->filter(fn (array $product) => mb_strtolower(trim((string) ($product[$field] ?? ''))) === $needle)
+                ->when($selectedLower !== [], fn ($products) => $products->filter(
+                    fn (array $product) => in_array(
+                        mb_strtolower(trim((string) ($product['category'] ?? ''))),
+                        $selectedLower,
+                        true
+                    )
+                ))
                 ->values();
 
             if ($matched->isEmpty()) {
@@ -726,6 +755,9 @@ class DashboardController extends Controller
 
         $typeLabel = $type === 'brand' ? 'Brand' : 'Category';
         $periodLabel = $this->periodLabel($period);
+        $charts = $type === 'brand'
+            ? $this->buildBrandCharts($needle, $like, $periodRange, $selectedLower, $selectedSalesId)
+            : null;
         $dashboardQuery = array_filter([
             'period' => $period,
             'leaderboard_period' => $period,
@@ -743,8 +775,230 @@ class DashboardController extends Controller
         return view('dashboard.catalog', compact(
             'type', 'typeLabel', 'name', 'displayName',
             'period', 'periodLabel', 'selectedSalesId', 'selectedSales',
-            'deals', 'totals', 'dashboardQuery', 'indexQuery'
+            'deals', 'totals', 'dashboardQuery', 'indexQuery',
+            'availableCategories', 'selectedCategories', 'charts'
         ));
+    }
+
+    /**
+     * Kategori yang bisa dipakai sebagai filter pada halaman detail brand:
+     * seluruh kategori master data, ditambah kategori legacy hasil transaksi
+     * yang tidak ada di master (agar data lama tetap bisa difilter).
+     *
+     * @return Collection<int, string>
+     */
+    protected function brandAvailableCategories(string $displayName, string $like): Collection
+    {
+        $masterNames = Category::query()->ordered()->pluck('name');
+        $masterLower = $masterNames
+            ->map(fn (string $name) => mb_strtolower(trim($name)))
+            ->all();
+
+        // LIKE pada kolom JSON hanya menyaring kandidat; pencocokan brand tetap
+        // dilakukan per indeks produk agar kategori brand lain tidak ikut terbawa.
+        $needle = mb_strtolower($displayName);
+        $legacyNames = collect();
+
+        Opportunity::query()
+            ->whereRaw('LOWER(COALESCE(crm_item_brand, "")) LIKE ?', [$like])
+            ->select(['id', 'crm_item_brand', 'crm_item_category'])
+            ->lazyById(500)
+            ->each(function (Opportunity $opportunity) use (&$legacyNames, $needle, $masterLower) {
+                $brands = array_values((array) $opportunity->getRawOriginal('crm_item_brand'));
+                $categories = array_values((array) $opportunity->getRawOriginal('crm_item_category'));
+
+                // Kolom JSON dibaca mentah (string); decode bila masih berupa string.
+                if ($brands !== [] && is_string($brands[0] ?? null)) {
+                    $brands = array_values((array) json_decode((string) $opportunity->getRawOriginal('crm_item_brand'), true));
+                    $categories = array_values((array) json_decode((string) $opportunity->getRawOriginal('crm_item_category'), true));
+                }
+
+                foreach ($brands as $index => $brand) {
+                    if (mb_strtolower(trim((string) $brand)) !== $needle) {
+                        continue;
+                    }
+                    $category = trim((string) ($categories[$index] ?? ''));
+                    if ($category !== '' && ! in_array(mb_strtolower($category), $masterLower, true)) {
+                        $legacyNames->push($category);
+                    }
+                }
+            });
+
+        return $masterNames
+            ->merge($legacyNames)
+            ->filter(fn ($value) => trim((string) $value) !== '')
+            ->map(fn ($value) => trim((string) $value))
+            ->unique(fn ($value) => mb_strtolower($value))
+            ->values();
+    }
+
+    /**
+     * @param  Collection<int, string>  $available
+     * @return Collection<int, string>
+     */
+    protected function resolveSelectedCategories(Request $request, Collection $available): Collection
+    {
+        if ($available->isEmpty()) {
+            return collect();
+        }
+
+        $raw = $request->query('categories', []);
+        if (! is_array($raw)) {
+            return collect();
+        }
+
+        $wanted = collect($raw)
+            ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+            ->map(fn ($value) => mb_strtolower(trim($value)))
+            ->unique()
+            ->values();
+
+        if ($wanted->isEmpty()) {
+            return collect();
+        }
+
+        return $available
+            ->filter(fn (string $label) => $wanted->contains(mb_strtolower($label)))
+            ->values();
+    }
+
+    /**
+     * Baris produk Closed Won untuk sebuah brand, dipakai oleh grafik.
+     *
+     * @param  list<string>  $categoryLower  filter kategori (lowercase); kosong = tanpa filter
+     * @return Collection<int, array{close_date: ?Carbon, product: array<string, mixed>}>
+     */
+    protected function catalogWonProductRows(
+        string $needle,
+        string $like,
+        ?array $range,
+        array $categoryLower,
+        ?string $salesId
+    ): Collection {
+        $query = Opportunity::query()->where('stage', Opportunity::WON_STAGE);
+        if ($range !== null) {
+            [$start, $end] = $range;
+            $query->whereBetween('close_date', [$start->toDateString(), $end->toDateString()]);
+        }
+        $this->applySalesFilter($query, $salesId);
+        $query->whereRaw('LOWER(COALESCE(crm_item_brand, "")) LIKE ?', [$like]);
+
+        $rows = collect();
+        foreach ($query->get() as $opportunity) {
+            foreach ($opportunity->products as $product) {
+                if (mb_strtolower(trim((string) ($product['brand'] ?? ''))) !== $needle) {
+                    continue;
+                }
+                if ($categoryLower !== [] && ! in_array(
+                    mb_strtolower(trim((string) ($product['category'] ?? ''))),
+                    $categoryLower,
+                    true
+                )) {
+                    continue;
+                }
+                $rows->push([
+                    'close_date' => $opportunity->close_date
+                        ? Carbon::parse($opportunity->close_date)
+                        : null,
+                    'product' => $product,
+                ]);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Tiga grafik halaman detail brand: tren 12 bulan, top produk, komposisi kategori.
+     *
+     * @param  list<string>  $categoryLower
+     * @return array<string, array<string, mixed>>
+     */
+    protected function buildBrandCharts(
+        string $needle,
+        string $like,
+        ?array $periodRange,
+        array $categoryLower,
+        ?string $salesId
+    ): array {
+        // 1. Tren penjualan — 12 bulan terakhir, mengikuti filter kategori, mengabaikan periode.
+        $trendStart = Carbon::now()->startOfMonth()->subMonthsNoOverflow(11);
+        $trendEnd = Carbon::now()->endOfMonth();
+        $trendRows = $this->catalogWonProductRows(
+            $needle,
+            $like,
+            [$trendStart, $trendEnd],
+            $categoryLower,
+            $salesId
+        );
+
+        $monthlyTotal = [];
+        $monthlyMargin = [];
+        foreach ($trendRows as $row) {
+            if (! $row['close_date']) {
+                continue;
+            }
+            $key = $row['close_date']->format('Y-m');
+            $monthlyTotal[$key] = ($monthlyTotal[$key] ?? 0) + (float) ($row['product']['subtotal'] ?? 0);
+            $monthlyMargin[$key] = ($monthlyMargin[$key] ?? 0) + (float) ($row['product']['margin'] ?? 0);
+        }
+
+        $monthlyLabels = [];
+        $monthlyTotalValues = [];
+        $monthlyMarginValues = [];
+        for ($i = 0; $i < 12; $i++) {
+            $month = $trendStart->copy()->addMonthsNoOverflow($i);
+            $key = $month->format('Y-m');
+            $monthlyLabels[] = $month->translatedFormat('M y');
+            $monthlyTotalValues[] = round((float) ($monthlyTotal[$key] ?? 0), 2);
+            $monthlyMarginValues[] = round((float) ($monthlyMargin[$key] ?? 0), 2);
+        }
+
+        // 2. Top produk & komposisi kategori — satu kali baca untuk periode terpilih.
+        $periodRows = $this->catalogWonProductRows($needle, $like, $periodRange, [], $salesId);
+
+        // 2a. Top produk — mengikuti filter kategori DAN periode.
+        $productTotals = [];
+        foreach ($periodRows as $row) {
+            if ($categoryLower !== [] && ! in_array(
+                mb_strtolower(trim((string) ($row['product']['category'] ?? ''))),
+                $categoryLower,
+                true
+            )) {
+                continue;
+            }
+            $name = trim((string) ($row['product']['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $productTotals[$name] = ($productTotals[$name] ?? 0) + (float) ($row['product']['subtotal'] ?? 0);
+        }
+        arsort($productTotals);
+        $topProducts = array_slice($productTotals, 0, 8, true);
+
+        // 2b. Komposisi kategori — semua kategori brand, ikut periode, mengabaikan filter kategori.
+        $categoryTotals = [];
+        foreach ($periodRows as $row) {
+            $label = trim((string) ($row['product']['category'] ?? '')) ?: 'Tanpa kategori';
+            $categoryTotals[$label] = ($categoryTotals[$label] ?? 0) + (float) ($row['product']['subtotal'] ?? 0);
+        }
+        arsort($categoryTotals);
+
+        return [
+            'monthly' => [
+                'labels' => $monthlyLabels,
+                'total' => $monthlyTotalValues,
+                'margin' => $monthlyMarginValues,
+            ],
+            'products' => [
+                'labels' => array_keys($topProducts),
+                'values' => array_values(array_map(fn ($value) => round((float) $value, 2), $topProducts)),
+            ],
+            'categories' => [
+                'labels' => array_keys($categoryTotals),
+                'values' => array_values(array_map(fn ($value) => round((float) $value, 2), $categoryTotals)),
+            ],
+        ];
     }
 
     protected function applySalesFilter($query, ?string $salesId): void

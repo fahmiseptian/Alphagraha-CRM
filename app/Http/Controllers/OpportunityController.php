@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ScopesToUser;
+use App\Models\CustomerAddress;
 use App\Models\Espo\Account;
 use App\Models\Espo\Contact;
 use App\Models\Espo\EspoUser;
@@ -427,7 +428,7 @@ class OpportunityController extends Controller
     public function show(Opportunity $opportunity)
     {
         $this->authorizeAccess($opportunity);
-        $opportunity->load(['account', 'assignedUser', 'contact', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'entertainments.category', 'purchaseOrders.creator', 'purchaseOrders.approver', 'purchaseOrders.vendor', 'purchaseOrders.salesOrder', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator', 'salesOrders.assignedUser']);
+        $opportunity->load(['account', 'assignedUser', 'contact', 'shippingAddress', 'teams', 'quotation.creator', 'legacyDocuments.folder', 'notes.creator', 'entertainments.creator', 'entertainments.completedByUser', 'entertainments.category', 'purchaseOrders.creator', 'purchaseOrders.approver', 'purchaseOrders.vendor', 'purchaseOrders.salesOrder', 'purchaseOrders.items.vendorQuotes.vendor', 'salesOrders.creator', 'salesOrders.assignedUser']);
 
         // Self-heal: QO bisa tetap pending jika margin naik di atas threshold tanpa sync.
         if ($opportunity->quotation && $opportunity->syncLinkedQuotationMarginApproval()) {
@@ -473,9 +474,18 @@ class OpportunityController extends Controller
         }
 
         $defaultTop = CustomerTop::DEFAULT;
+        $defaultShippingAddressId = null;
         if ($accountId) {
             $account = Account::query()->find($accountId);
             $defaultTop = $account?->top() ?? CustomerTop::DEFAULT;
+            if ($account) {
+                app(\App\Services\CustomerAddressService::class)->ensurePrimaryFromAccount($account);
+                $defaultShippingAddressId = $account->addresses()
+                    ->orderByDesc('is_default_shipping')
+                    ->orderBy('sort_order')
+                    ->orderBy('id')
+                    ->value('id');
+            }
         }
 
         $opportunity = new Opportunity([
@@ -486,12 +496,48 @@ class OpportunityController extends Controller
             'assigned_user_id' => auth()->id(),
             'account_id' => $accountId,
             'crm_top' => $defaultTop,
+            'crm_shipping_address_id' => $defaultShippingAddressId,
         ]);
 
         return view('opportunities.create', $this->formData($opportunity) + [
             'opportunity' => $opportunity,
             'indexUrl' => $this->opportunitiesIndexUrl(),
         ]);
+    }
+
+    public function customerAddresses(Request $request)
+    {
+        if (! auth()->user()?->canCreateOpportunity() && ! auth()->user()?->canEditOpportunityFully()) {
+            abort(403);
+        }
+
+        $accountId = trim((string) $request->query('account_id', ''));
+        if ($accountId === '') {
+            return response()->json(['data' => []]);
+        }
+
+        $account = $this->scopeAssigned(Account::query())->find($accountId);
+        if (! $account) {
+            return response()->json(['data' => []]);
+        }
+
+        app(\App\Services\CustomerAddressService::class)->ensurePrimaryFromAccount($account);
+
+        $addresses = $account->addresses()
+            ->orderByDesc('is_default_shipping')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (CustomerAddress $addr) => [
+                'id' => (string) $addr->id,
+                'account_id' => (string) $addr->account_id,
+                'label' => $addr->label,
+                'line' => $addr->line(),
+                'is_default_shipping' => (bool) $addr->is_default_shipping,
+            ])
+            ->values();
+
+        return response()->json(['data' => $addresses]);
     }
 
     public function downloadProductTemplate()
@@ -1272,6 +1318,7 @@ class OpportunityController extends Controller
             'close_date' => ['required', 'date'],
             'probability' => ['required', 'integer', 'min:0', 'max:100'],
             'contact_id' => ['nullable', 'string', Rule::exists('contact', 'id')->where('deleted', 0)],
+            'crm_shipping_address_id' => ['required', 'integer', Rule::exists('crm_customer_addresses', 'id')],
             'lead_source' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'assigned_user_id' => ['nullable', 'string', Rule::exists('user', 'id')->where('deleted', 0)],
@@ -1317,6 +1364,8 @@ class OpportunityController extends Controller
         $messages = [
             'lost_reason.required' => 'Catatan kekalahan wajib diisi saat menutup deal sebagai Closed Lost.',
             'lost_reason.min' => 'Catatan kekalahan minimal 10 karakter.',
+            'crm_shipping_address_id.required' => 'Lokasi pengiriman wajib dipilih.',
+            'crm_shipping_address_id.exists' => 'Alamat pengiriman yang dipilih tidak valid.',
         ];
 
         $data = $request->validate($rules, $messages);
@@ -1354,6 +1403,25 @@ class OpportunityController extends Controller
             ]);
         }
 
+        if (! empty($data['crm_shipping_address_id']) && empty($data['account_id'])) {
+            throw ValidationException::withMessages([
+                'crm_shipping_address_id' => 'Pilih customer terlebih dahulu sebelum memilih lokasi pengiriman.',
+            ]);
+        }
+
+        if (! empty($data['crm_shipping_address_id']) && ! empty($data['account_id'])) {
+            $addressBelongsToAccount = CustomerAddress::query()
+                ->where('id', $data['crm_shipping_address_id'])
+                ->where('account_id', $data['account_id'])
+                ->exists();
+
+            if (! $addressBelongsToAccount) {
+                throw ValidationException::withMessages([
+                    'crm_shipping_address_id' => 'Alamat pengiriman harus milik customer yang dipilih.',
+                ]);
+            }
+        }
+
         return $data;
     }
 
@@ -1374,6 +1442,8 @@ class OpportunityController extends Controller
         $messages = [
             'lost_reason.required' => 'Catatan kekalahan wajib diisi saat menutup deal sebagai Closed Lost.',
             'lost_reason.min' => 'Catatan kekalahan minimal 10 karakter.',
+            'crm_shipping_address_id.required' => 'Lokasi pengiriman wajib dipilih.',
+            'crm_shipping_address_id.exists' => 'Alamat pengiriman yang dipilih tidak valid.',
         ];
 
         return $request->validate($rules, $messages);
@@ -1393,6 +1463,7 @@ class OpportunityController extends Controller
             'close_date' => $data['close_date'] ?? null,
             'probability' => $data['probability'] ?? null,
             'contact_id' => ($data['contact_id'] ?? null) ?: null,
+            'crm_shipping_address_id' => ($data['crm_shipping_address_id'] ?? null) ?: null,
             'lead_source' => $data['lead_source'] ?? null,
             'description' => $data['description'] ?? null,
         ]);
@@ -1646,6 +1717,11 @@ class OpportunityController extends Controller
 
         $catalog = app(CatalogService::class);
 
+        $scopedAccountIds = $this->scopeAssigned(Account::query())->select('id');
+        if ($opportunity?->account) {
+            app(\App\Services\CustomerAddressService::class)->ensurePrimaryFromAccount($opportunity->account);
+        }
+
         return [
             'accounts' => $accounts,
             'accountMarginMeta' => $accountMarginMeta,
@@ -1658,10 +1734,24 @@ class OpportunityController extends Controller
             'marginNominalOngkirPribadi' => PaymentLevel::marginNominalOngkirPribadi(),
             'marginMaxPercent' => PaymentLevel::maxMarginPercent(),
             'contacts' => Contact::query()
-                ->whereIn('account_id', $this->scopeAssigned(Account::query())->select('id'))
+                ->whereIn('account_id', $scopedAccountIds)
                 ->orderBy('first_name')
                 ->orderBy('last_name')
                 ->get(['id', 'name', 'first_name', 'last_name', 'account_id']),
+            'customerAddresses' => CustomerAddress::query()
+                ->whereIn('account_id', $scopedAccountIds)
+                ->orderByDesc('is_default_shipping')
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->get()
+                ->map(fn (CustomerAddress $addr) => [
+                    'id' => (string) $addr->id,
+                    'account_id' => (string) $addr->account_id,
+                    'label' => $addr->label,
+                    'line' => $addr->line(),
+                    'is_default_shipping' => (bool) $addr->is_default_shipping,
+                ])
+                ->values(),
             'salesUsers' => EspoUser::query()->activeRegular()->orderBy('name')->get(),
             'teams' => Team::query()->orderBy('name')->get(['id', 'name']),
             'selectedTeamIds' => (array) ($selectedTeamIds ?? []),

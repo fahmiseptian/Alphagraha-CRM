@@ -805,6 +805,19 @@
                 <div><dt class="text-slate-400">Close Date</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->translatedFormat('d M Y') : '—' }}</dd></div>
                 <div><dt class="text-slate-400">Contact</dt><dd class="mt-0.5 font-medium text-slate-700">{{ optional($opportunity->contact)->full_name ?: '—' }}</dd></div>
                 <div><dt class="text-slate-400">Lead Source</dt><dd class="mt-0.5 font-medium text-slate-700">{{ $opportunity->lead_source ?: '—' }}</dd></div>
+                <div class="sm:col-span-2">
+                    <dt class="text-slate-400">Lokasi Pengiriman</dt>
+                    <dd class="mt-0.5 font-medium text-slate-700">
+                        @if ($opportunity->shippingAddress)
+                            <span>{{ $opportunity->shippingAddress->label }}</span>
+                            @if ($opportunity->shippingAddress->line())
+                                <span class="block text-xs font-normal text-slate-500">{{ $opportunity->shippingAddress->line() }}</span>
+                            @endif
+                        @else
+                            —
+                        @endif
+                    </dd>
+                </div>
             </dl>
 
             @if ($opportunity->description)

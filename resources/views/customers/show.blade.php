@@ -310,7 +310,7 @@ function customerAddressManager(cfg) {
     });
 
     return {
-        formOpen: !!cfg.openOnError,
+        formOpen: !!(cfg.openOnError || cfg.openOnCreate),
         editingId: cfg.editingId ? String(cfg.editingId) : '',
         form: Object.assign(emptyForm(), {
             label: @js(old('label', '')),

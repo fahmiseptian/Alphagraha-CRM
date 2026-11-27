@@ -72,7 +72,20 @@
             }
         };
 
-        $el.on('change.crmAutoSubmit select2:select.crmAutoSubmit select2:clear.crmAutoSubmit', submit);
+        // Multi-select tetap membuka dropdown setelah memilih; tunda submit
+        // singkat agar beberapa pilihan sekaligus terkirim dalam satu request.
+        let timer = null;
+        const schedule = () => {
+            if (!$el.prop('multiple')) {
+                submit();
+                return;
+            }
+
+            window.clearTimeout(timer);
+            timer = window.setTimeout(submit, 500);
+        };
+
+        $el.on('change.crmAutoSubmit select2:select.crmAutoSubmit select2:clear.crmAutoSubmit', schedule);
     }
 
     window.CrmSelect2 = {

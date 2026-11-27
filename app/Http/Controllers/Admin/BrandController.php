@@ -39,7 +39,8 @@ class BrandController extends Controller
 
     public function store(Request $request)
     {
-        Brand::create($this->validated($request));
+        $data = $this->validated($request);
+        Brand::create($data);
 
         return redirect()
             ->route('brands.index')
@@ -48,12 +49,15 @@ class BrandController extends Controller
 
     public function edit(Brand $brand)
     {
-        return view('admin.brands.edit', compact('brand'));
+        return view('admin.brands.edit', [
+            'brand' => $brand,
+        ]);
     }
 
     public function update(Request $request, Brand $brand)
     {
-        $brand->update($this->validated($request, $brand));
+        $data = $this->validated($request, $brand);
+        $brand->update($data);
 
         return redirect()
             ->route('brands.index')

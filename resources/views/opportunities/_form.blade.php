@@ -1,6 +1,6 @@
 @php
     $initialProducts = old('products', $opportunity->exists
-        ? $opportunity->products->map(fn ($p) => [
+        ? $opportunity->products->map(fn($p) => [
             'name' => $p['name'],
             'quantity' => $p['quantity'],
             'sell_exclude' => $p['sell_exclude'],
@@ -13,17 +13,17 @@
             'category' => $p['category'] ?? '',
             'tax_category' => $p['tax_category'],
             'item_kind' => $p['item_kind'],
-            'has_royalty' => ! empty($p['has_royalty']),
-            'royalty_type' => (string) ($p['royalty_type'] ?? (! empty($p['has_royalty']) ? 'luar' : '')),
+            'has_royalty' => !empty($p['has_royalty']),
+            'royalty_type' => (string) ($p['royalty_type'] ?? (!empty($p['has_royalty']) ? 'luar' : '')),
             'image' => (string) ($p['image'] ?? ''),
             'image_url' => $p['image_url'] ?? (\App\Models\Espo\Opportunity::productImageUrl($p['image'] ?? null)),
-            'cost_foreign' => ! empty($p['cost_foreign']) || ! empty($p['cost_in_usd']),
+            'cost_foreign' => !empty($p['cost_foreign']) || !empty($p['cost_in_usd']),
             'cost_fx_code' => $p['cost_fx_code'] ?? (($p['cost_in_usd'] ?? false) ? 'USD' : ''),
             'cost_fx' => $p['cost_fx'] ?? $p['cost_usd'] ?? 0,
             'fx_rate' => $p['fx_rate'] ?? $p['usd_rate'] ?? 0,
-          ])->values()->all()
+        ])->values()->all()
         : []);
-    $contactOptions = $contacts->map(fn ($c) => [
+    $contactOptions = $contacts->map(fn($c) => [
         'id' => $c->id,
         'name' => $c->full_name,
         'account_id' => $c->account_id,
@@ -51,366 +51,442 @@
         'vendors' => route('vendors.quick-store'),
     ];
 @endphp
-<form method="POST" action="{{ $action }}" enctype="multipart/form-data"
-      x-data="opportunityForm({{ \Illuminate\Support\Js::from([
-          'products' => $initialProducts,
-          'currency' => old('amount_currency', $opportunity->amount_currency ?: 'IDR'),
-          'contacts' => $contactOptions,
-          'accountId' => old('account_id', $opportunity->account_id),
-          'contactId' => old('contact_id', $opportunity->contact_id),
-          'crmTop' => old('crm_top', $opportunity->top()),
-          'topMargins' => $topMargins ?? \App\Support\CustomerTop::allMinMargins(),
-          'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
-          'ppnPercent' => $ppnPercent,
-          'pphNonWapuJasa' => $pphNonWapuJasa,
-          'pphWapuBarang' => $pphWapuBarang,
-          'pphWapuJasa' => $pphWapuJasa,
-          'pnbpPercent' => $pnbpPercent,
-          'pnbpTiers' => $pnbpTiers,
-          'pph29Percent' => $pph29Percent,
-          'zinitTiers' => $zinitTiers,
-          'royaltyDalamPercent' => $royaltyDalamPercent,
-          'royaltyLuarPercent' => $royaltyLuarPercent,
-          'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
-          'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
-          'hasShippingCharge' => (bool) old('has_shipping_charge', $opportunity->crm_has_shipping_charge),
-          'shippingSell' => (float) old('shipping_sell', $opportunity->crm_shipping_sell ?? 0),
-          'accountMarginMeta' => $accountMarginMeta ?? [],
-          'marginNominalUmum' => (float) ($marginNominalUmum ?? 0),
-          'marginNominalOngkirPribadi' => (float) ($marginNominalOngkirPribadi ?? 0),
-          'marginMaxPercent' => (float) ($marginMaxPercent ?? \App\Support\PaymentLevel::maxMarginPercent()),
-          'purchasingMode' => $purchasingMode,
-          'productTemplateUrl' => route('opportunities.products.template'),
-          'stage' => old('stage', $opportunity->stage ?: 'Prospecting'),
-          'initialStage' => $opportunity->stage ?: 'Prospecting',
-          'noApprovalStages' => \App\Models\Espo\Opportunity::NO_APPROVAL_STAGES,
-          'catalogCanAdd' => $catalogCanAdd,
-          'catalogQuickUrls' => $catalogQuickUrls,
-      ]) }})" @submit="packProductsPayload()">
+<form method="POST" action="{{ $action }}" enctype="multipart/form-data" x-data="opportunityForm({{ \Illuminate\Support\Js::from([
+    'products' => $initialProducts,
+    'currency' => old('amount_currency', $opportunity->amount_currency ?: 'IDR'),
+    'contacts' => $contactOptions,
+    'customerAddresses' => $customerAddresses ?? [],
+    'accountId' => old('account_id', $opportunity->account_id),
+    'contactId' => old('contact_id', $opportunity->contact_id),
+    'shippingAddressId' => (string) old('crm_shipping_address_id', $opportunity->crm_shipping_address_id ?? ''),
+    'customerAddressesUrl' => route('opportunities.customer-addresses'),
+    'customerDetailUrlTemplate' => route('customers.show', ['id' => '__ID__']),
+    'crmTop' => old('crm_top', $opportunity->top()),
+    'topMargins' => $topMargins ?? \App\Support\CustomerTop::allMinMargins(),
+    'initialTaxCategory' => old('products.0.tax_category', count($initialProducts) > 0 ? ($initialProducts[0]['tax_category'] ?? null) : null),
+    'ppnPercent' => $ppnPercent,
+    'pphNonWapuJasa' => $pphNonWapuJasa,
+    'pphWapuBarang' => $pphWapuBarang,
+    'pphWapuJasa' => $pphWapuJasa,
+    'pnbpPercent' => $pnbpPercent,
+    'pnbpTiers' => $pnbpTiers,
+    'pph29Percent' => $pph29Percent,
+    'zinitTiers' => $zinitTiers,
+    'royaltyDalamPercent' => $royaltyDalamPercent,
+    'royaltyLuarPercent' => $royaltyLuarPercent,
+    'hasDiscount' => (bool) old('has_discount', $opportunity->crm_has_discount),
+    'discountAmount' => (float) old('discount_amount', $opportunity->crm_discount_amount ?? 0),
+    'hasShippingCharge' => (bool) old('has_shipping_charge', $opportunity->crm_has_shipping_charge),
+    'shippingSell' => (float) old('shipping_sell', $opportunity->crm_shipping_sell ?? 0),
+    'accountMarginMeta' => $accountMarginMeta ?? [],
+    'marginNominalUmum' => (float) ($marginNominalUmum ?? 0),
+    'marginNominalOngkirPribadi' => (float) ($marginNominalOngkirPribadi ?? 0),
+    'marginMaxPercent' => (float) ($marginMaxPercent ?? \App\Support\PaymentLevel::maxMarginPercent()),
+    'purchasingMode' => $purchasingMode,
+    'productTemplateUrl' => route('opportunities.products.template'),
+    'stage' => old('stage', $opportunity->stage ?: 'Prospecting'),
+    'initialStage' => $opportunity->stage ?: 'Prospecting',
+    'noApprovalStages' => \App\Models\Espo\Opportunity::NO_APPROVAL_STAGES,
+    'catalogCanAdd' => $catalogCanAdd,
+    'catalogQuickUrls' => $catalogQuickUrls,
+]) }})" @submit="packProductsPayload()">
     @csrf
     @if (($method ?? 'POST') === 'PUT')@method('PUT')@endif
     <textarea name="products_json" x-ref="productsJson" hidden></textarea>
 
     @if ($purchasingMode)
         <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Mode Purchasing: Anda hanya dapat mengubah <strong>harga modal (beli exclude)</strong> dan <strong>vendor</strong> pada deal Closed Won.
+            Mode Purchasing: Anda hanya dapat mengubah <strong>harga modal (beli exclude)</strong> dan
+            <strong>vendor</strong> pada deal Closed Won.
         </div>
     @endif
 
-    @if ($errors->any())        <div class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    @if ($errors->any())
+        <div class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <ul class="list-inside list-disc space-y-1">
-                @foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach
+                @foreach ($errors->all() as $error)
+                <li>{{ $error }}</li>@endforeach
             </ul>
         </div>
     @endif
 
     <div class="space-y-5">
         <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {{-- Kolom kiri: data opportunity --}}
-        <div class="space-y-5 lg:col-span-2">
-            <x-card>
-                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2" @if($purchasingMode) aria-disabled="true"@endif>
-                    <div>
-                        <label class="crm-label">Company <span class="text-red-500">*</span></label>
-                        <select name="company" required class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
-                            <option value="">— Select —</option>
-                            @foreach ($companies as $co)
-                                <option value="{{ $co }}" @selected(old('company', $opportunity->company) === $co)>{{ $co }}</option>
-                            @endforeach
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="company" value="{{ $opportunity->company }}">@endif
-                    </div>
-                    <div>
-                        <label class="crm-label">Type <span class="text-red-500">*</span></label>
-                        <select name="type" required class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
-                            <option value="">— Select —</option>
-                            @foreach ($types as $t)
-                                <option value="{{ $t }}" @selected(old('type', $opportunity->type) === $t)>{{ $t }}</option>
-                            @endforeach
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="type" value="{{ $opportunity->type }}">@endif
-                    </div>
-                    <div class="sm:col-span-2">
-                        <label class="crm-label">Opportunity Name <span class="text-red-500">*</span></label>
-                        <input type="text" name="name" value="{{ old('name', $opportunity->name) }}" required
-                               class="crm-field" @readonly($purchasingMode)>
-                    </div>
-                    <div class="sm:col-span-2">
-                        <label class="crm-label">Customer Name</label>
-                        <select name="account_id" class="select2 select2-search w-full" data-placeholder="Cari customer..." @disabled($purchasingMode)>
-                            <option value="">— Select —</option>
-                            @foreach ($accounts as $acc)
-                                <option value="{{ $acc->id }}" @selected(old('account_id', $opportunity->account_id) === $acc->id)>{{ $acc->name }}</option>
-                            @endforeach
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="account_id" value="{{ $opportunity->account_id }}">@endif
-                    </div>
-                    <div>
-                        <label class="crm-label">TOP <span class="text-red-500">*</span></label>
-                        <select name="crm_top" required class="select2 w-full" data-placeholder="— Pilih TOP —" @disabled($purchasingMode)>
-                            @foreach ($topOptions ?? \App\Support\CustomerTop::LABELS as $value => $label)
-                                <option value="{{ $value }}" @selected(old('crm_top', $opportunity->top()) === (string) $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="crm_top" value="{{ $opportunity->top() }}">@endif
-                        <p class="mt-1 text-xs text-slate-400">Default dari customer. Bisa diubah untuk deal ini.</p>
-                        @php
-                            $topRanks = collect(\App\Support\CustomerTop::LABELS)
-                                ->mapWithKeys(fn ($label, $value) => [$value => \App\Support\CustomerTop::rank((string) $value)]);
-                        @endphp
-                        <p class="mt-1 text-xs text-amber-700" x-cloak
-                           x-data="{ ranks: @js($topRanks) }"
-                           x-show="!purchasingMode && accountId && (ranks[crmTop] ?? 0) > (ranks[accountMeta?.top || @js(\App\Support\CustomerTop::DEFAULT)] ?? 0)">
-                            <i class="bi bi-shield-exclamation"></i>
-                            TOP melebihi TOP customer (<span x-text="accountMeta?.top_label || accountMeta?.top || 'CBD'"></span>) — perlu approval Superadmin/Finance sebelum bisa dipakai di SO.
-                        </p>
-                        @if ($opportunity->exists && $opportunity->topNeedsApproval())
-                            <p class="mt-1 text-xs font-medium text-amber-700"><i class="bi bi-hourglass-split"></i> {{ $opportunity->topLabel() }} sedang menunggu approval.</p>
-                        @elseif ($opportunity->exists && $opportunity->topIsApproved())
-                            <p class="mt-1 text-xs font-medium text-green-700"><i class="bi bi-check-circle"></i> {{ $opportunity->topLabel() }} sudah di-approve. Mengubah TOP akan meminta approval ulang.</p>
-                        @elseif ($opportunity->exists && $opportunity->topIsRejected())
-                            <p class="mt-1 text-xs font-medium text-red-700"><i class="bi bi-x-circle"></i> {{ $opportunity->topLabel() }} ditolak. Ubah TOP untuk mengajukan ulang.</p>
-                        @endif
-                    </div>
-                    <div>
-                        <label class="crm-label">Contact</label>
-                        <select name="contact_id" class="select2 select2-search w-full" data-placeholder="Select customer first" :disabled="!accountId || purchasingMode">
-                            <option value="">— No contact —</option>
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="contact_id" value="{{ $opportunity->contact_id }}">@endif
-                        <p class="mt-1 text-xs text-slate-400" x-show="accountId && !purchasingMode">Auto-filled from customer. You can clear or pick another contact.</p>
-                    </div>
-                    <div class="sm:col-span-2">
-                        <label class="crm-label">Lead Source</label>
-                        <select name="lead_source" class="select2 w-full" data-placeholder="— Select —" @disabled($purchasingMode)>
-                            <option value="">— Select —</option>
-                            @foreach ($leadSources as $src)
-                                <option value="{{ $src }}" @selected(old('lead_source', $opportunity->lead_source) === $src)>{{ $src }}</option>
-                            @endforeach
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="lead_source" value="{{ $opportunity->lead_source }}">@endif
-                    </div>
-                    <div>
-                        <label class="crm-label">Stage</label>
-                        <select name="stage" class="select2 w-full"
-                                @change="stage = $event.target.value"
+            {{-- Kolom kiri: data opportunity --}}
+            <div class="space-y-5 lg:col-span-2">
+                <x-card>
+                    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2" @if($purchasingMode) aria-disabled="true" @endif>
+                        <div>
+                            <label class="crm-label">Company <span class="text-red-500">*</span></label>
+                            <select name="company" required class="select2 w-full" data-placeholder="— Select —"
                                 @disabled($purchasingMode)>
-                            @foreach ($stages as $st)
-                                <option value="{{ $st }}" @selected(old('stage', $opportunity->stage) === $st)>{{ $st }}</option>
-                            @endforeach
-                        </select>
-                        @if ($purchasingMode)<input type="hidden" name="stage" value="{{ $opportunity->stage }}">@endif
-                        <p class="mt-1 text-xs text-slate-400"
-                           x-show="skipsApproval" x-cloak>
-                            Stage awal — approval margin &amp; diskon belum diperlukan.
-                        </p>
-                    </div>
-                    <div class="sm:col-span-2" x-show="stage === 'Closed Lost'" x-cloak>
-                        <label class="crm-label">
-                            Catatan kekalahan
-                            <span class="text-red-500" x-show="initialStage !== 'Closed Lost'">*</span>
-                        </label>
-                        <textarea
-                            name="lost_reason"
-                            rows="3"
-                            class="crm-field"
-                            :required="stage === 'Closed Lost' && initialStage !== 'Closed Lost'"
-                            placeholder="Jelaskan alasan kekalahan deal ini..."
-                            @readonly($purchasingMode)
-                        >{{ old('lost_reason', $opportunity->crm_lost_reason) }}</textarea>
-                        <p class="mt-1 text-xs text-slate-400">
-                            Wajib diisi saat menutup deal sebagai Closed Lost (minimal 10 karakter).
-                        </p>
-                    </div>
-                    <div>
-                        <label class="crm-label">Amount <span class="text-red-500">*</span></label>
-                        <div class="flex gap-2">
-                            <input type="text" inputmode="decimal" required
-                                   x-effect="if (editingField !== 'amount') $el.value = formatId(amount)"
-                                   @focus="editingField = 'amount'"
-                                   @blur="editingField = null; $el.value = formatId(amount)"
-                                   @input="amount = parseId($event.target.value)"
-                                   class="crm-field min-w-[200px] flex-1 tabular-nums" :readonly="products.length > 0 || purchasingMode">
-                            <input type="hidden" name="amount" :value="amount">
-                            <select name="amount_currency" class="select2 select2-compact w-28 shrink-0" @disabled($purchasingMode)>
-                                @foreach (['IDR', 'USD', 'EUR', 'SGD'] as $cur)
-                                    <option value="{{ $cur }}" @selected(old('amount_currency', $opportunity->amount_currency ?: 'IDR') === $cur)>{{ $cur }}</option>
+                                <option value="">— Select —</option>
+                                @foreach ($companies as $co)
+                                    <option value="{{ $co }}" @selected(old('company', $opportunity->company) === $co)>
+                                        {{ $co }}
+                                    </option>
                                 @endforeach
                             </select>
-                            @if ($purchasingMode)
-                                <input type="hidden" name="amount_currency" value="{{ $opportunity->amount_currency ?: 'IDR' }}">
+                            @if ($purchasingMode)<input type="hidden" name="company"
+                            value="{{ $opportunity->company }}">@endif
+                        </div>
+                        <div>
+                            <label class="crm-label">Type <span class="text-red-500">*</span></label>
+                            <select name="type" required class="select2 w-full" data-placeholder="— Select —"
+                                @disabled($purchasingMode)>
+                                <option value="">— Select —</option>
+                                @foreach ($types as $t)
+                                    <option value="{{ $t }}" @selected(old('type', $opportunity->type) === $t)>{{ $t }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            @if ($purchasingMode)<input type="hidden" name="type"
+                            value="{{ $opportunity->type }}">@endif
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="crm-label">Opportunity Name <span class="text-red-500">*</span></label>
+                            <input type="text" name="name" value="{{ old('name', $opportunity->name) }}" required
+                                class="crm-field" @readonly($purchasingMode)>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="crm-label">Customer Name</label>
+                            <select name="account_id" class="select2 select2-search w-full"
+                                data-placeholder="Cari customer..." @disabled($purchasingMode)>
+                                <option value="">— Select —</option>
+                                @foreach ($accounts as $acc)
+                                    <option value="{{ $acc->id }}" @selected(old('account_id', $opportunity->account_id) === $acc->id)>{{ $acc->name }}</option>
+                                @endforeach
+                            </select>
+                            @if ($purchasingMode)<input type="hidden" name="account_id"
+                            value="{{ $opportunity->account_id }}">@endif
+                        </div>
+                        <div>
+                            <label class="crm-label">TOP <span class="text-red-500">*</span></label>
+                            <select name="crm_top" required class="select2 w-full" data-placeholder="— Pilih TOP —"
+                                @disabled($purchasingMode)>
+                                @foreach ($topOptions ?? \App\Support\CustomerTop::LABELS as $value => $label)
+                                    <option value="{{ $value }}" @selected(old('crm_top', $opportunity->top()) === (string) $value)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                            @if ($purchasingMode)<input type="hidden" name="crm_top"
+                            value="{{ $opportunity->top() }}">@endif
+                            <p class="mt-1 text-xs text-slate-400">Default dari customer. Bisa diubah untuk deal ini.
+                            </p>
+                            @php
+                                $topRanks = collect(\App\Support\CustomerTop::LABELS)
+                                    ->mapWithKeys(fn($label, $value) => [$value => \App\Support\CustomerTop::rank((string) $value)]);
+                            @endphp
+                            <p class="mt-1 text-xs text-amber-700" x-cloak x-data="{ ranks: @js($topRanks) }"
+                                x-show="!purchasingMode && accountId && (ranks[crmTop] ?? 0) > (ranks[accountMeta?.top || @js(\App\Support\CustomerTop::DEFAULT)] ?? 0)">
+                                <i class="bi bi-shield-exclamation"></i>
+                                TOP melebihi TOP customer (<span
+                                    x-text="accountMeta?.top_label || accountMeta?.top || 'CBD'"></span>) — perlu
+                                approval Superadmin/Finance sebelum bisa dipakai di SO.
+                            </p>
+                            @if ($opportunity->exists && $opportunity->topNeedsApproval())
+                                <p class="mt-1 text-xs font-medium text-amber-700"><i class="bi bi-hourglass-split"></i>
+                                    {{ $opportunity->topLabel() }} sedang menunggu approval.
+                                </p>
+                            @elseif ($opportunity->exists && $opportunity->topIsApproved())
+                                <p class="mt-1 text-xs font-medium text-green-700"><i class="bi bi-check-circle"></i>
+                                    {{ $opportunity->topLabel() }} sudah di-approve. Mengubah TOP akan meminta approval
+                                    ulang.
+                                </p>
+                            @elseif ($opportunity->exists && $opportunity->topIsRejected())
+                                <p class="mt-1 text-xs font-medium text-red-700"><i class="bi bi-x-circle"></i>
+                                    {{ $opportunity->topLabel() }} ditolak. Ubah TOP untuk mengajukan ulang.
+                                </p>
                             @endif
                         </div>
-                        <p class="mt-1 text-xs text-slate-400" x-show="products.length > 0">Calculated automatically from line items.</p>
+                        <div>
+                            <label class="crm-label">Contact</label>
+                            <select name="contact_id" class="select2 select2-search w-full"
+                                data-placeholder="Select customer first" :disabled="!accountId || purchasingMode">
+                                <option value="">— No contact —</option>
+                            </select>
+                            @if ($purchasingMode)<input type="hidden" name="contact_id"
+                            value="{{ $opportunity->contact_id }}">@endif
+                            <p class="mt-1 text-xs text-slate-400" x-show="accountId && !purchasingMode">Auto-filled
+                                from customer. You can clear or pick another contact.</p>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <label class="crm-label">Shipping <span class="text-red-500">*</span></label>
+                                <div class="flex items-center gap-3 text-xs" x-show="accountId && !purchasingMode"
+                                    x-cloak>
+                                    <button type="button" @click="refreshCustomerAddresses()"
+                                        :disabled="loadingAddresses"
+                                        class="inline-flex items-center gap-1 font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                                        title="Muat ulang daftar alamat customer">
+                                        <i class="bi bi-arrow-clockwise"
+                                            :class="loadingAddresses && 'animate-spin'"></i>
+                                        <span x-text="loadingAddresses ? 'Memuat...' : 'Muat ulang'"></span>
+                                    </button>
+                                    <a :href="customerAddAddressUrl" target="_blank" rel="noopener"
+                                        class="inline-flex items-center gap-1 font-medium text-brand-600 hover:text-brand-700 hover:underline">
+                                        <i class="bi bi-plus-circle"></i> Tambah alamat di detail customer
+                                    </a>
+                                </div>
+                            </div>
+                            <select name="crm_shipping_address_id" required class="select2 select2-search w-full"
+                                data-placeholder="Pilih customer terlebih dahulu"
+                                :disabled="!accountId || purchasingMode">
+                                <option value="">— Shipping —</option>
+                            </select>
+                            @if ($purchasingMode)
+                                <input type="hidden" name="crm_shipping_address_id"
+                                    value="{{ $opportunity->crm_shipping_address_id }}">
+                            @endif
+                            <p class="mt-1 text-xs text-slate-400" x-show="!accountId && !purchasingMode">
+                                Please select a customer first to choose a shipping address.
+                            </p>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="crm-label">Lead Source</label>
+                            <select name="lead_source" class="select2 w-full" data-placeholder="— Select —"
+                                @disabled($purchasingMode)>
+                                <option value="">— Select —</option>
+                                @foreach ($leadSources as $src)
+                                    <option value="{{ $src }}" @selected(old('lead_source', $opportunity->lead_source) === $src)>{{ $src }}</option>
+                                @endforeach
+                            </select>
+                            @if ($purchasingMode)<input type="hidden" name="lead_source"
+                            value="{{ $opportunity->lead_source }}">@endif
+                        </div>
+                        <div>
+                            <label class="crm-label">Stage</label>
+                            <select name="stage" class="select2 w-full" @change="stage = $event.target.value"
+                                @disabled($purchasingMode)>
+                                @foreach ($stages as $st)
+                                    <option value="{{ $st }}" @selected(old('stage', $opportunity->stage) === $st)>{{ $st }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            @if ($purchasingMode)<input type="hidden" name="stage"
+                            value="{{ $opportunity->stage }}">@endif
+                            <p class="mt-1 text-xs text-slate-400" x-show="skipsApproval" x-cloak>
+                                Stage awal — approval margin &amp; diskon belum diperlukan.
+                            </p>
+                        </div>
+                        <div class="sm:col-span-2" x-show="stage === 'Closed Lost'" x-cloak>
+                            <label class="crm-label">
+                                Catatan kekalahan
+                                <span class="text-red-500" x-show="initialStage !== 'Closed Lost'">*</span>
+                            </label>
+                            <textarea name="lost_reason" rows="3" class="crm-field"
+                                :required="stage === 'Closed Lost' && initialStage !== 'Closed Lost'"
+                                placeholder="Jelaskan alasan kekalahan deal ini..."
+                                @readonly($purchasingMode)>{{ old('lost_reason', $opportunity->crm_lost_reason) }}</textarea>
+                            <p class="mt-1 text-xs text-slate-400">
+                                Wajib diisi saat menutup deal sebagai Closed Lost (minimal 10 karakter).
+                            </p>
+                        </div>
+                        <div>
+                            <label class="crm-label">Amount <span class="text-red-500">*</span></label>
+                            <div class="flex gap-2">
+                                <input type="text" inputmode="decimal" required
+                                    x-effect="if (editingField !== 'amount') $el.value = formatId(amount)"
+                                    @focus="editingField = 'amount'"
+                                    @blur="editingField = null; $el.value = formatId(amount)"
+                                    @input="amount = parseId($event.target.value)"
+                                    class="crm-field min-w-[200px] flex-1 tabular-nums"
+                                    :readonly="products.length > 0 || purchasingMode">
+                                <input type="hidden" name="amount" :value="amount">
+                                <select name="amount_currency" class="select2 select2-compact w-28 shrink-0"
+                                    @disabled($purchasingMode)>
+                                    @foreach (['IDR', 'USD', 'EUR', 'SGD'] as $cur)
+                                        <option value="{{ $cur }}" @selected(old('amount_currency', $opportunity->amount_currency ?: 'IDR') === $cur)>{{ $cur }}</option>
+                                    @endforeach
+                                </select>
+                                @if ($purchasingMode)
+                                    <input type="hidden" name="amount_currency"
+                                        value="{{ $opportunity->amount_currency ?: 'IDR' }}">
+                                @endif
+                            </div>
+                            <p class="mt-1 text-xs text-slate-400" x-show="products.length > 0">Calculated automatically
+                                from line items.</p>
+                        </div>
+                        <div>
+                            <label class="crm-label">Probability, % <span class="text-red-500">*</span></label>
+                            <input type="text" inputmode="decimal" name="probability" required data-crm-number
+                                data-decimals="0" value="{{ old('probability', $opportunity->probability ?? 10) }}"
+                                class="crm-field tabular-nums" @readonly($purchasingMode)>
+                        </div>
+                        <div>
+                            <label class="crm-label">Close Date <span class="text-red-500">*</span></label>
+                            <input type="date" name="close_date"
+                                value="{{ old('close_date', $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->format('Y-m-d') : '') }}"
+                                required class="crm-field" @readonly($purchasingMode)>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="crm-label">Description</label>
+                            <textarea name="description" rows="4" class="crm-field"
+                                @readonly($purchasingMode)>{{ old('description', $opportunity->description) }}</textarea>
+                        </div>
                     </div>
-                    <div>
-                        <label class="crm-label">Probability, % <span class="text-red-500">*</span></label>
-                        <input type="text" inputmode="decimal" name="probability" required data-crm-number data-decimals="0"
-                               value="{{ old('probability', $opportunity->probability ?? 10) }}"
-                               class="crm-field tabular-nums" @readonly($purchasingMode)>
-                    </div>
-                    <div>
-                        <label class="crm-label">Close Date <span class="text-red-500">*</span></label>
-                        <input type="date" name="close_date" value="{{ old('close_date', $opportunity->close_date ? \Illuminate\Support\Carbon::parse($opportunity->close_date)->format('Y-m-d') : '') }}" required
-                               class="crm-field" @readonly($purchasingMode)>
-                    </div>
-                    <div class="sm:col-span-2">
-                        <label class="crm-label">Description</label>
-                        <textarea name="description" rows="4" class="crm-field" @readonly($purchasingMode)>{{ old('description', $opportunity->description) }}</textarea>
-                    </div>
+                </x-card>
+            </div>
+
+            {{-- Sidebar kanan --}}
+            <div class="space-y-5">
+                <x-card title="Assigned User">
+                    @if (auth()->user()->isAdmin() && !$purchasingMode)
+                        <select name="assigned_user_id" class="select2 w-full" data-placeholder="— Select —">
+                            <option value="">— Select —</option>
+                            @foreach ($salesUsers as $u)
+                                <option value="{{ $u->id }}" @selected(old('assigned_user_id', $opportunity->assigned_user_id) === $u->id)>{{ $u->display_name }}</option>
+                            @endforeach
+                        </select>
+                    @else
+                        <p class="text-sm text-slate-700">
+                            {{ optional($opportunity->assignedUser)->display_name ?: auth()->user()->display_name }}
+                        </p>
+                        <input type="hidden" name="assigned_user_id"
+                            value="{{ old('assigned_user_id', $opportunity->assigned_user_id ?: auth()->id()) }}">
+                    @endif
+                </x-card>
+
+                @unless ($purchasingMode)
+                    <x-card title="Teams">
+                        <select name="team_ids[]" multiple class="select2 w-full" data-placeholder="— Select teams —">
+                            @foreach ($teams as $team)
+                                <option value="{{ $team->id }}" @selected(in_array($team->id, $selectedTeamIds))>
+                                    {{ $team->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                        <p class="mt-1.5 text-xs text-slate-400">Type to search, select one or more teams.</p>
+                    </x-card>
+                @endunless
+
+                <div class="flex flex-col gap-2">
+                    <x-btn type="submit" class="w-full justify-center" icon="bi-save">Save</x-btn>
+                    <x-btn href="{{ $cancelUrl }}" variant="secondary" class="w-full justify-center">Cancel</x-btn>
                 </div>
-            </x-card>
-        </div>
-
-        {{-- Sidebar kanan --}}
-        <div class="space-y-5">
-            <x-card title="Assigned User">
-                @if (auth()->user()->isAdmin() && ! $purchasingMode)
-                    <select name="assigned_user_id" class="select2 w-full" data-placeholder="— Select —">
-                        <option value="">— Select —</option>
-                        @foreach ($salesUsers as $u)
-                            <option value="{{ $u->id }}" @selected(old('assigned_user_id', $opportunity->assigned_user_id) === $u->id)>{{ $u->display_name }}</option>
-                        @endforeach
-                    </select>
-                @else
-                    <p class="text-sm text-slate-700">{{ optional($opportunity->assignedUser)->display_name ?: auth()->user()->display_name }}</p>
-                    <input type="hidden" name="assigned_user_id" value="{{ old('assigned_user_id', $opportunity->assigned_user_id ?: auth()->id()) }}">
-                @endif
-            </x-card>
-
-            @unless ($purchasingMode)
-            <x-card title="Teams">
-                <select name="team_ids[]" multiple class="select2 w-full" data-placeholder="— Select teams —">
-                    @foreach ($teams as $team)
-                        <option value="{{ $team->id }}" @selected(in_array($team->id, $selectedTeamIds))>{{ $team->name }}</option>
-                    @endforeach
-                </select>
-                <p class="mt-1.5 text-xs text-slate-400">Type to search, select one or more teams.</p>
-            </x-card>
-            @endunless
-
-            <div class="flex flex-col gap-2">
-                <x-btn type="submit" class="w-full justify-center" icon="bi-save">Save</x-btn>
-                <x-btn href="{{ $cancelUrl }}" variant="secondary" class="w-full justify-center">Cancel</x-btn>
             </div>
         </div>
-        </div>
 
-            {{-- Line items: full width --}}
-            <x-card>
-                {{-- Langkah 1: pilih kategori saja --}}
-                <div x-show="!selectedTaxCategory && !purchasingMode" class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
-                    <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori pajak terlebih dahulu</p>
-                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                        <button type="button" @click="selectTaxCategory('non_wapu')"
-                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
-                            <span class="block text-sm font-semibold text-slate-800">Non Wapu</span>
-                            @if (auth()->user()?->isSuperAdmin())
+        {{-- Line items: full width --}}
+        <x-card>
+            {{-- Langkah 1: pilih kategori saja --}}
+            <div x-show="!selectedTaxCategory && !purchasingMode"
+                class="rounded-lg border border-dashed border-slate-200 p-6 text-center">
+                <p class="mb-4 text-sm font-medium text-slate-700">Pilih kategori pajak terlebih dahulu</p>
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <button type="button" @click="selectTaxCategory('non_wapu')"
+                        class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                        <span class="block text-sm font-semibold text-slate-800">Non Wapu</span>
+                        @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Barang: PPN saja<br>Jasa: PPN + PPH</span>
-                            @endif
-                        </button>
-                        <button type="button" @click="selectTaxCategory('wapu')"
-                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
-                            <span class="block text-sm font-semibold text-slate-800">Wapu</span>
-                            @if (auth()->user()?->isSuperAdmin())
+                        @endif
+                    </button>
+                    <button type="button" @click="selectTaxCategory('wapu')"
+                        class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                        <span class="block text-sm font-semibold text-slate-800">Wapu</span>
+                        @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Barang: PPN + 1.5%<br>Jasa: PPN + 2%</span>
-                            @endif
-                        </button>
-                        <button type="button" @click="selectTaxCategory('inaproc')"
-                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
-                            <span class="block text-sm font-semibold text-slate-800">Inaproc</span>
-                            @if (auth()->user()?->isSuperAdmin())
+                        @endif
+                    </button>
+                    <button type="button" @click="selectTaxCategory('inaproc')"
+                        class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                        <span class="block text-sm font-semibold text-slate-800">Inaproc</span>
+                        @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Seperti Wapu + PNBP berjenjang + PPH 29</span>
-                            @endif
-                        </button>
-                        <button type="button" @click="selectTaxCategory('zinit')"
-                                class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
-                            <span class="block text-sm font-semibold text-slate-800">Zinit</span>
-                            @if (auth()->user()?->isSuperAdmin())
+                        @endif
+                    </button>
+                    <button type="button" @click="selectTaxCategory('zinit')"
+                        class="rounded-lg border-2 border-slate-200 bg-white px-4 py-4 text-left transition hover:border-brand-500 hover:bg-brand-50">
+                        <span class="block text-sm font-semibold text-slate-800">Zinit</span>
+                        @if (auth()->user()?->isSuperAdmin())
                             <span class="mt-1 block text-xs text-slate-500">Fee Zinit + PPH 2% jika Jasa</span>
-                            @endif
-                        </button>
+                        @endif
+                    </button>
+                </div>
+            </div>
+
+            {{-- Langkah 2: form item setelah kategori dipilih --}}
+            <div x-show="selectedTaxCategory || purchasingMode" x-cloak class="relative">
+                {{-- Overlay loading import Excel --}}
+                <div x-show="productImportBusy" x-cloak x-transition:enter="transition ease-out duration-150"
+                    x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+                    x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100"
+                    x-transition:leave-end="opacity-0"
+                    class="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-[1px]">
+                    <div
+                        class="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
+                        <span
+                            class="flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
+                            <i class="bi bi-arrow-repeat animate-spin text-2xl"></i>
+                        </span>
+                        <div class="text-center">
+                            <p class="text-sm font-semibold text-slate-800">Mengimpor produk…</p>
+                            <p class="mt-0.5 text-xs text-slate-500">Membaca &amp; memproses file Excel</p>
+                        </div>
                     </div>
                 </div>
-
-                {{-- Langkah 2: form item setelah kategori dipilih --}}
-                <div x-show="selectedTaxCategory || purchasingMode" x-cloak class="relative">
-                    {{-- Overlay loading import Excel --}}
-                    <div x-show="productImportBusy" x-cloak
-                         x-transition:enter="transition ease-out duration-150"
-                         x-transition:enter-start="opacity-0"
-                         x-transition:enter-end="opacity-100"
-                         x-transition:leave="transition ease-in duration-100"
-                         x-transition:leave-start="opacity-100"
-                         x-transition:leave-end="opacity-0"
-                         class="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-[1px]">
-                        <div class="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
-                            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-                                <i class="bi bi-arrow-repeat animate-spin text-2xl"></i>
-                            </span>
-                            <div class="text-center">
-                                <p class="text-sm font-semibold text-slate-800">Mengimpor produk…</p>
-                                <p class="mt-0.5 text-xs text-slate-500">Membaca &amp; memproses file Excel</p>
+                <div
+                    class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-sm text-slate-500">Kategori:</span>
+                        <template x-if="!purchasingMode">
+                            <div class="inline-flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                                <button type="button" @click="changeTaxCategory('non_wapu')"
+                                    :class="selectedTaxCategory === 'non_wapu' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Non Wapu</button>
+                                <button type="button" @click="changeTaxCategory('wapu')"
+                                    :class="selectedTaxCategory === 'wapu' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Wapu</button>
+                                <button type="button" @click="changeTaxCategory('inaproc')"
+                                    :class="selectedTaxCategory === 'inaproc' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Inaproc</button>
+                                <button type="button" @click="changeTaxCategory('zinit')"
+                                    :class="selectedTaxCategory === 'zinit' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Zinit</button>
                             </div>
-                        </div>
+                        </template>
+                        <span x-show="purchasingMode"
+                            class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700"
+                            x-text="taxCategoryLabel(selectedTaxCategory)"></span>
                     </div>
-                    <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="text-sm text-slate-500">Kategori:</span>
-                            <template x-if="!purchasingMode">
-                                <div class="inline-flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1">
-                                    <button type="button" @click="changeTaxCategory('non_wapu')"
-                                            :class="selectedTaxCategory === 'non_wapu' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Non Wapu</button>
-                                    <button type="button" @click="changeTaxCategory('wapu')"
-                                            :class="selectedTaxCategory === 'wapu' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Wapu</button>
-                                    <button type="button" @click="changeTaxCategory('inaproc')"
-                                            :class="selectedTaxCategory === 'inaproc' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Inaproc</button>
-                                    <button type="button" @click="changeTaxCategory('zinit')"
-                                            :class="selectedTaxCategory === 'zinit' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                                            class="rounded-md px-3 py-1.5 text-xs font-semibold transition">Zinit</button>
-                                </div>
-                            </template>
-                            <span x-show="purchasingMode" class="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-700" x-text="taxCategoryLabel(selectedTaxCategory)"></span>
-                        </div>
-                        @if (auth()->user()?->isSuperAdmin())
-                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja — PPH/PNBP/margin item dihitung ulang. Exclude/Include = satuan; kolom Total = include × qty (pajak/margin total di kolom kanan). % margin (putih) bisa diubah.</p>
-                        @endif
-                    </div>
+                    @if (auth()->user()?->isSuperAdmin())
+                        <p class="w-full text-xs text-slate-500 sm:w-auto">Kategori bisa diganti kapan saja —
+                            PPH/PNBP/margin item dihitung ulang. Exclude/Include = satuan; kolom Total = include × qty
+                            (pajak/margin total di kolom kanan). % margin (putih) bisa diubah.</p>
+                    @endif
+                </div>
 
-                    <div class="space-y-4">
-                        <template x-for="(p, i) in products" :key="i">
-                            <div class="flex w-full gap-3 rounded-lg border border-slate-200 p-4">
-                                <div class="flex w-8 shrink-0 flex-col items-center pt-6">
-                                    <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold tabular-nums text-slate-700"
-                                          x-text="i + 1"
-                                          :title="'Item ' + (i + 1)"></span>
-                                </div>
-                                <div class="min-w-0 w-full flex-1">
+                <div class="space-y-4">
+                    <template x-for="(p, i) in products" :key="i">
+                        <div class="flex w-full gap-3 rounded-lg border border-slate-200 p-4">
+                            <div class="flex w-8 shrink-0 flex-col items-center pt-6">
+                                <span
+                                    class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold tabular-nums text-slate-700"
+                                    x-text="i + 1" :title="'Item ' + (i + 1)"></span>
+                            </div>
+                            <div class="min-w-0 w-full flex-1">
                                 <input type="hidden" :name="`products[${i}][tax_category]`" :value="p.tax_category">
                                 <input type="hidden" :name="`products[${i}][sku]`" :value="p.sku || ''">
                                 <div class="mb-3 grid w-full grid-cols-1 gap-2 sm:grid-cols-12">
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Barang / Jasa</label>
-                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind" @change="onItemKindChange(p)" class="crm-field w-full text-sm" :disabled="purchasingMode">
+                                        <select :name="`products[${i}][item_kind]`" x-model="p.item_kind"
+                                            @change="onItemKindChange(p)" class="crm-field w-full text-sm"
+                                            :disabled="purchasingMode">
                                             <option value="barang">Barang</option>
                                             <option value="jasa">Jasa</option>
                                         </select>
                                     </div>
                                     <div class="sm:col-span-3">
                                         <label class="crm-label text-xs">Item</label>
-                                        <input type="text" :name="`products[${i}][name]`" x-model="p.name" placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
+                                        <input type="text" :name="`products[${i}][name]`" x-model="p.name"
+                                            placeholder="Nama item" class="crm-field w-full" :readonly="purchasingMode">
                                     </div>
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Brand</label>
                                         <select :name="`products[${i}][brand]`"
-                                                class="select2 select2-search w-full text-sm"
-                                                data-placeholder="— Brand —"
-                                                data-brand-select
-                                                :disabled="purchasingMode"
-                                                x-init="$nextTick(() => initBrandSelect($el, i))">
+                                            class="select2 select2-search w-full text-sm" data-placeholder="— Brand —"
+                                            data-brand-select :disabled="purchasingMode"
+                                            x-init="$nextTick(() => initBrandSelect($el, i))">
                                             <option value="">— Brand —</option>
                                             @foreach ($brandOptions ?? [] as $brand)
                                                 <option value="{{ $brand['name'] }}">{{ $brand['name'] }}</option>
@@ -420,11 +496,10 @@
                                     <div class="sm:col-span-2">
                                         <label class="crm-label text-xs">Category</label>
                                         <select :name="`products[${i}][category]`"
-                                                class="select2 select2-search w-full text-sm"
-                                                data-placeholder="— Category —"
-                                                data-category-select
-                                                :disabled="purchasingMode"
-                                                x-init="$nextTick(() => initCategorySelect($el, i))">
+                                            class="select2 select2-search w-full text-sm"
+                                            data-placeholder="— Category —" data-category-select
+                                            :disabled="purchasingMode"
+                                            x-init="$nextTick(() => initCategorySelect($el, i))">
                                             <option value="">— Category —</option>
                                             @foreach ($categoryOptions ?? [] as $category)
                                                 <option value="{{ $category['name'] }}">{{ $category['name'] }}</option>
@@ -434,20 +509,19 @@
                                     <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Qty</label>
                                         <input type="text" inputmode="decimal"
-                                               x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(p.quantity, 2)"
-                                               @focus="editingField = `qty-${i}`"
-                                               @blur="editingField = null; $el.value = formatId(p.quantity, 2)"
-                                               @input="p.quantity = parseId($event.target.value); onQuantityChange(p)"
-                                               class="crm-field w-full min-w-[4.5rem] text-right tabular-nums" :readonly="purchasingMode">
+                                            x-effect="if (editingField !== `qty-${i}`) $el.value = formatId(p.quantity, 2)"
+                                            @focus="editingField = `qty-${i}`"
+                                            @blur="editingField = null; $el.value = formatId(p.quantity, 2)"
+                                            @input="p.quantity = parseId($event.target.value); onQuantityChange(p)"
+                                            class="crm-field w-full min-w-[4.5rem] text-right tabular-nums"
+                                            :readonly="purchasingMode">
                                         <input type="hidden" :name="`products[${i}][quantity]`" :value="p.quantity">
                                     </div>
                                     <div class="sm:col-span-1">
                                         <label class="crm-label text-xs">Vendor</label>
                                         <select :name="`products[${i}][vendor]`"
-                                                class="select2 select2-search w-full text-sm"
-                                                data-placeholder="— Vendor —"
-                                                data-vendor-select
-                                                x-init="$nextTick(() => initVendorSelect($el, i))">
+                                            class="select2 select2-search w-full text-sm" data-placeholder="— Vendor —"
+                                            data-vendor-select x-init="$nextTick(() => initVendorSelect($el, i))">
                                             <option value="">— Vendor —</option>
                                             @foreach ($vendorOptions ?? [] as $vendor)
                                                 <option value="{{ $vendor['name'] }}">{{ $vendor['name'] }}</option>
@@ -455,456 +529,497 @@
                                         </select>
                                     </div>
                                     <div class="flex items-end justify-end sm:col-span-1">
-                                        <button type="button" x-show="!purchasingMode" @click="removeProduct(i)" class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i class="bi bi-trash"></i></button>
+                                        <button type="button" x-show="!purchasingMode" @click="removeProduct(i)"
+                                            class="rounded-lg p-2 text-red-500 hover:bg-red-50" title="Hapus item"><i
+                                                class="bi bi-trash"></i></button>
                                     </div>
                                 </div>
 
                                 <div class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-12">
                                     <div class="sm:col-span-6">
-                                        <label class="crm-label text-xs">Gambar <span class="font-normal text-slate-400">(opsional)</span></label>
+                                        <label class="crm-label text-xs">Gambar <span
+                                                class="font-normal text-slate-400">(opsional)</span></label>
                                         <div class="mt-1.5 flex flex-wrap items-center gap-3">
-                                            <div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                                            <div
+                                                class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                                                 <template x-if="p.image_preview || p.image_url">
-                                                    <img :src="p.image_preview || p.image_url" alt="" class="h-full w-full object-cover">
+                                                    <img :src="p.image_preview || p.image_url" alt=""
+                                                        class="h-full w-full object-cover">
                                                 </template>
                                                 <template x-if="!(p.image_preview || p.image_url)">
                                                     <i class="bi bi-image text-lg text-slate-300"></i>
                                                 </template>
                                             </div>
                                             <div class="min-w-0 flex-1 space-y-1">
-                                                <input type="file"
-                                                       :name="`products[${i}][image_file]`"
-                                                       accept="image/png,image/jpeg,image/webp,image/gif"
-                                                       class="crm-field w-full max-w-xs text-xs file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs file:font-medium file:text-slate-700"
-                                                       :disabled="purchasingMode"
-                                                       @change="onProductImageChange(p, $event)">
-                                                <div class="flex items-center gap-2" x-show="p.image_preview || p.image_url || p.image" x-cloak>
-                                                    <button type="button"
-                                                            x-show="!purchasingMode"
-                                                            @click="clearProductImage(p, i)"
-                                                            class="text-xs font-medium text-red-600 hover:text-red-700">
+                                                <input type="file" :name="`products[${i}][image_file]`"
+                                                    accept="image/png,image/jpeg,image/webp,image/gif"
+                                                    class="crm-field w-full max-w-xs text-xs file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs file:font-medium file:text-slate-700"
+                                                    :disabled="purchasingMode"
+                                                    @change="onProductImageChange(p, $event)">
+                                                <div class="flex items-center gap-2"
+                                                    x-show="p.image_preview || p.image_url || p.image" x-cloak>
+                                                    <button type="button" x-show="!purchasingMode"
+                                                        @click="clearProductImage(p, i)"
+                                                        class="text-xs font-medium text-red-600 hover:text-red-700">
                                                         Hapus gambar
                                                     </button>
                                                 </div>
                                             </div>
                                         </div>
-                                        <input type="hidden" :name="`products[${i}][image]`" :value="p.remove_image ? '' : (p.image || '')">
-                                        <input type="hidden" :name="`products[${i}][remove_image]`" :value="p.remove_image ? 1 : 0">
+                                        <input type="hidden" :name="`products[${i}][image]`"
+                                            :value="p.remove_image ? '' : (p.image || '')">
+                                        <input type="hidden" :name="`products[${i}][remove_image]`"
+                                            :value="p.remove_image ? 1 : 0">
                                     </div>
                                     <div class="sm:col-span-4">
                                         <label class="crm-label text-xs">Royalti</label>
                                         <div class="mt-1.5 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700"
-                                             :class="p.royalty_type ? 'border-brand-300 bg-brand-50' : ''">
+                                            :class="p.royalty_type ? 'border-brand-300 bg-brand-50' : ''">
                                             <label class="inline-flex items-center gap-1.5">
-                                                <input type="checkbox"
-                                                       :checked="p.royalty_type === 'dalam'"
-                                                       @change="toggleRoyaltyType(p, 'dalam')"
-                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                                                       :disabled="purchasingMode">
+                                                <input type="checkbox" :checked="p.royalty_type === 'dalam'"
+                                                    @change="toggleRoyaltyType(p, 'dalam')"
+                                                    class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                                    :disabled="purchasingMode">
                                                 <span x-text="royaltyDalamPercent + '%'"></span>
                                             </label>
                                             <label class="inline-flex items-center gap-1.5">
-                                                <input type="checkbox"
-                                                       :checked="p.royalty_type === 'luar'"
-                                                       @change="toggleRoyaltyType(p, 'luar')"
-                                                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                                                       :disabled="purchasingMode">
+                                                <input type="checkbox" :checked="p.royalty_type === 'luar'"
+                                                    @change="toggleRoyaltyType(p, 'luar')"
+                                                    class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                                    :disabled="purchasingMode">
                                                 <span x-text="royaltyLuarPercent + '%'"></span>
                                             </label>
                                         </div>
-                                        <input type="hidden" :name="`products[${i}][royalty_type]`" :value="p.royalty_type || ''">
-                                        <input type="hidden" :name="`products[${i}][has_royalty]`" :value="p.royalty_type ? 1 : 0">
+                                        <input type="hidden" :name="`products[${i}][royalty_type]`"
+                                            :value="p.royalty_type || ''">
+                                        <input type="hidden" :name="`products[${i}][has_royalty]`"
+                                            :value="p.royalty_type ? 1 : 0">
                                     </div>
                                 </div>
 
-                            <div class="w-full overflow-x-auto">
-                                <table class="w-full table-fixed text-sm">
-                                    <colgroup>
-                                        <col class="w-[24%]">
-                                        <col class="w-[24%]">
-                                        <col class="w-[24%]">
-                                        <col class="w-[28%]">
-                                    </colgroup>
-                                    <thead>
-                                        <tr class="text-left text-xs uppercase tracking-wider text-slate-400">
-                                            <th class="pb-2 pr-3"></th>
-                                            <th class="pb-2 pr-3">Exclude</th>
-                                            <th class="pb-2 pr-3">Include</th>
-                                            <th class="pb-2 pr-3">Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-slate-100">
-                                        <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">Harga Jual</td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal"
-                                                       x-effect="if (editingField !== `sell-${i}`) $el.value = formatIdWhole(p.sell_exclude)"
-                                                       @focus="editingField = `sell-${i}`"
-                                                       @blur="editingField = null; $el.value = formatIdWhole(p.sell_exclude)"
-                                                       @input="p.sell_exclude = parseId($event.target.value); onSellChange(p)"
-                                                       class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
-                                                <input type="hidden" :name="`products[${i}][sell_exclude]`" :value="p.sell_exclude">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal"
-                                                       x-effect="if (editingField !== `sell-inc-${i}`) $el.value = formatId(sellInclude(p))"
-                                                       @focus="editingField = `sell-inc-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(sellInclude(p))"
-                                                       @input="onSellIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
-                                                       :readonly="purchasingMode"
-                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(lineTotalInclude(sellInclude(p), p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
-                                                       title="Include × qty">
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                Diskon Item
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Harga net (0 = pakai harga jual)</span>
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal" placeholder="0"
-                                                       x-effect="if (editingField !== `disc-${i}`) $el.value = formatId(p.discount_exclude)"
-                                                       @focus="editingField = `disc-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(p.discount_exclude)"
-                                                       @input="p.discount_exclude = parseId($event.target.value); onDiscountItemChange(p)"
-                                                       class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
-                                                <input type="hidden" :name="`products[${i}][discount_exclude]`" :value="p.discount_exclude">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal" placeholder="0"
-                                                       x-effect="if (editingField !== `disc-inc-${i}`) $el.value = formatId(discountInclude(p))"
-                                                       @focus="editingField = `disc-inc-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(discountInclude(p))"
-                                                       @input="onDiscountIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
-                                                       :readonly="purchasingMode"
-                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(lineTotalInclude(discountInclude(p), p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
-                                                       title="Include × qty">
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                <div class="flex flex-col gap-1.5">
-                                                    <span>Harga Beli / Modal</span>
-                                                    <div class="inline-flex w-fit rounded-md border border-slate-200 bg-slate-50 p-0.5">
-                                                        <button type="button"
-                                                                @click="setCostMode(p, false)"
+                                <div class="w-full overflow-x-auto">
+                                    <table class="w-full table-fixed text-sm">
+                                        <colgroup>
+                                            <col class="w-[24%]">
+                                            <col class="w-[24%]">
+                                            <col class="w-[24%]">
+                                            <col class="w-[28%]">
+                                        </colgroup>
+                                        <thead>
+                                            <tr class="text-left text-xs uppercase tracking-wider text-slate-400">
+                                                <th class="pb-2 pr-3"></th>
+                                                <th class="pb-2 pr-3">Exclude</th>
+                                                <th class="pb-2 pr-3">Include</th>
+                                                <th class="pb-2 pr-3">Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100">
+                                            <tr>
+                                                <td class="py-2 pr-3 font-medium text-slate-600">Harga Jual</td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" inputmode="decimal"
+                                                        x-effect="if (editingField !== `sell-${i}`) $el.value = formatIdWhole(p.sell_exclude)"
+                                                        @focus="editingField = `sell-${i}`"
+                                                        @blur="editingField = null; $el.value = formatIdWhole(p.sell_exclude)"
+                                                        @input="p.sell_exclude = parseId($event.target.value); onSellChange(p)"
+                                                        class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                        :readonly="purchasingMode">
+                                                    <input type="hidden" :name="`products[${i}][sell_exclude]`"
+                                                        :value="p.sell_exclude">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" inputmode="decimal"
+                                                        x-effect="if (editingField !== `sell-inc-${i}`) $el.value = formatId(sellInclude(p))"
+                                                        @focus="editingField = `sell-inc-${i}`"
+                                                        @blur="editingField = null; $el.value = formatId(sellInclude(p))"
+                                                        @input="onSellIncludeChange(p, parseId($event.target.value))"
+                                                        class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                        :readonly="purchasingMode"
+                                                        title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly
+                                                        :value="formatId(lineTotalInclude(sellInclude(p), p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                        title="Include × qty">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    Diskon Item
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Harga
+                                                        net (0 = pakai harga jual)</span>
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" inputmode="decimal" placeholder="0"
+                                                        x-effect="if (editingField !== `disc-${i}`) $el.value = formatId(p.discount_exclude)"
+                                                        @focus="editingField = `disc-${i}`"
+                                                        @blur="editingField = null; $el.value = formatId(p.discount_exclude)"
+                                                        @input="p.discount_exclude = parseId($event.target.value); onDiscountItemChange(p)"
+                                                        class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                        :readonly="purchasingMode">
+                                                    <input type="hidden" :name="`products[${i}][discount_exclude]`"
+                                                        :value="p.discount_exclude">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" inputmode="decimal" placeholder="0"
+                                                        x-effect="if (editingField !== `disc-inc-${i}`) $el.value = formatId(discountInclude(p))"
+                                                        @focus="editingField = `disc-inc-${i}`"
+                                                        @blur="editingField = null; $el.value = formatId(discountInclude(p))"
+                                                        @input="onDiscountIncludeChange(p, parseId($event.target.value))"
+                                                        class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                        :readonly="purchasingMode"
+                                                        title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly
+                                                        :value="formatId(lineTotalInclude(discountInclude(p), p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                        title="Include × qty">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    <div class="flex flex-col gap-1.5">
+                                                        <span>Harga Beli / Modal</span>
+                                                        <div
+                                                            class="inline-flex w-fit rounded-md border border-slate-200 bg-slate-50 p-0.5">
+                                                            <button type="button" @click="setCostMode(p, false)"
                                                                 :class="!p.cost_foreign
                                                                     ? 'rounded bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-800 shadow-sm'
                                                                     : 'rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 transition hover:text-slate-700'">
-                                                            Rupiah
-                                                        </button>
-                                                        <button type="button"
-                                                                @click="setCostMode(p, true)"
+                                                                Rupiah
+                                                            </button>
+                                                            <button type="button" @click="setCostMode(p, true)"
                                                                 :class="p.cost_foreign
                                                                     ? 'rounded bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-800 shadow-sm'
                                                                     : 'rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 transition hover:text-slate-700'">
-                                                            Asing
-                                                        </button>
+                                                                Asing
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <div x-show="!p.cost_foreign">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <div x-show="!p.cost_foreign">
+                                                        <input type="text" inputmode="decimal"
+                                                            x-effect="if (editingField !== `cost-${i}`) $el.value = formatId(p.cost_exclude)"
+                                                            @focus="editingField = `cost-${i}`"
+                                                            @blur="editingField = null; $el.value = formatId(p.cost_exclude)"
+                                                            @input="p.cost_exclude = parseId($event.target.value); onCostChange(p)"
+                                                            class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums">
+                                                    </div>
+                                                    <div x-show="p.cost_foreign" class="space-y-1.5" x-cloak>
+                                                        <div class="flex items-center gap-1.5">
+                                                            <span
+                                                                class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500">Mata
+                                                                uang</span>
+                                                            <input type="text" x-model="p.cost_fx_code"
+                                                                @input="p.cost_fx_code = String($event.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6)"
+                                                                placeholder="USD / SGD" maxlength="6"
+                                                                class="crm-field w-full min-w-[6rem] bg-white uppercase tracking-wide"
+                                                                title="Kode mata uang asing, mis. USD, SGD, EUR">
+                                                        </div>
+                                                        <div class="flex items-center gap-1.5">
+                                                            <span
+                                                                class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500"
+                                                                x-text="p.cost_fx_code || 'FX'"></span>
+                                                            <input type="text" inputmode="decimal" placeholder="0"
+                                                                x-effect="if (editingField !== `cost-fx-${i}`) $el.value = formatId(p.cost_fx, 4)"
+                                                                @focus="editingField = `cost-fx-${i}`"
+                                                                @blur="editingField = null; $el.value = formatId(p.cost_fx, 4)"
+                                                                @input="p.cost_fx = parseId($event.target.value); recalcCostFromFx(p)"
+                                                                class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                                title="Harga modal dalam mata uang asing">
+                                                        </div>
+                                                        <div class="flex items-center gap-1.5">
+                                                            <span
+                                                                class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500">Rate</span>
+                                                            <input type="text" inputmode="decimal" placeholder="0"
+                                                                x-effect="if (editingField !== `fx-rate-${i}`) $el.value = formatId(p.fx_rate)"
+                                                                @focus="editingField = `fx-rate-${i}`"
+                                                                @blur="editingField = null; $el.value = formatId(p.fx_rate)"
+                                                                @input="p.fx_rate = parseId($event.target.value); recalcCostFromFx(p)"
+                                                                class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                                title="Kurs Rp per 1 unit mata uang asing (diisi sales)">
+                                                        </div>
+                                                        <p class="text-[11px] text-slate-500">
+                                                            = <span class="font-semibold tabular-nums text-slate-700"
+                                                                x-text="formatMoney(p.cost_exclude)"></span>
+                                                            <span class="text-slate-400"> exclude</span>
+                                                        </p>
+                                                    </div>
+                                                    <input type="hidden" :name="`products[${i}][cost_exclude]`"
+                                                        :value="p.cost_exclude">
+                                                    <input type="hidden" :name="`products[${i}][cost_foreign]`"
+                                                        :value="p.cost_foreign ? 1 : 0">
+                                                    <input type="hidden" :name="`products[${i}][cost_in_usd]`"
+                                                        :value="p.cost_foreign ? 1 : 0">
+                                                    <input type="hidden" :name="`products[${i}][cost_fx_code]`"
+                                                        :value="p.cost_fx_code">
+                                                    <input type="hidden" :name="`products[${i}][cost_fx]`"
+                                                        :value="p.cost_fx">
+                                                    <input type="hidden" :name="`products[${i}][cost_usd]`"
+                                                        :value="p.cost_fx">
+                                                    <input type="hidden" :name="`products[${i}][fx_rate]`"
+                                                        :value="p.fx_rate">
+                                                    <input type="hidden" :name="`products[${i}][usd_rate]`"
+                                                        :value="p.fx_rate">
+                                                </td>
+                                                <td class="py-2 pr-3">
                                                     <input type="text" inputmode="decimal"
-                                                           x-effect="if (editingField !== `cost-${i}`) $el.value = formatId(p.cost_exclude)"
-                                                           @focus="editingField = `cost-${i}`"
-                                                           @blur="editingField = null; $el.value = formatId(p.cost_exclude)"
-                                                           @input="p.cost_exclude = parseId($event.target.value); onCostChange(p)"
-                                                           class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums">
-                                                </div>
-                                                <div x-show="p.cost_foreign" class="space-y-1.5" x-cloak>
-                                                    <div class="flex items-center gap-1.5">
-                                                        <span class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500">Mata uang</span>
-                                                        <input type="text"
-                                                               x-model="p.cost_fx_code"
-                                                               @input="p.cost_fx_code = String($event.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6)"
-                                                               placeholder="USD / SGD"
-                                                               maxlength="6"
-                                                               class="crm-field w-full min-w-[6rem] bg-white uppercase tracking-wide"
-                                                               title="Kode mata uang asing, mis. USD, SGD, EUR">
+                                                        x-effect="if (editingField !== `cost-inc-${i}`) $el.value = formatId(costInclude(p))"
+                                                        @focus="editingField = `cost-inc-${i}`"
+                                                        @blur="editingField = null; $el.value = formatId(costInclude(p))"
+                                                        @input="onCostIncludeChange(p, parseId($event.target.value))"
+                                                        class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                        :readonly="p.cost_foreign"
+                                                        :title="p.cost_foreign ? 'Dihitung dari modal asing × rate' : 'Isi Include → Exclude dihitung otomatis (÷ PPN)'">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly
+                                                        :value="formatId(lineTotalInclude(costInclude(p), p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                        title="Include × qty">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    Modal ongkir
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Per
+                                                        satuan, mengurangi margin</span>
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" inputmode="decimal" placeholder="0"
+                                                        x-effect="if (editingField !== `ship-${i}`) $el.value = formatId(p.shipping_exclude)"
+                                                        @focus="editingField = `ship-${i}`"
+                                                        @blur="editingField = null; $el.value = formatId(p.shipping_exclude)"
+                                                        @input="p.shipping_exclude = parseId($event.target.value); onShippingChange(p)"
+                                                        class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
+                                                        :readonly="purchasingMode">
+                                                    <input type="hidden" :name="`products[${i}][shipping_exclude]`"
+                                                        :value="p.shipping_exclude">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" inputmode="decimal" placeholder="0"
+                                                        x-effect="if (editingField !== `ship-inc-${i}`) $el.value = formatId(shippingInclude(p))"
+                                                        @focus="editingField = `ship-inc-${i}`"
+                                                        @blur="editingField = null; $el.value = formatId(shippingInclude(p))"
+                                                        @input="onShippingIncludeChange(p, parseId($event.target.value))"
+                                                        class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
+                                                        :readonly="purchasingMode"
+                                                        title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly
+                                                        :value="formatId(lineTotalInclude(shippingInclude(p), p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
+                                                        title="Include × qty">
+                                                </td>
+                                            </tr>
+                                            <tr x-show="appliesPph(p)">
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    <span x-text="'PPH ' + pphPercentFor(p) + '%'"></span>
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400"
+                                                        x-text="'Basis × ' + pphPercentFor(p) + '%'"></span>
+                                                </td>
+                                                <td class="py-2 pr-3"></td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(pphUnitAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                        title="PPH per satuan">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(pphAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                        title="PPH total (× qty)">
+                                                </td>
+                                            </tr>
+                                            <tr x-show="appliesPnbp(p)">
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    PNBP
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">MIN(include
+                                                        × rate, cap)</span>
+                                                </td>
+                                                <td class="py-2 pr-3"></td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(pnbpUnitAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                        title="PNBP per satuan">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(pnbpAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                        title="PNBP total (tier dari total include)">
+                                                </td>
+                                            </tr>
+                                            <tr x-show="appliesPph29(p)">
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    <span x-text="'PPH 29 ' + pph29Percent + '%'"></span>
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">(Jual
+                                                        − Modal) exclude</span>
+                                                </td>
+                                                <td class="py-2 pr-3"></td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(pph29UnitAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                        title="PPH 29 per satuan">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(pph29Amount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                        title="PPH 29 total (× qty)">
+                                                </td>
+                                            </tr>
+                                            <tr x-show="appliesRoyalty(p)">
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    <span x-text="'Royalti ' + royaltyPercentFor(p) + '%'"></span>
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400"
+                                                        x-text="royaltyTypeLabel(p)"></span>
+                                                </td>
+                                                <td class="py-2 pr-3"></td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(royaltyUnitAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                        title="Royalti per satuan">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatId(royaltyAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
+                                                        title="Royalti total (× qty)">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="py-2 pr-3 font-medium text-slate-600">
+                                                    Margin
+                                                    <span
+                                                        class="block text-[10px] font-normal normal-case tracking-normal text-slate-400"
+                                                        x-text="marginLabel(p)"></span>
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly
+                                                        :value="formatIdWhole(marginUnitAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
+                                                        title="Margin per satuan">
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <div class="flex items-center gap-1">
+                                                        <input type="text" inputmode="decimal"
+                                                            x-effect="if (editingField !== `mgn-${i}`) $el.value = formatId(p.margin_percent, 2)"
+                                                            @focus="editingField = `mgn-${i}`"
+                                                            @blur="editingField = null; $el.value = formatId(p.margin_percent, 2)"
+                                                            @input="p.margin_percent = parseId($event.target.value); onMarginPercentChange(p)"
+                                                            class="crm-field w-full min-w-[5rem] bg-white text-right text-sm tabular-nums"
+                                                            title="Ubah % margin untuk hitung ulang harga jual / diskon"
+                                                            :readonly="purchasingMode || appliesZinit(p)">
+                                                        <span
+                                                            class="shrink-0 text-xs font-semibold text-slate-600">%</span>
                                                     </div>
-                                                    <div class="flex items-center gap-1.5">
-                                                        <span class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500" x-text="p.cost_fx_code || 'FX'"></span>
-                                                        <input type="text" inputmode="decimal" placeholder="0"
-                                                               x-effect="if (editingField !== `cost-fx-${i}`) $el.value = formatId(p.cost_fx, 4)"
-                                                               @focus="editingField = `cost-fx-${i}`"
-                                                               @blur="editingField = null; $el.value = formatId(p.cost_fx, 4)"
-                                                               @input="p.cost_fx = parseId($event.target.value); recalcCostFromFx(p)"
-                                                               class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
-                                                               title="Harga modal dalam mata uang asing">
-                                                    </div>
-                                                    <div class="flex items-center gap-1.5">
-                                                        <span class="w-12 shrink-0 text-[10px] font-semibold uppercase text-slate-500">Rate</span>
-                                                        <input type="text" inputmode="decimal" placeholder="0"
-                                                               x-effect="if (editingField !== `fx-rate-${i}`) $el.value = formatId(p.fx_rate)"
-                                                               @focus="editingField = `fx-rate-${i}`"
-                                                               @blur="editingField = null; $el.value = formatId(p.fx_rate)"
-                                                               @input="p.fx_rate = parseId($event.target.value); recalcCostFromFx(p)"
-                                                               class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums"
-                                                               title="Kurs Rp per 1 unit mata uang asing (diisi sales)">
-                                                    </div>
-                                                    <p class="text-[11px] text-slate-500">
-                                                        = <span class="font-semibold tabular-nums text-slate-700" x-text="formatMoney(p.cost_exclude)"></span>
-                                                        <span class="text-slate-400"> exclude</span>
-                                                    </p>
-                                                </div>
-                                                <input type="hidden" :name="`products[${i}][cost_exclude]`" :value="p.cost_exclude">
-                                                <input type="hidden" :name="`products[${i}][cost_foreign]`" :value="p.cost_foreign ? 1 : 0">
-                                                <input type="hidden" :name="`products[${i}][cost_in_usd]`" :value="p.cost_foreign ? 1 : 0">
-                                                <input type="hidden" :name="`products[${i}][cost_fx_code]`" :value="p.cost_fx_code">
-                                                <input type="hidden" :name="`products[${i}][cost_fx]`" :value="p.cost_fx">
-                                                <input type="hidden" :name="`products[${i}][cost_usd]`" :value="p.cost_fx">
-                                                <input type="hidden" :name="`products[${i}][fx_rate]`" :value="p.fx_rate">
-                                                <input type="hidden" :name="`products[${i}][usd_rate]`" :value="p.fx_rate">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal"
-                                                       x-effect="if (editingField !== `cost-inc-${i}`) $el.value = formatId(costInclude(p))"
-                                                       @focus="editingField = `cost-inc-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(costInclude(p))"
-                                                       @input="onCostIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
-                                                       :readonly="p.cost_foreign"
-                                                       :title="p.cost_foreign ? 'Dihitung dari modal asing × rate' : 'Isi Include → Exclude dihitung otomatis (÷ PPN)'">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(lineTotalInclude(costInclude(p), p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
-                                                       title="Include × qty">
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                Modal ongkir
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">Per satuan, mengurangi margin</span>
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal" placeholder="0"
-                                                       x-effect="if (editingField !== `ship-${i}`) $el.value = formatId(p.shipping_exclude)"
-                                                       @focus="editingField = `ship-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(p.shipping_exclude)"
-                                                       @input="p.shipping_exclude = parseId($event.target.value); onShippingChange(p)"
-                                                       class="crm-field w-full min-w-[7rem] bg-white text-right tabular-nums" :readonly="purchasingMode">
-                                                <input type="hidden" :name="`products[${i}][shipping_exclude]`" :value="p.shipping_exclude">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" inputmode="decimal" placeholder="0"
-                                                       x-effect="if (editingField !== `ship-inc-${i}`) $el.value = formatId(shippingInclude(p))"
-                                                       @focus="editingField = `ship-inc-${i}`"
-                                                       @blur="editingField = null; $el.value = formatId(shippingInclude(p))"
-                                                       @input="onShippingIncludeChange(p, parseId($event.target.value))"
-                                                       class="crm-field w-full min-w-[7rem] border-amber-200 bg-amber-50 text-right tabular-nums"
-                                                       :readonly="purchasingMode"
-                                                       title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(lineTotalInclude(shippingInclude(p), p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums text-slate-700"
-                                                       title="Include × qty">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesPph(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                <span x-text="'PPH ' + pphPercentFor(p) + '%'"></span>
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400" x-text="'Basis × ' + pphPercentFor(p) + '%'"></span>
-                                            </td>
-                                            <td class="py-2 pr-3"></td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(pphUnitAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
-                                                       title="PPH per satuan">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(pphAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
-                                                       title="PPH total (× qty)">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesPnbp(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                PNBP
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">MIN(include × rate, cap)</span>
-                                            </td>
-                                            <td class="py-2 pr-3"></td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(pnbpUnitAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
-                                                       title="PNBP per satuan">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(pnbpAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
-                                                       title="PNBP total (tier dari total include)">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesPph29(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                <span x-text="'PPH 29 ' + pph29Percent + '%'"></span>
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400">(Jual − Modal) exclude</span>
-                                            </td>
-                                            <td class="py-2 pr-3"></td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(pph29UnitAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
-                                                       title="PPH 29 per satuan">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(pph29Amount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
-                                                       title="PPH 29 total (× qty)">
-                                            </td>
-                                        </tr>
-                                        <tr x-show="appliesRoyalty(p)">
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                <span x-text="'Royalti ' + royaltyPercentFor(p) + '%'"></span>
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400" x-text="royaltyTypeLabel(p)"></span>
-                                            </td>
-                                            <td class="py-2 pr-3"></td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(royaltyUnitAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
-                                                       title="Royalti per satuan">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatId(royaltyAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-medium text-slate-800"
-                                                       title="Royalti total (× qty)">
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td class="py-2 pr-3 font-medium text-slate-600">
-                                                Margin
-                                                <span class="block text-[10px] font-normal normal-case tracking-normal text-slate-400" x-text="marginLabel(p)"></span>
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatIdWhole(marginUnitAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-amber-200 bg-amber-50 text-right tabular-nums text-slate-700"
-                                                       title="Margin per satuan">
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <div class="flex items-center gap-1">
-                                                    <input type="text" inputmode="decimal"
-                                                           x-effect="if (editingField !== `mgn-${i}`) $el.value = formatId(p.margin_percent, 2)"
-                                                           @focus="editingField = `mgn-${i}`"
-                                                           @blur="editingField = null; $el.value = formatId(p.margin_percent, 2)"
-                                                           @input="p.margin_percent = parseId($event.target.value); onMarginPercentChange(p)"
-                                                           class="crm-field w-full min-w-[5rem] bg-white text-right text-sm tabular-nums"
-                                                           title="Ubah % margin untuk hitung ulang harga jual / diskon"
-                                                           :readonly="purchasingMode || appliesZinit(p)">
-                                                    <span class="shrink-0 text-xs font-semibold text-slate-600">%</span>
-                                                </div>
-                                            </td>
-                                            <td class="py-2 pr-3">
-                                                <input type="text" readonly
-                                                       :value="formatIdWhole(marginAmount(p))"
-                                                       class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-semibold text-green-700"
-                                                       title="Margin total baris">
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
+                                                </td>
+                                                <td class="py-2 pr-3">
+                                                    <input type="text" readonly :value="formatIdWhole(marginAmount(p))"
+                                                        class="crm-field w-full min-w-[7rem] cursor-default border-slate-200 bg-slate-50 text-right tabular-nums font-semibold text-green-700"
+                                                        title="Margin total baris">
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-                        </template>
-                        <p x-show="products.length === 0" class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">Belum ada item. Klik Add Item atau Import Excel.</p>
-                    </div>
-                    <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                        <div class="flex flex-wrap items-center gap-2" x-show="!purchasingMode">
-                            <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()" x-bind:disabled="productImportBusy">Add Item</x-btn>
-                            <span class="text-xs text-slate-500" x-text="products.length + ' item'"></span>
-                            <x-btn variant="secondary" icon="bi-download" :href="route('opportunities.products.template')" x-bind:class="productImportBusy ? 'pointer-events-none opacity-50' : ''">Download Template</x-btn>
-                            <button type="button"
-                                    @click="$refs.productImportInput.click()"
-                                    x-bind:disabled="!selectedTaxCategory || productImportBusy"
-                                    class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-                                <i class="bi" :class="productImportBusy ? 'bi-arrow-repeat animate-spin' : 'bi-file-earmark-excel'"></i>
-                                <span x-text="productImportBusy ? 'Mengimpor…' : 'Import Excel'"></span>
-                            </button>
-                            <input type="file" x-ref="productImportInput" class="hidden"
-                                   accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-                                   @change="importProductsFromFile($event)">
                         </div>
-                        <div class="text-sm" :class="purchasingMode ? 'ml-auto' : ''">
-                            <span class="text-slate-500">Total (Include):&nbsp;</span>
-                            <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
-                            <span class="mx-2 text-slate-300" x-show="products.some(p => appliesZinit(p))" x-cloak>·</span>
-                            <span class="text-slate-500" x-show="products.some(p => appliesZinit(p))" x-cloak>Fee Zinit:&nbsp;</span>
-                            <span class="font-semibold text-amber-700" x-show="products.some(p => appliesZinit(p))" x-cloak x-text="formatMoney(zinitDealFees().success_fee)"></span>
-                            <span class="mx-2 text-slate-300">·</span>
-                            <span class="text-slate-500">Total Margin:&nbsp;</span>
-                            <span class="font-semibold text-green-700" x-text="'Rp ' + formatIdWhole(productsMarginTotal)"></span>
-                        </div>
-                    </div>
-                    <p class="mt-2 text-xs text-slate-400" x-show="!purchasingMode">
-                        Bulk import: unduh template, isi (atau ganti) baris produk, lalu Import Excel (.xlsx / .csv). Kategori pajak mengikuti pilihan di atas.
-                    </p>
+                    </template>
+                    <p x-show="products.length === 0"
+                        class="rounded-lg border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">
+                        Belum ada item. Klik Add Item atau Import Excel.</p>
                 </div>
-            </x-card>
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex flex-wrap items-center gap-2" x-show="!purchasingMode">
+                        <x-btn type="button" variant="secondary" icon="bi-plus-lg" @click="addProduct()"
+                            x-bind:disabled="productImportBusy">Add Item</x-btn>
+                        <span class="text-xs text-slate-500" x-text="products.length + ' item'"></span>
+                        <x-btn variant="secondary" icon="bi-download" :href="route('opportunities.products.template')"
+                            x-bind:class="productImportBusy ? 'pointer-events-none opacity-50' : ''">Download
+                            Template</x-btn>
+                        <button type="button" @click="$refs.productImportInput.click()"
+                            x-bind:disabled="!selectedTaxCategory || productImportBusy"
+                            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                            <i class="bi"
+                                :class="productImportBusy ? 'bi-arrow-repeat animate-spin' : 'bi-file-earmark-excel'"></i>
+                            <span x-text="productImportBusy ? 'Mengimpor…' : 'Import Excel'"></span>
+                        </button>
+                        <input type="file" x-ref="productImportInput" class="hidden"
+                            accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                            @change="importProductsFromFile($event)">
+                    </div>
+                    <div class="text-sm" :class="purchasingMode ? 'ml-auto' : ''">
+                        <span class="text-slate-500">Total (Include):&nbsp;</span>
+                        <span class="font-semibold text-slate-800" x-text="formatMoney(productsTotal)"></span>
+                        <span class="mx-2 text-slate-300" x-show="products.some(p => appliesZinit(p))" x-cloak>·</span>
+                        <span class="text-slate-500" x-show="products.some(p => appliesZinit(p))" x-cloak>Fee
+                            Zinit:&nbsp;</span>
+                        <span class="font-semibold text-amber-700" x-show="products.some(p => appliesZinit(p))" x-cloak
+                            x-text="formatMoney(zinitDealFees().success_fee)"></span>
+                        <span class="mx-2 text-slate-300">·</span>
+                        <span class="text-slate-500">Total Margin:&nbsp;</span>
+                        <span class="font-semibold text-green-700"
+                            x-text="'Rp ' + formatIdWhole(productsMarginTotal)"></span>
+                    </div>
+                </div>
+                <p class="mt-2 text-xs text-slate-400" x-show="!purchasingMode">
+                    Bulk import: unduh template, isi (atau ganti) baris produk, lalu Import Excel (.xlsx / .csv).
+                    Kategori pajak mengikuti pilihan di atas.
+                </p>
+            </div>
+        </x-card>
 
-            @unless ($purchasingMode)
+        @unless ($purchasingMode)
             <x-card title="Ongkir jual">
                 <label class="flex items-center gap-2 text-sm text-slate-700">
                     <input type="hidden" name="has_shipping_charge" value="0">
                     <input type="checkbox" name="has_shipping_charge" value="1" x-model="hasShippingCharge"
-                           class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                           @checked(old('has_shipping_charge', $opportunity->crm_has_shipping_charge))>
+                        class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        @checked(old('has_shipping_charge', $opportunity->crm_has_shipping_charge))>
                     Ada ongkir (dijual ke customer)
                 </label>
                 <div x-show="hasShippingCharge" x-cloak class="mt-3 grid max-w-md gap-3 sm:grid-cols-2">
                     <div>
                         <label class="mb-1 block text-xs font-medium text-slate-500">Exclude</label>
                         <input type="text" inputmode="decimal" placeholder="0"
-                               x-effect="if (editingField !== 'ship-sell-ex') $el.value = formatId(shippingSell)"
-                               @focus="editingField = 'ship-sell-ex'"
-                               @blur="editingField = null; $el.value = formatId(shippingSell)"
-                               @input="onShippingSellExcludeChange(parseId($event.target.value))"
-                               class="crm-field w-full text-right tabular-nums">
+                            x-effect="if (editingField !== 'ship-sell-ex') $el.value = formatId(shippingSell)"
+                            @focus="editingField = 'ship-sell-ex'"
+                            @blur="editingField = null; $el.value = formatId(shippingSell)"
+                            @input="onShippingSellExcludeChange(parseId($event.target.value))"
+                            class="crm-field w-full text-right tabular-nums">
                     </div>
                     <div>
                         <label class="mb-1 block text-xs font-medium text-slate-500">Include</label>
                         <input type="text" inputmode="decimal" placeholder="0"
-                               x-effect="if (editingField !== 'ship-sell-inc') $el.value = formatId(shippingSellInclude())"
-                               @focus="editingField = 'ship-sell-inc'"
-                               @blur="editingField = null; $el.value = formatId(shippingSellInclude())"
-                               @input="onShippingSellIncludeChange(parseId($event.target.value))"
-                               class="crm-field w-full border-amber-200 bg-amber-50 text-right tabular-nums"
-                               title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
+                            x-effect="if (editingField !== 'ship-sell-inc') $el.value = formatId(shippingSellInclude())"
+                            @focus="editingField = 'ship-sell-inc'"
+                            @blur="editingField = null; $el.value = formatId(shippingSellInclude())"
+                            @input="onShippingSellIncludeChange(parseId($event.target.value))"
+                            class="crm-field w-full border-amber-200 bg-amber-50 text-right tabular-nums"
+                            title="Isi Include → Exclude dihitung otomatis (÷ PPN)">
                     </div>
                     <input type="hidden" name="shipping_sell" :value="shippingSell">
                     @if (auth()->user()?->isSuperAdmin())
-                    <p class="mt-1 text-xs text-slate-400">
-                        Jika dicentang, threshold margin nominal hanya memakai <em>Nominal Umum</em>
-                        (tanpa Nominal Ongkir Pribadi).
-                    </p>
+                        <p class="mt-1 text-xs text-slate-400">
+                            Jika dicentang, threshold margin nominal hanya memakai <em>Nominal Umum</em>
+                            (tanpa Nominal Ongkir Pribadi).
+                        </p>
                     @endif
                 </div>
-                <p class="mt-2 text-xs" :class="isFreeShippingCity ? 'text-green-700' : 'text-slate-500'" x-show="accountId">
-                    <span x-show="isFreeShippingCity"><i class="bi bi-check-circle mr-1"></i>Kota customer termasuk kawasan free ongkir.</span>
-                    <span x-show="!isFreeShippingCity"><i class="bi bi-info-circle mr-1"></i>Kota customer bukan free ongkir — threshold nominal memakai Umum + Ongkir Pribadi (kecuali checkbox di atas dicentang).</span>
+                <p class="mt-2 text-xs" :class="isFreeShippingCity ? 'text-green-700' : 'text-slate-500'"
+                    x-show="accountId">
+                    <span x-show="isFreeShippingCity"><i class="bi bi-check-circle mr-1"></i>Kota customer termasuk kawasan
+                        free ongkir.</span>
+                    <span x-show="!isFreeShippingCity"><i class="bi bi-info-circle mr-1"></i>Kota customer bukan free ongkir
+                        — threshold nominal memakai Umum + Ongkir Pribadi (kecuali checkbox di atas dicentang).</span>
                 </p>
             </x-card>
 
@@ -912,8 +1027,7 @@
                 <label class="flex items-center gap-2 text-sm text-slate-700">
                     <input type="hidden" name="has_discount" value="0">
                     <input type="checkbox" name="has_discount" value="1" x-model="hasDiscount"
-                           class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                           @checked(old('has_discount', $opportunity->crm_has_discount))>
+                        class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" @checked(old('has_discount', $opportunity->crm_has_discount))>
                     Aktifkan diskon tambahan
                 </label>
                 <div x-show="hasDiscount" x-cloak class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -921,25 +1035,25 @@
                         <label class="mb-1 block text-xs font-medium text-slate-500">Persentase dari margin</label>
                         <div class="flex items-center gap-2">
                             <input type="text" inputmode="decimal" placeholder="0"
-                                   x-effect="if (editingField !== 'discPct') $el.value = formatId(discountPercent, 2)"
-                                   @focus="editingField = 'discPct'"
-                                   @blur="editingField = null; $el.value = formatId(discountPercent, 2)"
-                                   @input="discountPercent = parseId($event.target.value); onDiscountPercentChange()"
-                                   class="crm-field w-full tabular-nums">
+                                x-effect="if (editingField !== 'discPct') $el.value = formatId(discountPercent, 2)"
+                                @focus="editingField = 'discPct'"
+                                @blur="editingField = null; $el.value = formatId(discountPercent, 2)"
+                                @input="discountPercent = parseId($event.target.value); onDiscountPercentChange()"
+                                class="crm-field w-full tabular-nums">
                             <span class="shrink-0 text-sm font-semibold text-slate-600">%</span>
                         </div>
                         @if (auth()->user()?->isSuperAdmin())
-                        <p class="mt-1 text-xs text-slate-400">Isi % → nominal terisi otomatis dari basis margin.</p>
+                            <p class="mt-1 text-xs text-slate-400">Isi % → nominal terisi otomatis dari basis margin.</p>
                         @endif
                     </div>
                     <div>
                         <label class="mb-1 block text-xs font-medium text-slate-500">Nominal diskon</label>
                         <input type="text" inputmode="decimal" placeholder="0"
-                               x-effect="if (editingField !== 'discAmt') $el.value = formatId(discountAmount)"
-                               @focus="editingField = 'discAmt'"
-                               @blur="editingField = null; $el.value = formatId(discountAmount)"
-                               @input="discountAmount = parseId($event.target.value); onDiscountAmountChange()"
-                               class="crm-field w-full tabular-nums">
+                            x-effect="if (editingField !== 'discAmt') $el.value = formatId(discountAmount)"
+                            @focus="editingField = 'discAmt'"
+                            @blur="editingField = null; $el.value = formatId(discountAmount)"
+                            @input="discountAmount = parseId($event.target.value); onDiscountAmountChange()"
+                            class="crm-field w-full tabular-nums">
                         <input type="hidden" name="discount_amount" :value="discountAmount">
                         <p class="mt-1 text-xs text-slate-400" x-show="!skipsApproval">
                             Setiap diskon &gt; 0 wajib approval Superadmin (mulai stage Proposal).
@@ -965,7 +1079,7 @@
             </x-card>
 
             <div x-show="marginNeedsApprovalHint" x-cloak
-                 class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <p class="font-semibold">
                     <i class="bi bi-exclamation-triangle mr-1"></i>
                     <span x-text="marginAbovePercent ? 'Margin di atas batas atas' : 'Margin di bawah minimal'"></span>
@@ -983,7 +1097,7 @@
                     (kecuali stage Prospecting/Qualification).
                 </p>
             </div>
-            @endunless
+        @endunless
     </div>
 </form>
 
@@ -1193,8 +1307,13 @@
             editingField: null,
             selectedTaxCategory: config.initialTaxCategory || null,
             contacts: config.contacts || [],
+            customerAddresses: config.customerAddresses || [],
             accountId: config.accountId || '',
             contactId: config.contactId || '',
+            shippingAddressId: config.shippingAddressId || '',
+            customerAddressesUrl: config.customerAddressesUrl || '',
+            customerDetailUrlTemplate: config.customerDetailUrlTemplate || '',
+            loadingAddresses: false,
             crmTop: config.crmTop || @js(\App\Support\CustomerTop::DEFAULT),
             topMargins: config.topMargins || {},
             _accountReady: false,
@@ -1233,6 +1352,14 @@
             get filteredContacts() {
                 if (!this.accountId) return [];
                 return this.contacts.filter(c => c.account_id === this.accountId);
+            },
+            get filteredAddresses() {
+                if (!this.accountId) return [];
+                return this.customerAddresses.filter(a => String(a.account_id) === String(this.accountId));
+            },
+            get customerAddAddressUrl() {
+                if (!this.accountId || !this.customerDetailUrlTemplate) return '#';
+                return this.customerDetailUrlTemplate.replace('__ID__', encodeURIComponent(this.accountId)) + '?add_address=1#alamat-customer';
             },
             get accountMeta() {
                 return this.accountMarginMeta[this.accountId] || null;
@@ -1514,7 +1641,7 @@
             onProductImageChange(p, event) {
                 const file = event?.target?.files?.[0] || null;
                 if (p._previewUrl) {
-                    try { URL.revokeObjectURL(p._previewUrl); } catch (e) {}
+                    try { URL.revokeObjectURL(p._previewUrl); } catch (e) { }
                     p._previewUrl = '';
                 }
                 if (!file) {
@@ -1527,7 +1654,7 @@
             },
             clearProductImage(p, index) {
                 if (p._previewUrl) {
-                    try { URL.revokeObjectURL(p._previewUrl); } catch (e) {}
+                    try { URL.revokeObjectURL(p._previewUrl); } catch (e) { }
                     p._previewUrl = '';
                 }
                 p.image_preview = '';
@@ -1850,8 +1977,21 @@
                     this.contactId = list.length > 0 ? String(list[0].id) : '';
                 }
 
+                const addrList = this.filteredAddresses;
+                const addrValid = addrList.some(a => String(a.id) === String(this.shippingAddressId));
+                if (!this.accountId) {
+                    this.shippingAddressId = '';
+                } else if (!addrValid) {
+                    const def = addrList.find(a => a.is_default_shipping) || addrList[0];
+                    this.shippingAddressId = def ? String(def.id) : '';
+                }
+
                 this.applyCustomerTopDefault();
                 this.refreshContactSelect();
+                this.refreshAddressSelect();
+                if (this.accountId && addrList.length === 0) {
+                    this.refreshCustomerAddresses();
+                }
             },
             applyCustomerTopDefault() {
                 if (this.purchasingMode) return;
@@ -1880,6 +2020,50 @@
                     placeholder
                 );
                 CrmSelect2.bindAlpine(el, this, 'contactId');
+            },
+            refreshAddressSelect() {
+                const el = this.$root.querySelector('[name="crm_shipping_address_id"]');
+                if (!el || !window.CrmSelect2) return;
+
+                const placeholder = this.accountId
+                    ? (this.filteredAddresses.length > 0 ? '— Pilih lokasi pengiriman —' : 'Belum ada alamat customer')
+                    : 'Pilih customer terlebih dahulu';
+                el.disabled = !this.accountId || this.purchasingMode;
+
+                CrmSelect2.setOptions(
+                    el,
+                    this.filteredAddresses.map(a => ({
+                        id: a.id,
+                        name: a.line ? `${a.label} — ${a.line}` : a.label,
+                    })),
+                    this.shippingAddressId,
+                    placeholder
+                );
+                CrmSelect2.bindAlpine(el, this, 'shippingAddressId');
+            },
+            async refreshCustomerAddresses() {
+                if (!this.accountId || !this.customerAddressesUrl || this.loadingAddresses) return;
+                this.loadingAddresses = true;
+                try {
+                    const url = this.customerAddressesUrl + '?account_id=' + encodeURIComponent(this.accountId);
+                    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+                    const json = await res.json();
+                    const fresh = json.data || [];
+                    this.customerAddresses = [
+                        ...this.customerAddresses.filter(a => String(a.account_id) !== String(this.accountId)),
+                        ...fresh,
+                    ];
+                    const stillValid = fresh.some(a => String(a.id) === String(this.shippingAddressId));
+                    if (!stillValid) {
+                        const def = fresh.find(a => a.is_default_shipping) || fresh[0];
+                        this.shippingAddressId = def ? String(def.id) : '';
+                    }
+                    this.refreshAddressSelect();
+                } catch (e) {
+                    // ignore network error
+                } finally {
+                    this.loadingAddresses = false;
+                }
             },
             selectTaxCategory(category) {
                 this.changeTaxCategory(category);
@@ -2188,7 +2372,7 @@
                         try {
                             const payload = await response.json();
                             message = payload.message || Object.values(payload.errors || {})[0]?.[0] || message;
-                        } catch (e) {}
+                        } catch (e) { }
                         throw new Error(message);
                     }
 
@@ -2488,7 +2672,16 @@
                         }
                     }
 
+                    if (this.accountId && !this.shippingAddressId) {
+                        const addrList = this.filteredAddresses;
+                        const def = addrList.find(a => a.is_default_shipping) || addrList[0];
+                        if (def) {
+                            this.shippingAddressId = String(def.id);
+                        }
+                    }
+
                     this.refreshContactSelect();
+                    this.refreshAddressSelect();
                     this.syncDiscountPercentFromAmount();
                     this.refreshBrandSelects();
                     this.refreshCategorySelects();

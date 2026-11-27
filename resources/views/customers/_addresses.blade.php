@@ -4,11 +4,13 @@
     $openFormOnError = $errors->any() && $errors->hasAny([
         'label', 'street', 'contact_name', 'phone', 'crm_province_code', 'crm_regency_code', 'crm_district_code', 'postal_code', 'country',
     ]);
+    $openFormOnCreate = request()->boolean('add_address') && $canManageAddresses && ! $editingAddressId;
     $addressFormCfg = [
         'storeUrl' => route('customers.addresses.store', $account->id),
         'updateUrlTemplate' => route('customers.addresses.update', [$account->id, '__ID__']),
         'editingId' => $editingAddressId,
         'openOnError' => $openFormOnError,
+        'openOnCreate' => $openFormOnCreate,
         'provinceCode' => old('crm_province_code', ''),
         'regencyCode' => old('crm_regency_code', ''),
         'districtCode' => old('crm_district_code', ''),
@@ -33,7 +35,7 @@
     ];
 @endphp
 
-<x-card title="Alamat">
+<x-card title="Alamat" id="alamat-customer">
     <div x-data="customerAddressManager({{ \Illuminate\Support\Js::from($addressFormCfg) }})" x-init="init()">
         @if (($addresses ?? collect())->count())
             <ul class="space-y-3">
